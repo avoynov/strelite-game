@@ -19,7 +19,19 @@ ORTHO_SCALE = 3.2
 # Height (m) of the point the camera is centred on.
 CAM_TARGET_Z = 0.7
 
-STYLES = ("stylized", "realistic")
+STYLES = ("stylized", "realistic", "photoreal")
+
+# --- "photoreal" camera: a full-frame camera with a telephoto lens -------------
+# Same elevation/azimuth as the ortho contract, but true perspective. The camera
+# is placed so that `frame_m` metres fill the frame width at the target point,
+# i.e. sprites keep the same footprint as in the ortho styles.
+PHOTO_LENS_MM = 200.0
+PHOTO_SENSOR_MM = 36.0
+PHOTO_SUN_ELEVATION_DEG = 45.0
+# Film exposure (stops) that puts an 18 % grey card in full sun at middle grey
+# under the sky below ("sunny 16"). Measured with tools/calibrate_exposure.py.
+PHOTO_EXPOSURE_EV = -5.18
+PHOTO_WHITE_BALANCE = (0.907, 1.0, 1.118)
 
 
 def reset_scene():
@@ -36,16 +48,28 @@ def camera_vectors():
     return rot, back, right
 
 
-def add_camera(scene):
+def add_camera(scene, style="stylized", frame_m=ORTHO_SCALE, lens_mm=PHOTO_LENS_MM,
+               target_z=None):
     rot, back, _ = camera_vectors()
     cam_data = bpy.data.cameras.new("IsoCam")
-    cam_data.type = "ORTHO"
-    cam_data.ortho_scale = ORTHO_SCALE
-    cam_data.clip_start = 0.1
-    cam_data.clip_end = 100
+    target = Vector((0, 0, CAM_TARGET_Z if target_z is None else target_z))
+    if style == "photoreal":
+        cam_data.type = "PERSP"
+        cam_data.sensor_fit = "HORIZONTAL"
+        cam_data.sensor_width = PHOTO_SENSOR_MM
+        cam_data.lens = lens_mm
+        distance = frame_m * lens_mm / PHOTO_SENSOR_MM
+        cam_data.clip_start = 0.5
+        cam_data.clip_end = distance * 4
+    else:
+        cam_data.type = "ORTHO"
+        cam_data.ortho_scale = ORTHO_SCALE
+        cam_data.clip_start = 0.1
+        cam_data.clip_end = 100
+        distance = 30
     cam = bpy.data.objects.new("IsoCam", cam_data)
     cam.rotation_euler = rot
-    cam.location = Vector((0, 0, CAM_TARGET_Z)) + back * 30
+    cam.location = target + back * distance
     scene.collection.objects.link(cam)
     scene.camera = cam
     return cam
@@ -95,6 +119,49 @@ def add_lights(scene, style):
     scene.world = world
 
 
+def sun_vector(elevation_deg=PHOTO_SUN_ELEVATION_DEG):
+    """Unit vector toward the sun: screen upper-left, like the key light of A/B."""
+    _, back, right = camera_vectors()
+    right_h = Vector((right.x, right.y, 0)).normalized()
+    back_h = Vector((back.x, back.y, 0)).normalized()
+    h = (-0.75 * right_h + 0.45 * back_h).normalized()
+    el = math.radians(elevation_deg)
+    return h * math.cos(el) + Vector((0, 0, math.sin(el)))
+
+
+def add_physical_sky(scene, elevation_deg=PHOTO_SUN_ELEVATION_DEG):
+    """Physically based daylight: atmospheric sky model with its own sun disc
+    (0.545 deg, so shadow sharpness is real). The sky is not visible in frame but
+    gives the blue fill in shadows and the reflections in paint and metal."""
+    world = bpy.data.worlds.new("PhysicalSky")
+    world.use_nodes = True
+    nt = world.node_tree
+    sky = nt.nodes.new("ShaderNodeTexSky")
+    sky.sky_type = "MULTIPLE_SCATTERING"
+    sky.sun_disc = True
+    sky.sun_size = math.radians(0.545)
+    sky.sun_elevation = math.radians(elevation_deg)
+    to_sun = sun_vector(elevation_deg)
+    # Sky model convention: rotation 0 puts the sun toward +Y, positive turns toward +X.
+    sky.sun_rotation = math.atan2(to_sun.x, to_sun.y)
+    sky.altitude = 300
+    sky.air_density = 1.0
+    sky.aerosol_density = 0.5   # clear day
+    sky.ozone_density = 1.0
+    bg = nt.nodes["Background"]
+    bg.inputs["Strength"].default_value = 1.0
+    # Camera white balance ("daylight" preset): a grey card in the sun comes out neutral.
+    wb = nt.nodes.new("ShaderNodeMix")
+    wb.data_type = "RGBA"
+    wb.blend_type = "MULTIPLY"
+    wb.inputs["Factor"].default_value = 1.0
+    wb.inputs["B"].default_value = (*PHOTO_WHITE_BALANCE, 1.0)
+    nt.links.new(sky.outputs["Color"], wb.inputs["A"])
+    nt.links.new(wb.outputs["Result"], bg.inputs["Color"])
+    scene.world = world
+    return sky
+
+
 def add_shadow_catcher(scene):
     """Invisible ground that keeps cast shadows in the sprite's alpha."""
     mesh = bpy.data.meshes.new("Ground")
@@ -111,7 +178,7 @@ def configure_render(scene, style, size=512, samples=48):
     scene.cycles.device = "CPU"
     scene.cycles.samples = samples
     scene.cycles.use_denoising = True
-    scene.cycles.max_bounces = 6 if style == "realistic" else 4
+    scene.cycles.max_bounces = {"stylized": 4, "realistic": 6, "photoreal": 8}[style]
     scene.render.film_transparent = True
     scene.render.resolution_x = size
     scene.render.resolution_y = size
@@ -121,16 +188,31 @@ def configure_render(scene, style, size=512, samples=48):
     scene.render.image_settings.color_depth = "8"
     scene.view_settings.view_transform = "AgX"
     try:
-        scene.view_settings.look = "AgX - Punchy" if style == "stylized" else "AgX - Base Contrast"
+        scene.view_settings.look = {"stylized": "AgX - Punchy", "realistic": "AgX - Base Contrast",
+                                    "photoreal": "AgX - Medium High Contrast"}[style]
     except TypeError:
         pass
-    scene.view_settings.exposure = 0.3 if style == "stylized" else -0.1
+    scene.view_settings.exposure = {"stylized": 0.3, "realistic": -0.1,
+                                    "photoreal": PHOTO_EXPOSURE_EV}[style]
+    if style == "photoreal":
+        scene.cycles.sample_clamp_indirect = 10.0
+        scene.cycles.use_adaptive_sampling = True
+        scene.cycles.adaptive_threshold = 0.02
 
 
-def build_stage(style, size=512, samples=48):
+def build_stage(style, size=512, samples=48, frame_m=ORTHO_SCALE, ground="catcher",
+                lens_mm=PHOTO_LENS_MM, target_z=None):
+    """ground: "catcher" = transparent sprite with shadow, "none" = caller adds terrain."""
     scene = reset_scene()
-    add_camera(scene)
-    add_lights(scene, style)
-    add_shadow_catcher(scene)
+    if style == "photoreal":
+        add_camera(scene, style, frame_m, lens_mm, target_z)
+        add_physical_sky(scene)
+    else:
+        add_camera(scene)
+        add_lights(scene, style)
+    if ground == "catcher":
+        g = add_shadow_catcher(scene)
+        g.scale = (frame_m / ORTHO_SCALE,) * 3
     configure_render(scene, style, size, samples)
+    scene.render.film_transparent = ground == "catcher"
     return scene

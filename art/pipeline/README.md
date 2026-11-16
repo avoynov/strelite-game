@@ -20,6 +20,26 @@ pip install bpy pillow        # Blender as a Python module (5.x)
 - **Models** (`strelite_art/models/`): built only from the `Kit` primitives in `geo.py`.
   Upgrade levels add parts and better materials; the silhouette stays the same.
 
+## Style В: `photoreal` (preview)
+Guns that look photographed. Same pipeline, different physics:
+- **Camera**: full-frame, 200 mm telephoto, same 30°/45° view. Models are built at real
+  size (metres) and declare `FRAME_M`, the real width the sprite frame covers.
+- **Light**: Blender's physical sky with its own 0.545° sun at 45°, white balance and
+  exposure calibrated on an 18 % grey card (`tools/calibrate_exposure.py`), AgX.
+- **Materials** (`materials_photoreal.py`): layered ageing driven by geometry (edges,
+  cavities, up-facing, height): primer, paint, chips, rust and wash streaks, grime, dust, mud.
+- **Ground** (`terrain.py`): displaced soil, ruts, stones, grass. `--ground terrain` renders
+  the photo, `--ground catcher` the transparent game sprite.
+- **Camera effects** (`tools/camera_fx.py`) are a whole-frame filter, never baked in sprites.
+
+```
+python3 render_sprites.py --model howitzer --style photoreal --levels 1 --dirs 16 \
+  --only-dir 12 --size 1600 --samples 96 --ground terrain
+python3 tools/camera_fx.py in.png out.jpg --ev 0.35
+```
+Scanned CC0 textures (Poly Haven, ambientCG) are not used yet: their download hosts
+were unreachable from the build container, so everything is procedural for now.
+
 ## Output
 `art/out/<model>/<style>/L<level>/dir_NN.png`, 512×512 RGBA. `dir_NN` aims the turret at
 `NN * 360/dirs` degrees CCW from world +Y (`dir_00` = screen upper-right).
