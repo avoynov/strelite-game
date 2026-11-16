@@ -52,7 +52,7 @@ async function start(): Promise<void> {
     hud.update();
     const { top, bottom } = hud.insets();
     const pad = 8;
-    board.layout(pad, top + pad, app.screen.width - 2 * pad, app.screen.height - top - bottom - 2 * pad);
+    board.layout(pad, top + pad, app.screen.width - 2 * pad, app.screen.height - top - bottom - 2 * pad, app.screen.width, app.screen.height);
   };
 
   // Tap handling on the canvas: select a tile or a tower, tap again to deselect.
@@ -84,6 +84,11 @@ async function start(): Promise<void> {
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
+
+  // `?debug` exposes a hook for automated browser checks.
+  if (new URLSearchParams(location.search).has('debug')) {
+    Object.assign(window, { strelite: { cellToScreen: (x: number, y: number) => board.cellToScreen(x, y), game: () => game } });
+  }
 
   app.ticker.add((ticker) => {
     const frame = ticker.deltaMS / 1000;
