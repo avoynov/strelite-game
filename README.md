@@ -31,3 +31,20 @@ Tower defence-like game but not exactly. Made as I like it - i can't find any to
 
 
 
+
+# Development
+
+```bash
+npm install
+npm run dev        # local server, open on your phone via the LAN URL
+npm test           # simulation tests
+npm run lint
+npm run build      # production build + PWA service worker
+```
+
+Layout:
+
+- `src/sim/` – game logic, no rendering. Fixed time step (`TICK`), deterministic. `damage.ts` holds the overkill rule, `content.ts` the numbers for guns and enemies, `waves.ts` the wave generator, `flowField.ts` the pathing.
+- `src/render/` – PixiJS drawing of the simulation (flat placeholder, isometric in Phase 2).
+- `src/ui/` – DOM HUD and bottom sheet.
+- `src/i18n/` – `bg.ts` (source language) and `en.ts`. All visible text goes here.

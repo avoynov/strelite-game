@@ -1,0 +1,22 @@
+/** Placeholder palette for the flat Phase 1 board. Replaced by sprites in Phase 2–3. */
+export const PALETTE = {
+  background: 0x141a12,
+  grass: 0x56783a,
+  grassAlt: 0x5e8240,
+  path: 0xc4a066,
+  pathEdge: 0xa9864f,
+  hover: 0xffffff,
+  invalid: 0xd9534f,
+  range: 0xf3e6b3,
+  towerBase: 0x6b5a44,
+  towerTop: 0x9b8462,
+  towerGun: 0x3a2f24,
+  levelPip: 0xf2c94c,
+  enemy: 0x8e2f2f,
+  enemyEdge: 0x4a1515,
+  hpBack: 0x1e1e1e,
+  hpFill: 0x6fcf63,
+  bolt: 0xf6e7c1,
+  goal: 0x3b4b8f,
+  spawn: 0x5a2a2a,
+} as const;
