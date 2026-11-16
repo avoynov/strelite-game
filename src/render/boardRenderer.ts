@@ -18,20 +18,18 @@ interface FloatText {
 }
 
 const FLOAT_LIFE = 0.9;
-/** Ground depth foreshortening: 1 = straight down, smaller = flatter camera. */
-const TILT = 0.72;
-/** Screen pixels per cell of height, as a fraction of the cell size. */
-const RISE = 0.8;
-/** Visible thickness of the board's front edge, in cells. */
-const EDGE = 0.35;
-/** Room above the top row for tall objects, in cells. */
-const HEADROOM = 0.7;
+/** Screen pixels per cell of height, as a fraction of the tile width. */
+const RISE = 0.55;
+/** Visible thickness of the board's side walls, as a fraction of the tile width. */
+const EDGE = 0.18;
+/** Room above the top tile for tall objects, as a fraction of the tile width. */
+const HEADROOM = 0.6;
 
 /**
- * Three-quarter view of the simulation: the camera looks down at an angle, so
- * the ground is foreshortened and towers and enemies stand up from it. Objects
- * are drawn back to front. Phase 2–3 replace the shapes with rendered sprites;
- * the simulation does not know or care how it is drawn.
+ * Isometric view, Clash of Clans style: square cells become 2:1 diamonds seen
+ * from a corner, objects stand up from the ground and are drawn back to front.
+ * Phase 3 replaces the shapes with rendered sprites; the simulation does not
+ * know or care how it is drawn.
  */
 export class BoardRenderer {
   readonly root = new Container();
@@ -41,101 +39,154 @@ export class BoardRenderer {
   private readonly shots = new Graphics();
   private readonly floats = new Container();
   private floatTexts: FloatText[] = [];
-  /** Width of one cell in screen pixels. */
-  cell = 40;
+  /** Tile width in screen pixels (tile height is half of it). */
+  cell = 48;
 
   constructor(private readonly game: Game) {
     this.root.addChild(this.ground, this.overlay, this.objects, this.shots, this.floats);
     this.drawGround();
   }
 
-  /** Ground point (grid units) plus height (cells) to local screen coordinates. */
-  private sx(gx: number): number {
-    return gx * this.cell;
+  /** Grid point + height (cells) to local screen x. */
+  private ix(gx: number, gy: number): number {
+    return ((gx - gy) * this.cell) / 2;
   }
-  private sy(gy: number, h = 0): number {
-    return gy * this.cell * TILT - h * this.cell * RISE;
+  /** Grid point + height (cells) to local screen y. */
+  private iy(gx: number, gy: number, h = 0): number {
+    return ((gx + gy) * this.cell) / 4 - h * this.cell * RISE;
+  }
+
+  /** Extent of the playable cells in units of tile width, before scaling. */
+  private bounds(): { minX: number; maxX: number; minY: number; maxY: number } {
+    const { grid } = this.game.map;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (let y = 0; y < grid.rows; y++) {
+      for (let x = 0; x < grid.cols; x++) {
+        if (grid.get(x, y) === 'blocked') continue;
+        minX = Math.min(minX, (x - y - 1) / 2);
+        maxX = Math.max(maxX, (x - y + 1) / 2);
+        minY = Math.min(minY, (x + y) / 4);
+        maxY = Math.max(maxY, (x + y + 2) / 4);
+      }
+    }
+    return { minX, maxX, minY: minY - HEADROOM, maxY: maxY + EDGE };
   }
 
   /** Fit the board into the given screen rectangle, centred. */
   layout(x: number, y: number, w: number, h: number): void {
-    const { cols, rows } = this.game.map.grid;
-    this.cell = Math.max(8, Math.floor(Math.min(w / cols, h / (rows * TILT + EDGE + HEADROOM))));
-    const bw = cols * this.cell;
-    const bh = (rows * TILT + EDGE + HEADROOM) * this.cell;
-    this.root.position.set(Math.round(x + (w - bw) / 2), Math.round(y + (h - bh) / 2 + HEADROOM * this.cell));
+    const b = this.bounds();
+    const bw = b.maxX - b.minX;
+    const bh = b.maxY - b.minY;
+    this.cell = Math.max(12, Math.floor(Math.min(w / bw, h / bh)));
+    const c = this.cell;
+    this.root.position.set(Math.round(x + (w - bw * c) / 2 - b.minX * c), Math.round(y + (h - bh * c) / 2 - b.minY * c));
     this.drawGround();
   }
 
-  /** Screen point to grid cell, or null when outside the board. */
+  /** Screen point to grid cell, or null when outside the map. */
   cellAt(px: number, py: number): { x: number; y: number } | null {
-    const x = Math.floor((px - this.root.x) / this.cell);
-    const y = Math.floor((py - this.root.y) / (this.cell * TILT));
-    return this.game.map.grid.inBounds(x, y) ? { x, y } : null;
+    const u = (px - this.root.x) / (this.cell / 2); // gx - gy
+    const v = (py - this.root.y) / (this.cell / 4); // gx + gy
+    const x = Math.floor((u + v) / 2);
+    const y = Math.floor((v - u) / 2);
+    const { grid } = this.game.map;
+    return grid.inBounds(x, y) && grid.get(x, y) !== 'blocked' ? { x, y } : null;
+  }
+
+  /** Screen point at the centre of a cell's ground tile. */
+  cellToScreen(x: number, y: number): { x: number; y: number } {
+    return { x: this.root.x + this.ix(x + 0.5, y + 0.5), y: this.root.y + this.iy(x + 0.5, y + 0.5) };
   }
 
   addFloat(text: string, gx: number, gy: number, color: number): void {
     const node = new Text({
       text,
-      style: { fontFamily: 'system-ui, sans-serif', fontSize: Math.max(11, this.cell * 0.32), fontWeight: '700', fill: color, stroke: { color: 0x000000, width: 3 } },
+      style: { fontFamily: 'system-ui, sans-serif', fontSize: Math.max(11, this.cell * 0.28), fontWeight: '700', fill: color, stroke: { color: 0x000000, width: 3 } },
     });
     node.anchor.set(0.5);
     this.floats.addChild(node);
-    this.floatTexts.push({ node, age: 0, gx, gy, h: 0.7 });
+    this.floatTexts.push({ node, age: 0, gx, gy, h: 0.9 });
+  }
+
+  /** Diamond outline of cell (x, y), inset by `inset` grid units, at height h. */
+  private diamond(x: number, y: number, inset = 0, h = 0): number[] {
+    const a = inset;
+    const b = 1 - inset;
+    return [
+      this.ix(x + a, y + a), this.iy(x + a, y + a, h),
+      this.ix(x + b, y + a), this.iy(x + b, y + a, h),
+      this.ix(x + b, y + b), this.iy(x + b, y + b, h),
+      this.ix(x + a, y + b), this.iy(x + a, y + b, h),
+    ];
   }
 
   private drawGround(): void {
     const g = this.ground;
     const c = this.cell;
-    const ch = c * TILT;
     const { grid, spawns, goals } = this.game.map;
+    const open = (x: number, y: number) => grid.get(x, y) !== 'blocked';
+    const e = EDGE * c;
     g.clear();
     for (let y = 0; y < grid.rows; y++) {
       for (let x = 0; x < grid.cols; x++) {
-        const path = grid.get(x, y) === 'path';
-        const color = path ? PALETTE.path : (x + y) % 2 ? PALETTE.grass : PALETTE.grassAlt;
-        g.rect(x * c, y * ch, c, ch).fill(color);
-        if (path) g.rect(x * c, y * ch, c, ch).stroke({ width: 1, color: PALETTE.pathEdge, alpha: 0.3 });
+        if (!open(x, y)) continue;
+        // Side walls where the map ends, so it reads as a raised slab.
+        if (!open(x, y + 1)) {
+          const ax = this.ix(x, y + 1), ay = this.iy(x, y + 1);
+          const bx = this.ix(x + 1, y + 1), by = this.iy(x + 1, y + 1);
+          g.poly([ax, ay, bx, by, bx, by + e, ax, ay + e]).fill(PALETTE.edgeLeft);
+        }
+        if (!open(x + 1, y)) {
+          const ax = this.ix(x + 1, y + 1), ay = this.iy(x + 1, y + 1);
+          const bx = this.ix(x + 1, y), by = this.iy(x + 1, y);
+          g.poly([ax, ay, bx, by, bx, by + e, ax, ay + e]).fill(PALETTE.edgeRight);
+        }
       }
     }
-    for (const s of spawns) g.rect(s.x * c, s.y * ch, c, ch).fill({ color: PALETTE.spawn, alpha: 0.5 });
-    for (const s of goals) g.rect(s.x * c, s.y * ch, c, ch).fill({ color: PALETTE.goal, alpha: 0.6 });
-    // Front edge of the board, so it reads as a slab seen from above and in front.
-    const bottom = grid.rows * ch;
-    const w = grid.cols * c;
-    g.rect(0, bottom, w, EDGE * c * 0.55).fill(PALETTE.edgeTop);
-    g.rect(0, bottom + EDGE * c * 0.55, w, EDGE * c * 0.45).fill(PALETTE.edgeBottom);
+    for (let y = 0; y < grid.rows; y++) {
+      for (let x = 0; x < grid.cols; x++) {
+        const kind = grid.get(x, y);
+        if (kind === 'blocked') continue;
+        const color = kind === 'path' ? PALETTE.path : (x + y) % 2 ? PALETTE.grass : PALETTE.grassAlt;
+        g.poly(this.diamond(x, y)).fill(color);
+        if (kind === 'path') g.poly(this.diamond(x, y)).stroke({ width: 1, color: PALETTE.pathEdge, alpha: 0.3 });
+      }
+    }
+    for (const s of spawns) g.poly(this.diamond(s.x, s.y)).fill({ color: PALETTE.spawn, alpha: 0.5 });
+    for (const s of goals) g.poly(this.diamond(s.x, s.y)).fill({ color: PALETTE.goal, alpha: 0.6 });
   }
 
   /** Draw one frame. `alpha` interpolates between the last two sim steps. */
   render(alpha: number, selection: Selection | null, dtSeconds: number): void {
     const c = this.cell;
-    const ch = c * TILT;
     const game = this.game;
 
-    // Selection outline on the ground + range ellipse.
+    // Selection outline on the ground + range ellipse (a grid circle seen isometrically).
     const o = this.overlay;
     o.clear();
     if (selection) {
       const tower = selection.kind === 'tower' ? game.towerAt(selection.x, selection.y) : undefined;
       const valid = tower ? true : game.canBuildAt(selection.x, selection.y);
-      o.rect(selection.x * c + 1, selection.y * ch + 1, c - 2, ch - 2).stroke({ width: 2, color: valid ? PALETTE.hover : PALETTE.invalid });
+      o.poly(this.diamond(selection.x, selection.y, 0.04)).stroke({ width: 2, color: valid ? PALETTE.hover : PALETTE.invalid });
       if (tower) {
-        const r = game.levelOf(tower).range * c;
-        o.ellipse(this.sx(tower.cx + 0.5), this.sy(tower.cy + 0.5), r, r * TILT)
+        const rx = (game.levelOf(tower).range * c) / Math.SQRT2;
+        o.ellipse(this.ix(tower.cx + 0.5, tower.cy + 0.5), this.iy(tower.cx + 0.5, tower.cy + 0.5), rx, rx / 2)
           .fill({ color: PALETTE.range, alpha: 0.12 })
           .stroke({ width: 1.5, color: PALETTE.range, alpha: 0.6 });
       }
     }
 
-    // Towers and enemies, sorted back to front by ground depth.
+    // Towers and enemies, back to front: larger gx + gy is nearer the camera.
     type Drawable = { depth: number; draw: () => void };
     const list: Drawable[] = [];
-    for (const t of game.towers) list.push({ depth: t.cy + 0.5, draw: () => this.drawTower(t.cx + 0.5, t.cy + 0.5, t.level, t.aim) });
+    for (const t of game.towers) list.push({ depth: t.cx + t.cy + 1, draw: () => this.drawTower(t.cx, t.cy, t.level, t.aim) });
     for (const e of game.enemies) {
       const gx = e.px + (e.x - e.px) * alpha;
       const gy = e.py + (e.y - e.py) * alpha;
-      list.push({ depth: gy, draw: () => this.drawEnemy(gx, gy, e.hp / e.maxHp) });
+      list.push({ depth: gx + gy, draw: () => this.drawEnemy(gx, gy, e.hp / e.maxHp) });
     }
     list.sort((a, b) => a.depth - b.depth);
     this.objects.clear();
@@ -147,20 +198,20 @@ export class BoardRenderer {
     for (const p of game.projectiles) {
       const gx = p.px + (p.x - p.px) * alpha;
       const gy = p.py + (p.y - p.py) * alpha;
-      const dx = p.x - p.px;
-      const dy = (p.y - p.py) * TILT;
+      const x = this.ix(gx, gy);
+      const y = this.iy(gx, gy, 0.5);
+      const dx = this.ix(p.x, p.y) - this.ix(p.px, p.py);
+      const dy = this.iy(p.x, p.y) - this.iy(p.px, p.py);
       const d = Math.hypot(dx, dy) || 1;
-      const len = c * 0.25;
-      const x = this.sx(gx);
-      const y = this.sy(gy, 0.45);
-      sg.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: Math.max(2, c * 0.05), color: PALETTE.bolt, cap: 'round' });
+      const len = c * 0.22;
+      sg.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: Math.max(2, c * 0.045), color: PALETTE.bolt, cap: 'round' });
     }
 
     // Floating texts rise and fade.
     this.floatTexts = this.floatTexts.filter((f) => {
       f.age += dtSeconds;
-      f.h += dtSeconds;
-      f.node.position.set(this.sx(f.gx), this.sy(f.gy, f.h));
+      f.h += dtSeconds * 1.2;
+      f.node.position.set(this.ix(f.gx, f.gy), this.iy(f.gx, f.gy, f.h));
       f.node.alpha = Math.max(0, 1 - f.age / FLOAT_LIFE);
       if (f.age >= FLOAT_LIFE) {
         f.node.destroy();
@@ -170,52 +221,61 @@ export class BoardRenderer {
     });
   }
 
-  /** A stone plinth with a round turret and a barrel; grows a little per level. */
-  private drawTower(gx: number, gy: number, level: number, aim: number): void {
+  /** A square stone plinth with a round turret and a barrel; grows a little per level. */
+  private drawTower(cx: number, cy: number, level: number, aim: number): void {
     const g = this.objects;
     const c = this.cell;
-    const x = this.sx(gx);
-    const y = this.sy(gy);
-    const w = c * 0.78;
-    const d = w * TILT;
-    const baseH = c * RISE * (0.32 + 0.06 * level);
+    const inset = 0.12;
+    const baseH = 0.45 + 0.1 * level;
+    const gx = cx + 0.5;
+    const gy = cy + 0.5;
 
-    g.ellipse(x + c * 0.06, y + c * 0.04, w * 0.6, d * 0.6).fill({ color: PALETTE.shadow, alpha: 0.25 });
-    // Plinth: front face then top face.
-    g.rect(x - w / 2, y + d / 2 - baseH, w, baseH).fill(PALETTE.towerBaseFront);
-    g.rect(x - w / 2, y - d / 2 - baseH, w, d).fill(PALETTE.towerBaseTop);
-    g.rect(x - w / 2, y - d / 2 - baseH, w, d).stroke({ width: 1, color: PALETTE.towerBaseFront, alpha: 0.6 });
+    // Shadow towards bottom-right of the tile.
+    g.ellipse(this.ix(gx, gy) + c * 0.08, this.iy(gx, gy) + c * 0.03, c * 0.42, c * 0.21).fill({ color: PALETTE.shadow, alpha: 0.25 });
+
+    // Plinth: left (south-west) face, right (south-east) face, then top.
+    const a = inset;
+    const b = 1 - inset;
+    const W = [this.ix(cx + a, cy + b), this.iy(cx + a, cy + b)] as const;
+    const S = [this.ix(cx + b, cy + b), this.iy(cx + b, cy + b)] as const;
+    const E = [this.ix(cx + b, cy + a), this.iy(cx + b, cy + a)] as const;
+    const lift = baseH * c * RISE;
+    g.poly([W[0], W[1], S[0], S[1], S[0], S[1] - lift, W[0], W[1] - lift]).fill(PALETTE.towerBaseFront);
+    g.poly([S[0], S[1], E[0], E[1], E[0], E[1] - lift, S[0], S[1] - lift]).fill(PALETTE.towerBaseSide);
+    g.poly(this.diamond(cx, cy, inset, baseH)).fill(PALETTE.towerBaseTop);
+    // Level pips along the left face.
     for (let i = 0; i <= level; i++) {
-      g.circle(x - w / 2 + c * 0.12 + i * c * 0.15, y + d / 2 - baseH / 2, c * 0.045).fill(PALETTE.levelPip);
+      const t = 0.25 + i * 0.22;
+      g.circle(W[0] + (S[0] - W[0]) * t, W[1] + (S[1] - W[1]) * t - lift / 2, c * 0.04).fill(PALETTE.levelPip);
     }
 
-    // Turret: a short cylinder on top of the plinth.
-    const r = c * (0.22 + 0.025 * level);
-    const top = y - baseH;
-    const th = c * RISE * 0.18;
-    g.ellipse(x, top, r, r * TILT).fill(PALETTE.towerBody);
+    // Turret: a short cylinder (iso circle = 2:1 ellipse).
+    const x = this.ix(gx, gy);
+    const top = this.iy(gx, gy, baseH);
+    const r = c * (0.2 + 0.02 * level);
+    const th = c * RISE * 0.22;
+    g.ellipse(x, top, r, r / 2).fill(PALETTE.towerBody);
     g.rect(x - r, top - th, 2 * r, th).fill(PALETTE.towerBody);
-    g.ellipse(x, top - th, r, r * TILT).fill(PALETTE.towerTop);
+    g.ellipse(x, top - th, r, r / 2).fill(PALETTE.towerTop);
 
-    // Barrel, foreshortened along the ground direction.
-    const len = c * 0.42;
-    const bx = x + Math.cos(aim) * len;
-    const by = top - th + Math.sin(aim) * len * TILT;
-    g.moveTo(x, top - th).lineTo(bx, by).stroke({ width: c * 0.1, color: PALETTE.towerGun, cap: 'round' });
+    // Barrel pointing along the aim direction on the ground plane.
+    const len = 0.42;
+    const bx = this.ix(gx + Math.cos(aim) * len, gy + Math.sin(aim) * len);
+    const by = this.iy(gx + Math.cos(aim) * len, gy + Math.sin(aim) * len) - (this.iy(gx, gy) - top) - th;
+    g.moveTo(x, top - th).lineTo(bx, by).stroke({ width: c * 0.08, color: PALETTE.towerGun, cap: 'round' });
   }
 
   private drawEnemy(gx: number, gy: number, hpFrac: number): void {
     const g = this.objects;
     const c = this.cell;
-    const x = this.sx(gx);
-    const y = this.sy(gy);
-    const r = c * 0.2;
-    g.ellipse(x, y, r * 1.05, r * 1.05 * TILT * 0.6).fill({ color: PALETTE.shadow, alpha: 0.3 });
-    const cy = this.sy(gy, 0.28);
+    const x = this.ix(gx, gy);
+    const r = c * 0.16;
+    g.ellipse(x, this.iy(gx, gy), r * 1.1, r * 0.55).fill({ color: PALETTE.shadow, alpha: 0.3 });
+    const cy = this.iy(gx, gy, 0.3);
     g.circle(x, cy, r).fill(PALETTE.enemy).stroke({ width: 2, color: PALETTE.enemyEdge });
     g.circle(x - r * 0.3, cy - r * 0.3, r * 0.35).fill({ color: PALETTE.enemyLight, alpha: 0.7 });
-    const bw = c * 0.6;
-    const bh = Math.max(3, c * 0.08);
+    const bw = c * 0.5;
+    const bh = Math.max(3, c * 0.07);
     const by = cy - r - bh - 4;
     g.rect(x - bw / 2, by, bw, bh).fill(PALETTE.hpBack);
     g.rect(x - bw / 2, by, bw * hpFrac, bh).fill(PALETTE.hpFill);

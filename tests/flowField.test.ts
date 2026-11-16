@@ -21,6 +21,7 @@ describe('path map + flow field', () => {
 
   it('marks build cells as unreachable', () => {
     expect(map.grid.get(0, 0)).toBe('build');
+    expect(map.grid.get(10, 0)).toBe('blocked');
     expect(flow.distanceAt(0, 0)).toBe(-1);
   });
 });

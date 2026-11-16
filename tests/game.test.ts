@@ -11,7 +11,8 @@ const run = (g: Game, seconds: number) => {
 describe('Game', () => {
   it('builds only on build cells and charges money', () => {
     const g = newGame();
-    expect(g.build('crossbow', 1, 0)).toEqual({ ok: false, reason: 'notBuildable' });
+    expect(g.build('crossbow', 0, 4)).toEqual({ ok: false, reason: 'notBuildable' }); // path
+    expect(g.build('crossbow', 10, 0)).toEqual({ ok: false, reason: 'notBuildable' }); // off the map
     expect(g.build('crossbow', 0, 2)).toEqual({ ok: true });
     expect(g.money).toBe(ECONOMY.startMoney - TOWERS.crossbow.levels[0].cost);
     expect(g.build('crossbow', 0, 2)).toEqual({ ok: false, reason: 'occupied' });
@@ -49,7 +50,7 @@ describe('Game', () => {
   it('kills enemies, pays rewards and tracks dealt/wasted damage', () => {
     const g = newGame();
     g.money = 1000;
-    for (const [x, y] of [[0, 2], [2, 2], [0, 4], [3, 4], [6, 6], [8, 4]] as const) g.build('crossbow', x, y);
+    for (const [x, y] of [[2, 3], [5, 5], [7, 5], [9, 7], [7, 9]] as const) expect(g.build('crossbow', x, y).ok).toBe(true);
     const moneyBefore = g.money;
     g.startWave();
     run(g, 60);
@@ -70,7 +71,7 @@ describe('Game', () => {
       const g = newGame();
       g.money = 500;
       g.build('crossbow', 0, 2);
-      g.build('crossbow', 2, 4);
+      g.build('crossbow', 3, 5);
       for (let w = 0; w < 3; w++) {
         g.startWave();
         run(g, 40);
