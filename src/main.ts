@@ -52,7 +52,7 @@ async function start(): Promise<void> {
     hud.update();
     const { top, bottom } = hud.insets();
     const pad = 8;
-    board.layout(pad, top + pad, app.screen.width - 2 * pad, app.screen.height - top - bottom - 2 * pad);
+    board.layout(pad, top + pad, app.screen.width - 2 * pad, app.screen.height - top - bottom - 2 * pad, app.screen.width, app.screen.height);
   };
 
   // Tap handling on the canvas: select a tile or a tower, tap again to deselect.

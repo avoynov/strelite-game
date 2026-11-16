@@ -20,8 +20,6 @@ interface FloatText {
 const FLOAT_LIFE = 0.9;
 /** Screen pixels per cell of height, as a fraction of the tile width. */
 const RISE = 0.55;
-/** Visible thickness of the board's side walls, as a fraction of the tile width. */
-const EDGE = 0.18;
 /** Room above the top tile for tall objects, as a fraction of the tile width. */
 const HEADROOM = 0.6;
 
@@ -72,11 +70,17 @@ export class BoardRenderer {
         maxY = Math.max(maxY, (x + y + 2) / 4);
       }
     }
-    return { minX, maxX, minY: minY - HEADROOM, maxY: maxY + EDGE };
+    return { minX, maxX, minY: minY - HEADROOM, maxY };
   }
 
-  /** Fit the board into the given screen rectangle, centred. */
-  layout(x: number, y: number, w: number, h: number): void {
+  /** Full screen size, so the field can be drawn to every edge. */
+  private screenW = 0;
+  private screenH = 0;
+
+  /** Fit the playable map into the given screen rectangle, centred; the field fills the whole screen. */
+  layout(x: number, y: number, w: number, h: number, screenW: number, screenH: number): void {
+    this.screenW = screenW;
+    this.screenH = screenH;
     const b = this.bounds();
     const bw = b.maxX - b.minX;
     const bh = b.maxY - b.minY;
@@ -123,40 +127,124 @@ export class BoardRenderer {
     ];
   }
 
+  /** Cheap deterministic hash of a cell, 0..1, for scattering decoration. */
+  private static hash(x: number, y: number): number {
+    let h = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
+  }
+
+  /**
+   * Road cells outside the map: the path continues straight back from the
+   * spawn and straight on past the goal, off the edge of the screen.
+   */
+  private roadOutside(range: number): Set<string> {
+    const cells = new Set<string>();
+    const { flow, map } = this.game;
+    const extend = (from: { x: number; y: number }, dx: number, dy: number) => {
+      for (let i = 1; i <= range; i++) cells.add(`${from.x + dx * i},${from.y + dy * i}`);
+    };
+    for (const s of map.spawns) {
+      const n = flow.next(s.x, s.y);
+      if (n) extend(s, s.x - n.x, s.y - n.y);
+    }
+    for (const g of map.goals) {
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        if (flow.distanceAt(g.x + dx, g.y + dy) === 1) extend(g, -dx, -dy);
+      }
+    }
+    return cells;
+  }
+
   private drawGround(): void {
     const g = this.ground;
     const c = this.cell;
     const { grid, spawns, goals } = this.game.map;
     const open = (x: number, y: number) => grid.get(x, y) !== 'blocked';
-    const e = EDGE * c;
     g.clear();
+
+    // Range of cells that can touch the screen: invert the four screen corners.
+    const corners = [
+      [0, 0],
+      [this.screenW, 0],
+      [0, this.screenH],
+      [this.screenW, this.screenH],
+    ].map(([px, py]) => {
+      const u = (px! - this.root.x) / (c / 2);
+      const v = (py! - this.root.y) / (c / 4);
+      return [(u + v) / 2, (v - u) / 2] as const;
+    });
+    const x0 = Math.floor(Math.min(...corners.map((p) => p[0]))) - 2;
+    const x1 = Math.ceil(Math.max(...corners.map((p) => p[0]))) + 2;
+    const y0 = Math.floor(Math.min(...corners.map((p) => p[1]))) - 2;
+    const y1 = Math.ceil(Math.max(...corners.map((p) => p[1]))) + 2;
+    const road = this.roadOutside(Math.max(x1 - x0, y1 - y0));
+
+    // Tiles, back to front so decoration overlaps correctly.
+    const decor: Array<() => void> = [];
+    for (let s = x0 + y0; s <= x1 + y1; s++) {
+      for (let x = x0; x <= x1; x++) {
+        const y = s - x;
+        if (y < y0 || y > y1) continue;
+        if (open(x, y)) {
+          const kind = grid.get(x, y);
+          const color = kind === 'path' ? PALETTE.path : (x + y) % 2 ? PALETTE.grass : PALETTE.grassAlt;
+          g.poly(this.diamond(x, y)).fill(color);
+          if (kind === 'path') g.poly(this.diamond(x, y)).stroke({ width: 1, color: PALETTE.pathEdge, alpha: 0.3 });
+          continue;
+        }
+        if (road.has(`${x},${y}`)) {
+          g.poly(this.diamond(x, y)).fill(PALETTE.path);
+          g.poly(this.diamond(x, y)).stroke({ width: 1, color: PALETTE.pathEdge, alpha: 0.3 });
+          continue;
+        }
+        const r = BoardRenderer.hash(x, y);
+        g.poly(this.diamond(x, y)).fill(r < 0.5 ? PALETTE.field : PALETTE.fieldAlt);
+        // Keep the strip next to the map clear so nothing hides the play area.
+        const nearMap = [-1, 0, 1].some((dy) => [-1, 0, 1].some((dx) => open(x + dx, y + dy)));
+        if (nearMap || road.has(`${x + 1},${y}`) || road.has(`${x},${y + 1}`) || road.has(`${x - 1},${y}`) || road.has(`${x},${y - 1}`)) continue;
+        if (r > 0.86) decor.push(() => this.drawTree(x + 0.5, y + 0.5, BoardRenderer.hash(y, x)));
+        else if (r > 0.8) decor.push(() => this.drawRock(x + 0.5, y + 0.5));
+        else if (r < 0.06) decor.push(() => this.drawTree(x + 0.5, y + 0.5, BoardRenderer.hash(y, x)));
+      }
+    }
+
+    // Soft light line along the border of the playable area.
     for (let y = 0; y < grid.rows; y++) {
       for (let x = 0; x < grid.cols; x++) {
         if (!open(x, y)) continue;
-        // Side walls where the map ends, so it reads as a raised slab.
-        if (!open(x, y + 1)) {
-          const ax = this.ix(x, y + 1), ay = this.iy(x, y + 1);
-          const bx = this.ix(x + 1, y + 1), by = this.iy(x + 1, y + 1);
-          g.poly([ax, ay, bx, by, bx, by + e, ax, ay + e]).fill(PALETTE.edgeLeft);
-        }
-        if (!open(x + 1, y)) {
-          const ax = this.ix(x + 1, y + 1), ay = this.iy(x + 1, y + 1);
-          const bx = this.ix(x + 1, y), by = this.iy(x + 1, y);
-          g.poly([ax, ay, bx, by, bx, by + e, ax, ay + e]).fill(PALETTE.edgeRight);
-        }
+        const d = this.diamond(x, y);
+        const edge = (i: number, j: number) => g.moveTo(d[i]!, d[i + 1]!).lineTo(d[j]!, d[j + 1]!).stroke({ width: 1.5, color: PALETTE.fieldEdge, alpha: 0.35 });
+        if (!open(x, y - 1)) edge(0, 2);
+        if (!open(x + 1, y)) edge(2, 4);
+        if (!open(x, y + 1)) edge(4, 6);
+        if (!open(x - 1, y)) edge(6, 0);
       }
     }
-    for (let y = 0; y < grid.rows; y++) {
-      for (let x = 0; x < grid.cols; x++) {
-        const kind = grid.get(x, y);
-        if (kind === 'blocked') continue;
-        const color = kind === 'path' ? PALETTE.path : (x + y) % 2 ? PALETTE.grass : PALETTE.grassAlt;
-        g.poly(this.diamond(x, y)).fill(color);
-        if (kind === 'path') g.poly(this.diamond(x, y)).stroke({ width: 1, color: PALETTE.pathEdge, alpha: 0.3 });
-      }
-    }
-    for (const s of spawns) g.poly(this.diamond(s.x, s.y)).fill({ color: PALETTE.spawn, alpha: 0.5 });
+    for (const s of spawns) g.poly(this.diamond(s.x, s.y)).fill({ color: PALETTE.spawn, alpha: 0.35 });
     for (const s of goals) g.poly(this.diamond(s.x, s.y)).fill({ color: PALETTE.goal, alpha: 0.6 });
+    for (const d of decor) d();
+  }
+
+  private drawTree(gx: number, gy: number, v: number): void {
+    const g = this.ground;
+    const c = this.cell;
+    const x = this.ix(gx, gy) + (v - 0.5) * c * 0.2;
+    const y = this.iy(gx, gy);
+    const s = 0.8 + v * 0.5;
+    g.ellipse(x + c * 0.08, y + c * 0.02, c * 0.28 * s, c * 0.12 * s).fill({ color: PALETTE.shadow, alpha: 0.25 });
+    g.rect(x - c * 0.04, y - c * 0.2 * s, c * 0.08, c * 0.2 * s).fill(PALETTE.treeTrunk);
+    g.circle(x, y - c * 0.38 * s, c * 0.26 * s).fill(PALETTE.treeDark);
+    g.circle(x - c * 0.07 * s, y - c * 0.45 * s, c * 0.15 * s).fill(PALETTE.treeLight);
+  }
+
+  private drawRock(gx: number, gy: number): void {
+    const g = this.ground;
+    const c = this.cell;
+    const x = this.ix(gx, gy);
+    const y = this.iy(gx, gy);
+    g.ellipse(x, y - c * 0.04, c * 0.16, c * 0.1).fill(PALETTE.rockShade);
+    g.ellipse(x - c * 0.02, y - c * 0.07, c * 0.12, c * 0.07).fill(PALETTE.rock);
   }
 
   /** Draw one frame. `alpha` interpolates between the last two sim steps. */
