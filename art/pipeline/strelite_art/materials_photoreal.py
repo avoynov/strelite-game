@@ -19,9 +19,12 @@ import bpy
 
 from .materials import srgb
 
-# Reference object whose space the 3D patterns live in (the rotating gun), so
-# wear does not swim when the gun turns. Set by the model before materials are made.
+# Reference object whose space the 3D patterns of the rotating parts live in (the
+# gun), so wear does not swim when the gun turns. Set by the model.
 _ref = {"obj": None}
+# Set True by the exporter: round the edges in the shading normal (Bevel node), so the
+# baked normal map carries the chamfers and the game mesh can stay un-bevelled.
+OPTIONS = {"bevel_normal": False}
 # name -> image path for stencil decals (white paint through a stencil).
 _decals = {}
 
@@ -32,6 +35,7 @@ BARE_STEEL = (0.56, 0.57, 0.58)
 
 # name: (builder, kwargs)
 OLIVE = (0.34, 0.35, 0.24)      # FS 34087 olive drab
+GREEN_4BO = (0.30, 0.37, 0.21)  # Soviet 4BO protective green
 SPEC = {
     "paint_olive":   ("painted", dict(color=OLIVE, rough=0.62)),
     "paint_olive_worn": ("painted", dict(color=OLIVE, rough=0.6, wear=1.8, dust=1.3)),
@@ -56,11 +60,84 @@ SPEC = {
     "dirt":          ("dirt", {}),
     "grass":         ("grass", {}),
     "bore":          ("bore", {}),
+    # --- field fortifications
+    "dirt_fill":     ("dirt", dict(masks=False)),
+    "burlap":        ("cloth", dict(color=(0.64, 0.56, 0.40), alt=(0.40, 0.43, 0.30))),
+    "flag":          ("cloth", dict(color=(0.74, 0.07, 0.09), dust=0.0, translucent=0.35, wrinkle=6.0)),
+    "geotextile":    ("geotextile", {}),
+    "concrete":      ("concrete", {}),
+    "log":           ("log", {}),
+    "camo_net":      ("camo_net", {}),
+    "screen":        ("screen", {}),
+    # --- Soviet protective green 4BO (ZIS-3 type)
+    "paint_4bo":      ("painted", dict(color=GREEN_4BO, rough=0.6, wear=1.2)),
+    "paint_4bo_worn": ("painted", dict(color=GREEN_4BO, rough=0.6, wear=1.9, dust=1.3)),
+    "paint_4bo_barrel": ("painted", dict(color=GREEN_4BO, rough=0.55, wear=0.8, dust=0.6)),
+    "paint_4bo_soot": ("painted", dict(color=GREEN_4BO, rough=0.7, wear=1.5, dust=0.4, soot=1.0)),
+    "brass":         ("metal", dict(color=(0.80, 0.66, 0.34), rough=0.28, dust=0.3)),
 }
 
 
 def set_reference(obj):
     _ref["obj"] = obj
+
+
+def stamp(scene):
+    """Write the pattern space into every mesh as vertex attributes:
+      pcoord  position in metres in pattern space (gun space for parts under the
+              reference object, world space for everything static),
+      ocoord  position in the object's own space (wood grain, log rings, nets),
+      rnd     one random number per object (tone differs from panel to panel).
+    Materials read only these, never the object itself, so they give the same
+    result when parts are joined and baked to textures for the game.
+    Call once after the model is built, with the gun at yaw 0. Curves (hoses)
+    are converted to meshes on the way. Terrain objects are skipped."""
+    import random
+
+    import numpy as np
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    for obj in [o for o in scene.objects if o.type == "CURVE"]:
+        me = bpy.data.meshes.new_from_object(obj.evaluated_get(dg))
+        new = bpy.data.objects.new(obj.name, me)
+        for coll in obj.users_collection:
+            coll.objects.link(new)
+        new.parent = obj.parent
+        new.matrix_parent_inverse = obj.matrix_parent_inverse.copy()
+        new.matrix_basis = obj.matrix_basis.copy()
+        for poly in me.polygons:
+            poly.use_smooth = True
+        bpy.data.objects.remove(obj)
+    bpy.context.view_layer.update()
+    ref = _ref["obj"]
+    gun = set()
+    if ref is not None:
+        stack = [ref]
+        while stack:
+            o = stack.pop()
+            gun.add(o)
+            stack.extend(o.children)
+        ref_inv = ref.matrix_world.inverted()
+    rng = random.Random(20261116)
+    for obj in sorted(scene.objects, key=lambda o: o.name):
+        if obj.type != "MESH" or obj.get("terrain"):
+            continue
+        if obj.data.users > 1:
+            obj.data = obj.data.copy()
+        me = obj.data
+        n = len(me.vertices)
+        co = np.empty(n * 3, np.float32)
+        me.vertices.foreach_get("co", co)
+        co = co.reshape(-1, 3)
+        m = np.array((ref_inv @ obj.matrix_world) if obj in gun else obj.matrix_world, np.float32)
+        pc = co @ m[:3, :3].T + m[:3, 3]
+
+        def put(name, kind, key, values):
+            a = me.attributes.get(name) or me.attributes.new(name, kind, "POINT")
+            a.data.foreach_set(key, values)
+        put("pcoord", "FLOAT_VECTOR", "vector", pc.ravel())
+        put("ocoord", "FLOAT_VECTOR", "vector", co.ravel())
+        put("rnd", "FLOAT", "value", np.full(n, rng.random(), np.float32))
 
 
 def register_decal(name, image_path):
@@ -143,10 +220,16 @@ class Graph:
         return n.outputs["Vector"]
 
     def coords(self):
-        tc = self.node("ShaderNodeTexCoord")
-        if _ref["obj"] is not None:
-            tc.object = _ref["obj"]
-        return tc.outputs["Object"]
+        """Pattern space in metres (vertex attribute written by `stamp`)."""
+        return self.node("ShaderNodeAttribute", attribute_name="pcoord").outputs["Vector"]
+
+    def own(self):
+        """The object's own space in metres."""
+        return self.node("ShaderNodeAttribute", attribute_name="ocoord").outputs["Vector"]
+
+    def rnd(self):
+        """One random number per object, 0..1."""
+        return self.node("ShaderNodeAttribute", attribute_name="rnd").outputs["Fac"]
 
     def world(self):
         g = self.node("ShaderNodeNewGeometry")
@@ -160,6 +243,7 @@ class Graph:
                alpha=None, coat=0.0):
         out = self.node("ShaderNodeOutputMaterial")
         bsdf = self.node("ShaderNodeBsdfPrincipled")
+        bsdf.name = "PBR"
         self.set(bsdf.inputs["Base Color"], color)
         self.set(bsdf.inputs["Roughness"], rough)
         self.set(bsdf.inputs["Metallic"], metallic)
@@ -167,12 +251,21 @@ class Graph:
             bsdf.inputs["Coat Weight"].default_value = coat
         if alpha is not None:
             self.set(bsdf.inputs["Alpha"], alpha)
+        base_normal = None
+        if OPTIONS["bevel_normal"]:
+            bev = self.node("ShaderNodeBevel", samples=6)
+            bev.inputs["Radius"].default_value = 0.012
+            base_normal = bev.outputs["Normal"]
         if height is not None:
             b = self.node("ShaderNodeBump")
             b.inputs["Strength"].default_value = bump
             b.inputs["Distance"].default_value = bump_dist
             self.L.new(height, b.inputs["Height"])
+            if base_normal is not None:
+                self.L.new(base_normal, b.inputs["Normal"])
             self.L.new(b.outputs["Normal"], bsdf.inputs["Normal"])
+        elif base_normal is not None:
+            self.L.new(base_normal, bsdf.inputs["Normal"])
         self.L.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
         return bsdf
 
@@ -203,11 +296,10 @@ def _painted(name, color, rough, wear=1.0, dust=1.0, primer=PRIMER, bare=BARE_ST
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     P = g.coords()
-    info = g.node("ShaderNodeObjectInfo")
     geo = g.node("ShaderNodeNewGeometry")
 
     # --- paint: tone differs a little per panel and in large soft patches
-    tone = g.math("ADD", 0.84, g.math("MULTIPLY", info.outputs["Random"], 0.32))
+    tone = g.math("ADD", 0.84, g.math("MULTIPLY", g.rnd(), 0.32))
     patch = g.math("ADD", 0.82, g.math("MULTIPLY", g.noise(P, 1.3, detail=5, rough=0.6), 0.36))
     paint = g.mix(1.0, rgb(color), g.math("MULTIPLY", tone, patch), "MULTIPLY")
 
@@ -313,11 +405,9 @@ def _wood(name, color):
     """Raw sawn softwood (crate battens, tool handles). Grain runs along local Y."""
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
-    tc = g.node("ShaderNodeTexCoord")
-    info = g.node("ShaderNodeObjectInfo")
     off = g.node("ShaderNodeVectorMath", operation="ADD")
-    g.L.new(tc.outputs["Object"], off.inputs[0])
-    g.L.new(info.outputs["Random"], off.inputs[1])
+    g.L.new(g.own(), off.inputs[0])
+    g.L.new(g.rnd(), off.inputs[1])
     P = off.outputs["Vector"]
     grain = g.noise(g.scale_vec(P, (90, 4, 90)), 1.0, detail=5, rough=0.6, distortion=1.5)
     rings = g.noise(g.scale_vec(P, (14, 1.2, 14)), 1.0, detail=2, distortion=3.0)
@@ -347,17 +437,23 @@ def _stone(name):
     return mat
 
 
-def _dirt(name):
+def _dirt(name, masks=True):
     """Dry, compacted soil of a firing position. World-space, real scale.
-    Vertex colour "masks": R wheel ruts, G trampled ground, B grass cover."""
+    Vertex colour "masks": R wheel ruts, G trampled ground, B grass cover,
+    A opacity (sprites carry a soil patch that fades out at its edge).
+    masks=False: plain soil for heaps and barrier fill (no vertex data needed)."""
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     geo = g.node("ShaderNodeNewGeometry")
     P = geo.outputs["Position"]
-    att = g.node("ShaderNodeAttribute", attribute_name="masks")
-    sep = g.node("ShaderNodeSeparateColor")
-    g.L.new(att.outputs["Color"], sep.inputs[0])
-    rut, tramp, cover = sep.outputs[0], sep.outputs[1], sep.outputs[2]
+    rut = tramp = cover = 0.0
+    alpha = None
+    if masks:
+        att = g.node("ShaderNodeAttribute", attribute_name="masks")
+        sep = g.node("ShaderNodeSeparateColor")
+        g.L.new(att.outputs["Color"], sep.inputs[0])
+        rut, tramp, cover = sep.outputs[0], sep.outputs[1], sep.outputs[2]
+        alpha = att.outputs["Alpha"]
 
     macro = g.noise(P, 0.16, detail=3, rough=0.5)
     large = g.noise(P, 0.55, detail=9, rough=0.72)
@@ -396,7 +492,7 @@ def _dirt(name):
     h = g.math("ADD", g.math("MULTIPLY", fine, 0.5),
                g.math("ADD", g.math("MULTIPLY", grit, 0.2),
                       g.math("SUBTRACT", g.math("MULTIPLY", pebble, 0.5), g.math("MULTIPLY", gap, 0.5))))
-    g.finish(col, g.mixf(rut, 0.94, 0.72), 0.0, height=h, bump=1.0, bump_dist=0.025)
+    g.finish(col, g.mixf(rut, 0.94, 0.72), 0.0, height=h, bump=1.0, bump_dist=0.025, alpha=alpha)
     return mat
 
 
@@ -445,8 +541,191 @@ def _decal(name):
     return mat
 
 
+
+def _cloth(name, color, alt=None, dust=0.7, translucent=0.0, wrinkle=18.0):
+    """Woven cloth (sandbag hessian, flags). Tone differs from piece to piece."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.coords()
+    rnd = g.rnd()
+    tone = g.math("ADD", 0.72, g.math("MULTIPLY", rnd, 0.45))
+    col = g.mix(1.0, rgb(color), tone, "MULTIPLY")
+    if alt:     # every few pieces come from another batch: other dye, more weathered
+        rnd2 = g.math("FRACT", g.math("MULTIPLY", rnd, 7.31))
+        col = g.mix(g.ramp(rnd2, 0.62, 0.7), col, g.mix(1.0, rgb(alt), tone, "MULTIPLY"))
+    stain = g.noise(P, 7, detail=5, rough=0.7)
+    col = g.mix(g.math("MULTIPLY", g.ramp(stain, 0.5, 0.75), 0.35), col, (0.10, 0.08, 0.06, 1))
+    _, nz, pz = g.world()
+    if dust:
+        damp = g.ramp(pz, 0.22, 0.02)                       # wicks moisture from the ground
+        col = g.mix(g.math("MULTIPLY", damp, 0.45), col, rgb((0.30, 0.24, 0.17)))
+        dust_m, _, _ = _dust_mask(g, P, dust)
+        col = g.mix(dust_m, col, rgb(DUST))
+    weave = g.noise(P, 220, detail=2)
+    wr = g.noise(P, wrinkle, detail=4, rough=0.6)
+    h = g.math("ADD", g.math("MULTIPLY", wr, 0.8), g.math("MULTIPLY", weave, 0.2))
+    bsdf = g.finish(col, 0.92, 0.0, height=h, bump=0.5, bump_dist=0.012)
+    bsdf.inputs["Sheen Weight"].default_value = 0.3
+    if translucent:
+        out = next(n for n in g.N if n.bl_idname == "ShaderNodeOutputMaterial")
+        tr = g.node("ShaderNodeBsdfTranslucent")
+        g.L.new(col, tr.inputs["Color"])
+        mix = g.node("ShaderNodeMixShader")
+        mix.inputs["Fac"].default_value = translucent
+        g.L.new(bsdf.outputs["BSDF"], mix.inputs[1])
+        g.L.new(tr.outputs["BSDF"], mix.inputs[2])
+        g.L.new(mix.outputs["Shader"], out.inputs["Surface"])
+    return mat
+
+
+def _geotextile(name):
+    """HESCO-type barrier: felt liner behind a welded 76 mm galvanised mesh.
+    Expects a 1 m wide unit centred on its own Z axis."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.coords()
+    felt = g.noise(P, 5, detail=6, rough=0.7)
+    col = g.mix(1.0, rgb((0.68, 0.65, 0.57)), g.math("ADD", 0.76, g.math("MULTIPLY", felt, 0.42)),
+                "MULTIPLY")
+    _, nz, pz = g.world()
+    low = g.ramp(pz, 0.6, 0.0)                              # soil splashed up from the ground
+    col = g.mix(g.math("MULTIPLY", low, g.math("ADD", 0.25, g.math("MULTIPLY", felt, 0.7))), col,
+                rgb((0.48, 0.40, 0.29)))
+    streak = g.ramp(g.noise(g.scale_vec(P, (9, 9, 0.8)), 1.0, detail=3), 0.55, 0.8)
+    col = g.mix(g.math("MULTIPLY", streak, 0.3), col, rgb((0.36, 0.30, 0.22)))
+    sp = g.node("ShaderNodeSeparateXYZ")
+    g.L.new(g.own(), sp.inputs[0])
+
+    def wire(sock):
+        fr = g.math("FRACT", g.math("ADD", g.math("MULTIPLY", sock, 13.12), 100.5))
+        return g.math("LESS_THAN", fr, 0.09)
+    # a side face is the one whose own x (or y) sits at the unit's skin
+    on_x = g.math("GREATER_THAN", g.math("ABSOLUTE", sp.outputs["X"]), 0.44)
+    upright = g.math("MAXIMUM", g.math("MULTIPLY", wire(sp.outputs["Y"]), on_x),
+                     g.math("MULTIPLY", wire(sp.outputs["X"]), g.math("SUBTRACT", 1.0, on_x)))
+    line = g.math("MAXIMUM", wire(sp.outputs["Z"]), upright)
+    col = g.mix(line, col, rgb((0.43, 0.44, 0.45)))
+    h = g.math("ADD", g.math("MULTIPLY", felt, 0.5), line)
+    g.finish(col, g.mixf(line, 0.92, 0.45), g.math("MULTIPLY", line, 0.8), height=h, bump=0.5,
+             bump_dist=0.006)
+    return mat
+
+
+def _concrete(name):
+    """Cast concrete hardstanding: 2.5 m bays, joints, hairline cracks, oil, drifted soil."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    geo = g.node("ShaderNodeNewGeometry")
+    P = geo.outputs["Position"]
+    sp = g.node("ShaderNodeSeparateXYZ")
+    g.L.new(P, sp.inputs[0])
+    large = g.noise(P, 0.35, detail=6, rough=0.65)
+    med = g.noise(P, 4, detail=7, rough=0.7)
+    speck = g.noise(P, 260, detail=2)
+    v = g.math("ADD", 0.72, g.math("ADD", g.math("MULTIPLY", large, 0.3), g.math("MULTIPLY", med, 0.24)))
+    col = g.mix(1.0, rgb((0.62, 0.61, 0.58)), v, "MULTIPLY")
+    drift = g.ramp(g.noise(P, 0.9, detail=6, rough=0.72), 0.46, 0.74)
+    col = g.mix(g.math("MULTIPLY", drift, 0.6), col, rgb(DUST))
+    stain = g.ramp(g.noise(P, 1.6, detail=4, rough=0.6, distortion=0.8), 0.64, 0.74)
+    col = g.mix(g.math("MULTIPLY", stain, 0.6), col, (0.03, 0.028, 0.025, 1))
+    joint = None
+    for axis in "XY":
+        fr = g.math("FRACT", g.math("ADD", g.math("MULTIPLY", sp.outputs[axis], 0.4), 100.5))
+        j = g.ramp(g.math("ABSOLUTE", g.math("SUBTRACT", fr, 0.5)), 0.0042, 0.0018)
+        joint = j if joint is None else g.math("MAXIMUM", joint, j)
+    col = g.mix(g.math("MULTIPLY", joint, 0.85), col, (0.02, 0.02, 0.02, 1))
+    vor = g.node("ShaderNodeTexVoronoi", feature="DISTANCE_TO_EDGE")
+    warp = g.node("ShaderNodeVectorMath", operation="ADD")
+    g.L.new(P, warp.inputs[0])
+    wn = g.node("ShaderNodeTexNoise")
+    g.L.new(P, wn.inputs["Vector"])
+    wn.inputs["Scale"].default_value = 1.5
+    g.L.new(wn.outputs["Color"], warp.inputs[1])
+    g.L.new(warp.outputs["Vector"], vor.inputs["Vector"])
+    vor.inputs["Scale"].default_value = 0.8
+    crack = g.math("MULTIPLY", g.ramp(vor.outputs["Distance"], 0.007, 0.0),
+                   g.ramp(g.noise(P, 0.45, detail=2), 0.45, 0.58))
+    col = g.mix(g.math("MULTIPLY", crack, 0.75), col, (0.03, 0.03, 0.03, 1))
+    col = g.mix(1.0, col, g.math("ADD", 0.9, g.math("MULTIPLY", speck, 0.2)), "MULTIPLY")
+    h = g.math("SUBTRACT", g.math("ADD", g.math("MULTIPLY", speck, 0.3), g.math("MULTIPLY", med, 0.3)),
+               g.math("ADD", joint, g.math("MULTIPLY", crack, 0.6)))
+    g.finish(col, g.mixf(stain, 0.86, 0.5), 0.0, height=h, bump=0.6, bump_dist=0.004)
+    return mat
+
+
+def _log(name):
+    """Round timber standing on end: furrowed bark on the side, growth rings on the cut."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.coords()
+    rnd = g.rnd()
+    sp = g.node("ShaderNodeSeparateXYZ")
+    g.L.new(g.own(), sp.inputs[0])
+    _, nz, _ = g.world()                                    # logs stand upright
+    bark = g.noise(g.scale_vec(P, (55, 55, 3.5)), 1.0, detail=5, rough=0.65, distortion=0.6)
+    bcol = g.mix(g.ramp(bark, 0.35, 0.72), rgb((0.20, 0.15, 0.11)), rgb((0.47, 0.41, 0.33)))
+    bcol = g.mix(1.0, bcol, g.math("ADD", 0.8, g.math("MULTIPLY", rnd, 0.4)), "MULTIPLY")
+    r = g.math("SQRT", g.math("ADD", g.math("POWER", sp.outputs["X"], 2.0),
+                              g.math("POWER", sp.outputs["Y"], 2.0)))
+    rings = g.math("SINE", g.math("ADD", g.math("MULTIPLY", r, 230.0),
+                                  g.math("MULTIPLY", g.noise(P, 20, detail=2), 5.0)))
+    ecol = g.mix(g.ramp(rings, -0.4, 0.6), rgb((0.52, 0.40, 0.25)), rgb((0.76, 0.64, 0.44)))
+    ecol = g.mix(g.math("MULTIPLY", rnd, 0.6), ecol, rgb((0.47, 0.45, 0.42)))
+    end = g.ramp(g.math("ABSOLUTE", nz), 0.6, 0.9)
+    col = g.mix(end, bcol, ecol)
+    dust_m, _, _ = _dust_mask(g, P, 0.6)
+    col = g.mix(dust_m, col, rgb(DUST))
+    h = g.mixf(end, bark, g.math("MULTIPLY", rings, 0.15))
+    g.finish(col, 0.9, 0.0, height=h, bump=0.9, bump_dist=0.012)
+    return mat
+
+
+def _camo_net(name):
+    """Camouflage net: a 7 cm mesh garnished with leaf-cut scrim, about 60 % cover.
+    Alpha cut-out, so the sun shines through and dapples whatever is underneath."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.own()
+    vor = g.node("ShaderNodeTexVoronoi", feature="F1", voronoi_dimensions="2D")
+    g.L.new(P, vor.inputs["Vector"])
+    vor.inputs["Scale"].default_value = 11.0
+    sc = g.node("ShaderNodeSeparateColor")
+    g.L.new(vor.outputs["Color"], sc.inputs[0])
+    present = g.math("GREATER_THAN", sc.outputs[0], 0.25)
+    leaf = g.ramp(vor.outputs["Distance"], 0.6, 0.48)
+    torn = g.ramp(g.noise(P, 3.5, detail=3), 0.3, 0.42)
+    garnish = g.math("MULTIPLY", g.math("MULTIPLY", present, leaf), torn)
+    sp = g.node("ShaderNodeSeparateXYZ")
+    g.L.new(P, sp.inputs[0])
+    line = None
+    for axis in "XY":
+        fr = g.math("FRACT", g.math("ADD", g.math("MULTIPLY", sp.outputs[axis], 14.3), 100.0))
+        on = g.math("LESS_THAN", fr, 0.08)
+        line = on if line is None else g.math("MAXIMUM", line, on)
+    alpha = g.math("MAXIMUM", garnish, g.math("MULTIPLY", line, 0.7))
+    blot = g.noise(P, 0.9, detail=3, rough=0.5)
+    c = g.mix(g.ramp(blot, 0.42, 0.5), rgb((0.17, 0.22, 0.12)), rgb((0.36, 0.37, 0.21)))
+    c = g.mix(g.ramp(g.noise(P, 1.7, detail=2), 0.57, 0.63), c, rgb((0.37, 0.28, 0.18)))
+    c = g.mix(1.0, c, g.math("ADD", 0.7, g.math("MULTIPLY", sc.outputs[1], 0.6)), "MULTIPLY")
+    c = g.mix(g.math("MULTIPLY", line, g.math("SUBTRACT", 1.0, garnish)), c, rgb((0.10, 0.12, 0.08)))
+    g.finish(c, 0.85, 0.0, alpha=alpha)
+    return mat
+
+
+def _screen(name):
+    """Powered-on rugged display: dark glass with a faint green glow."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((0.01, 0.02, 0.012, 1), 0.08)
+    bsdf.inputs["Emission Color"].default_value = (0.25, 0.9, 0.4, 1)
+    bsdf.inputs["Emission Strength"].default_value = 60.0
+    return mat
+
+
 _BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood,
-             "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore}
+             "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
+             "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
+             "screen": _screen}
 
 
 def build(name):

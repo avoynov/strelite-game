@@ -21,8 +21,10 @@ from ..geo import Kit
 
 LEVELS = (1,)
 STYLES = ("photoreal",)
-FRAME_M = 12.0          # real metres across the sprite frame (3.2 tiles)
+FRAME_M = 12.0          # real metres across the preview frame
 TARGET_Z = 0.9          # height the camera is centred on
+GUN_SHIFT = 0.9         # the gun sits this far forward of the rotation centre, so the
+                        # spades and the stabiliser pads sweep the same 3.9 m circle
 HERO_DIR = 12           # of 16: barrel toward screen lower-right, sunlit side to camera
 ELEVATION_DEG = 20.0
 
@@ -32,12 +34,16 @@ OLIVE, WORN, STEEL = "paint_olive", "paint_olive_worn", "gunmetal"
 def build(style, level=1):
     k = Kit(style)
     root = k.empty("howitzer")
+    # Node empties carry a "node" tag: the game export turns each into one mesh
+    # node (turret yaws, elevating pitches about the trunnions, recoil slides).
     turret = k.empty("turret", parent=root)
-    mp.set_reference(turret)
+    turret["node"] = "turret"
+    gun = k.empty("gun", (0, GUN_SHIFT, 0), parent=turret)
+    mp.set_reference(gun)
 
-    _carriage(k, turret)
-    _saddle(k, turret)
-    _elevating_mass(k, turret)
+    _carriage(k, gun)
+    _saddle(k, gun)
+    _elevating_mass(k, gun, level)
     _props(k, root)
     return root, turret
 
@@ -180,10 +186,13 @@ def _saddle(k, t):
                u=(0, sx, 0), v=(0, 0, 1), height=0.12)
 
 
-def _elevating_mass(k, t):
+def _elevating_mass(k, t, level=1):
     piv = k.empty("elevating", (0, -0.7, 1.08), parent=t)
+    piv["node"] = "elevating"
     el = math.radians(ELEVATION_DEG)
     piv.rotation_euler = (el, 0, 0)
+    rec = k.empty("recoil", parent=piv)                     # barrel + breech slide back on firing
+    rec["node"] = "recoil"
     z0 = 0.12                                               # bore axis above the trunnions
 
     def to_turret(p):                                       # local (pivot) -> turret space
@@ -194,36 +203,37 @@ def _elevating_mass(k, t):
     # --- barrel: chamber, taper, tube
     barrel = [(-0.5, 0.0), (-0.5, 0.185), (0.4, 0.185), (0.55, 0.165), (1.3, 0.15),
               (1.62, 0.118), (4.55, 0.098), (4.55, 0.0)]
-    k.lathe("barrel", barrel, "paint_barrel", segs=40, loc=(0, 0, z0), parent=piv)
-    for y0, y1 in ((3.45, 3.57), (3.66, 3.72)):             # faction rings (crimson)
+    k.lathe("barrel", barrel, "paint_barrel", segs=40, loc=(0, 0, z0), parent=rec)
+    for i in range(level):                                  # crimson rings: one per level
+        y0, y1 = 3.72 - i * 0.2, 3.82 - i * 0.2
         r = 0.118 + (0.098 - 0.118) * ((y0 + y1) / 2 - 1.62) / 2.93 + 0.0025
         k.lathe("ring", [(y0, 0.0), (y0, r), (y1, r), (y1, 0.0)], "paint_red", segs=40,
-                loc=(0, 0, z0), parent=piv)
+                loc=(0, 0, z0), parent=rec)
 
     # --- muzzle brake: collar, two baffles, top/bottom bars, towing eye
     k.lathe("brake_collar", [(4.5, 0.0), (4.5, 0.125), (4.6, 0.14), (4.66, 0.14), (4.66, 0.0)],
-            "paint_barrel", segs=32, loc=(0, 0, z0), parent=piv)
+            "paint_barrel", segs=32, loc=(0, 0, z0), parent=rec)
     k.lathe("brake_core", [(4.6, 0.0), (4.6, 0.108), (5.14, 0.108), (5.14, 0.0)], "paint_soot", segs=32,
-            loc=(0, 0, z0), parent=piv)
+            loc=(0, 0, z0), parent=rec)
     for y in (4.84, 5.1):
-        k.box("baffle", (0.5, 0.06, 0.3), (0, y, z0), "paint_soot", parent=piv, bevel=0.012)
+        k.box("baffle", (0.5, 0.06, 0.3), (0, y, z0), "paint_soot", parent=rec, bevel=0.012)
     for s in (-1, 1):
         k.box("brake_bar", (0.2, 0.56, 0.035), (0, 4.86, z0 + s * 0.155), "paint_soot",
-              parent=piv, bevel=0.008)
+              parent=rec, bevel=0.008)
     k.cylinder("bore", 0.078, 0.01, (0, 5.141, z0), "bore", segs=24, rot=(-math.pi / 2, 0, 0),
-               parent=piv, bevel=False)
-    k.box("eye_lug", (0.06, 0.16, 0.1), (0, 5.0, z0 - 0.21), "paint_barrel", parent=piv)
+               parent=rec, bevel=False)
+    k.box("eye_lug", (0.06, 0.16, 0.1), (0, 5.0, z0 - 0.21), "paint_barrel", parent=rec)
     k.torus("tow_eye", 0.085, 0.024, (0, 5.0, z0 - 0.33), STEEL, rot=(0, math.pi / 2, 0),
-            parent=piv, segs=28, tube_segs=10)
+            parent=rec, segs=28, tube_segs=10)
 
     # --- breech ring, screw block, operating lever
-    k.box("breech_ring", (0.5, 0.5, 0.5), (0, -0.62, z0), WORN, parent=piv, bevel=0.02)
+    k.box("breech_ring", (0.5, 0.5, 0.5), (0, -0.62, z0), WORN, parent=rec, bevel=0.02)
     k.cylinder("breech_block", 0.16, 0.14, (0, -1.0, z0), STEEL, segs=28,
-               rot=(-math.pi / 2, 0, 0), parent=piv)
-    k.box("carrier", (0.16, 0.2, 0.36), (0.3, -0.9, z0), STEEL, parent=piv, bevel=0.012)
-    k.tube("lever", (0.3, -0.95, z0 + 0.1), (0.42, -1.2, z0 + 0.34), 0.016, STEEL, parent=piv,
+               rot=(-math.pi / 2, 0, 0), parent=rec)
+    k.box("carrier", (0.16, 0.2, 0.36), (0.3, -0.9, z0), STEEL, parent=rec, bevel=0.012)
+    k.tube("lever", (0.3, -0.95, z0 + 0.1), (0.42, -1.2, z0 + 0.34), 0.016, STEEL, parent=rec,
            segs=10)
-    k.cylinder("lever_knob", 0.03, 0.07, (0.42, -1.2, z0 + 0.32), "rubber", segs=12, parent=piv)
+    k.cylinder("lever_knob", 0.03, 0.07, (0.42, -1.2, z0 + 0.32), "rubber", segs=12, parent=rec)
 
     # --- cradle: body around the trunnions + four tubes + yokes
     k.box("cradle", (0.68, 1.05, 0.46), (0, 0.22, 0.08), OLIVE, parent=piv, bevel=0.015)
@@ -345,8 +355,8 @@ def _props(k, root):
             k.cylinder("aiming_post", 0.016, 0.3, (x, y, i * 0.3), "paint_red" if i % 2 else "paint_white",
                        segs=10, parent=root, bevel=False)
     # rammer staff lying by the trail
-    k.tube("rammer", (1.1, -3.3, 0.05), (-0.55, -5.9, 0.07), 0.022, "wood", parent=root, segs=12)
-    k.cylinder("rammer_head", 0.07, 0.12, (1.1, -3.3, 0.05), "rubber", segs=16,
+    k.tube("rammer", (1.5, -3.8, 0.05), (-0.15, -6.4, 0.07), 0.022, "wood", parent=root, segs=12)
+    k.cylinder("rammer_head", 0.07, 0.12, (1.5, -3.8, 0.05), "rubber", segs=16,
                rot=Vector((1.65, 2.6, -0.02)).to_track_quat("Z", "Y").to_euler(), parent=root)
 
 

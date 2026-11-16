@@ -12,6 +12,9 @@ from . import materials
 # "photoreal" models are built at real-world size, so its bevel is a real 6 mm chamfer.
 BEVEL = {"stylized": (0.035, 3), "realistic": (0.008, 2), "photoreal": (0.006, 2)}
 OUTLINE_THICKNESS = 0.022  # metres; only used by "stylized"
+# The game export switches geometric bevels off (the chamfers go into the baked
+# normal map instead), which cuts the triangle count several times.
+OPTIONS = {"bevel": True}
 
 
 class Kit:
@@ -19,17 +22,20 @@ class Kit:
         self.style = style
         self.collection = collection or bpy.context.scene.collection
 
+    def material(self, name):
+        return materials.get(name, self.style)
+
     # -- low level ---------------------------------------------------------
     def _finish(self, obj, mat_name, smooth=False, bevel=True, parent=None, outline=True):
         self.collection.objects.link(obj)
-        obj.data.materials.append(materials.get(mat_name, self.style))
+        obj.data.materials.append(self.material(mat_name))
         photoreal = self.style == "photoreal"
         if photoreal:
             _smooth_by_angle(obj.data, math.radians(35))
         elif smooth:
             for p in obj.data.polygons:
                 p.use_smooth = True
-        if bevel:
+        if bevel and OPTIONS["bevel"]:
             width, segs = BEVEL[self.style]
             if not isinstance(bevel, bool):
                 width = float(bevel)  # per-part override (metres)
@@ -61,7 +67,8 @@ class Kit:
     def box(self, name, size, loc, mat, rot=(0, 0, 0), parent=None, bevel=True, outline=True):
         sx, sy, sz = (s / 2 for s in size)
         v = [(x * sx, y * sy, z * sz) for z in (-1, 1) for y in (-1, 1) for x in (-1, 1)]
-        f = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+        # wound so that normals point outwards (needed for baking and backface culling)
+        f = [(2, 3, 1, 0), (5, 7, 6, 4), (1, 5, 4, 0), (6, 7, 3, 2), (4, 6, 2, 0), (3, 7, 5, 1)]
         obj = self.mesh(name, v, f)
         obj.location = loc
         obj.rotation_euler = rot
@@ -180,10 +187,10 @@ class Kit:
         n = len(outline_yz)
         v = [(x - thickness / 2, y, z) for y, z in outline_yz]
         v += [(x + thickness / 2, y, z) for y, z in outline_yz]
-        f = [tuple(range(n)), tuple(reversed(range(n, 2 * n)))]
+        f = [tuple(reversed(range(n))), tuple(range(n, 2 * n))]
         for i in range(n):
             j = (i + 1) % n
-            f.append((i, i + n, j + n, j))
+            f.append((i, j, j + n, i + n))
         return self._finish(self.mesh(name, v, f), mat, bevel=bevel, parent=parent, outline=False)
 
     def torus(self, name, radius, tube_radius, loc, mat, rot=(0, 0, 0), parent=None,
@@ -221,7 +228,7 @@ class Kit:
         sp.resolution_u = 8
         obj = bpy.data.objects.new(name, cu)
         self.collection.objects.link(obj)
-        cu.materials.append(materials.get(mat, self.style))
+        cu.materials.append(self.material(mat))
         if parent is not None:
             obj.parent = parent
         return obj

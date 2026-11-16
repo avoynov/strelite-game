@@ -104,6 +104,7 @@ class Terrain:
         rgba = np.stack([self.rut, self.tramp, self.cover, np.ones_like(self.rut)], axis=-1)
         masks.data.foreach_set("color", rgba.reshape(-1).astype(np.float32))
         obj = bpy.data.objects.new("terrain", me)
+        obj["terrain"] = True
         obj.data.materials.append(materials.get("dirt", STYLE))
         scene.collection.objects.link(obj)
         self._stones(scene)
@@ -140,6 +141,7 @@ class Terrain:
             if self.tramp[j, ii] > 0.5 and r > 0.022:
                 continue
             o = bpy.data.objects.new("stone", rnd.choice(variants))
+            o["terrain"] = True
             o.location = (x, y, self.h[j, ii] - r * 0.12)        # half sunk in the soil
             o.scale = (r, r, r)
             o.rotation_euler = (rnd.uniform(-0.3, 0.3), rnd.uniform(-0.3, 0.3), rnd.uniform(0, 6.28))
@@ -184,6 +186,7 @@ class Terrain:
             if rnd.random() > c * c * 1.2 + 0.006:
                 continue
             o = bpy.data.objects.new("tuft", rnd.choice(variants))
+            o["terrain"] = True
             s = rnd.uniform(0.10, 0.22) * (0.6 + 0.8 * c)
             o.location = (x, y, self.h[j, ii] - 0.005)
             o.scale = (s * rnd.uniform(0.8, 1.3), s * rnd.uniform(0.8, 1.3), s)

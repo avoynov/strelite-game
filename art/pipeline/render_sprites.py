@@ -45,6 +45,9 @@ def main(argv=None):
                                   ground=a.ground if a.style == "photoreal" else "catcher",
                                   lens_mm=a.lens, target_z=getattr(model, "TARGET_Z", None))
         _, turret = model.build(a.style, level)
+        if a.style == "photoreal":
+            from strelite_art import materials_photoreal
+            materials_photoreal.stamp(scene)
         if a.style == "photoreal" and a.ground == "terrain":
             from strelite_art.terrain import Terrain
             Terrain(frame_m * 3.1).build(scene)
