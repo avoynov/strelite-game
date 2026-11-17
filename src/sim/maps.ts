@@ -23,19 +23,20 @@ export interface BuiltMap {
 
 /**
  * Portrait map for phones. In the isometric view the band runs top to bottom;
- * the path zig-zags down it, alternating down-right (+x) and down-left (+y) runs.
+ * the road zig-zags down it, alternating down-right (+x) and down-left (+y)
+ * runs. The pockets between the runs take the 3x3 heavy guns.
  */
 export const MEADOW: PathMapSpec = {
   id: 'meadow',
-  cols: 16,
-  rows: 16,
-  band: 4,
+  cols: 30,
+  rows: 30,
+  band: 8,
   waypoints: [
-    [0, 4],
-    [8, 4],
-    [8, 12],
-    [15, 12],
-    [15, 15],
+    [0, 6],
+    [13, 6],
+    [13, 19],
+    [26, 19],
+    [26, 29],
   ],
 };
 

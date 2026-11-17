@@ -57,6 +57,19 @@ export function frameForAim(aim: number, directions: number): number {
   return ((Math.round(aim / step) % directions) + directions) % directions;
 }
 
+/**
+ * Like frameForAim, but keeps the current frame until the aim has moved
+ * `margin` (a fraction of one step) past the boundary, so a target sitting on
+ * the line between two frames does not make the gun flicker.
+ */
+export function stickyFrameForAim(aim: number, directions: number, current: number, margin = 0.15): number {
+  const step = (2 * Math.PI) / directions;
+  let off = (aim / step - current) % directions;
+  if (off > directions / 2) off -= directions;
+  else if (off < -directions / 2) off += directions;
+  return Math.abs(off) <= 0.5 + margin ? current : frameForAim(aim, directions);
+}
+
 export function aimFrameName(level: TowerArtLevel, aim: number, directions: number): string {
   return `${level.aim}_${String(frameForAim(aim, directions)).padStart(2, '0')}`;
 }
