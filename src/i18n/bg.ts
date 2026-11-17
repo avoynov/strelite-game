@@ -77,6 +77,7 @@ export const bg = {
   'target.strongest': "този с най-много живот",
   'target.line': "линията с най-много общ живот",
   'target.fallback': "Иначе първият по пътя; държи целта до край.",
+  'arsenal.locked': 'Отключва се на ниво {n}',
 } as const;
 
 export type MessageKey = keyof typeof bg;

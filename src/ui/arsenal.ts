@@ -19,6 +19,8 @@ export interface ArsenalCallbacks {
   directions: number;
   /** Player closed the screen with this gun selected. */
   close(def: TowerId): void;
+  /** False for guns the current map level has not unlocked yet; all unlocked when absent. */
+  isUnlocked?(def: TowerId): boolean;
 }
 
 /**
@@ -34,6 +36,8 @@ interface RosterFields {
   hitsAir?: boolean;
   /** Enemies a bolt passes through after the first. */
   passThrough?: number;
+  /** Map level from which the gun can be built. */
+  unlockLevel?: number;
   projectile: string;
 }
 type ArsenalDef = TowerDef & RosterFields;
@@ -128,7 +132,10 @@ export class Arsenal {
     };
     if (this.reduceMotion) done();
     else window.setTimeout(done, 320);
-    this.cb.close(TOWER_IDS[this.index]!);
+    // Arm the gun on screen only if it can be built on this map.
+    const shown = TOWER_IDS[this.index]!;
+    const unlocked = TOWER_IDS.filter((id) => this.cb.isUnlocked?.(id) ?? true);
+    this.cb.close(unlocked.includes(shown) ? shown : (unlocked[0] ?? shown));
   }
 
   /** Re-render text (language switch). */
@@ -199,11 +206,12 @@ export class Arsenal {
     const cost = lvN === 1 ? lvl.cost : def.levels.slice(0, lvN).reduce((a, l) => a + l.cost, 0);
 
     return `
-      <article class="ars-slide" data-i="${i}" aria-roledescription="slide" aria-label="${t(`tower.${id}`)}">
+      <article class="ars-slide${this.cb.isUnlocked && !this.cb.isUnlocked(id) ? ' locked' : ''}" data-i="${i}" aria-roledescription="slide" aria-label="${t(`tower.${id}`)}">
         <div class="ars-stage">
           <span class="ars-num" aria-hidden="true">${pad2(i + 1)}</span>
           <div class="ars-ring" aria-hidden="true"></div>
           <div class="ars-gun" data-def="${id}" data-lv="${lvN}"></div>
+          ${this.cb.isUnlocked && !this.cb.isUnlocked(id) ? `<p class="ars-lock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>${t('arsenal.locked', { n: (def as ArsenalDef).unlockLevel ?? '' })}</p>` : ''}
         </div>
         <div class="ars-info">
           <ul class="ars-tags">${traits.map((x) => `<li>${x}</li>`).join('')}</ul>
