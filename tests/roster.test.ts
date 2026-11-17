@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ENEMIES, TICK, TOWER_IDS, TOWERS, type EnemyId, type TowerId } from '../src/sim/content';
+import { RESEARCH, upgrades } from '../src/sim/research';
 import { Game, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
 import type { WaveGroup } from '../src/sim/waves';
@@ -49,16 +50,12 @@ describe('roster', () => {
     }
   });
 
-  it('unlocks guns by map level', () => {
-    const unlocked = (level: number) => TOWER_IDS.filter((id) => new Game(buildPathMap(MEADOW), { level }).isUnlocked(id));
-    expect(unlocked(1)).toEqual(['crossbow', 'zis3']);
-    expect(unlocked(2)).toEqual(['crossbow', 'zis3', 'howitzer']);
-    expect(unlocked(3)).toEqual(['crossbow', 'scorpion', 'zis3', 'howitzer']);
-    expect(unlocked(4)).toContain('trebuchet');
-    expect(unlocked(5)).toContain('greekfire');
-    expect(unlocked(7)).not.toContain('railgun');
-    expect(unlocked(8)).toHaveLength(7);
-    const g = new Game(buildPathMap(MEADOW), { level: 1 });
+  it('opens guns by research, starting with the crossbow and ZIS-3', () => {
+    const open = (done: string[]) => TOWER_IDS.filter((id) => new Game(buildPathMap(MEADOW), { upgrades: upgrades(done, TOWER_IDS) }).isUnlocked(id));
+    expect(open([])).toEqual(['crossbow', 'zis3']);
+    expect(open(['gun.howitzer'])).toEqual(['crossbow', 'zis3', 'howitzer']);
+    expect(open(RESEARCH.map((r) => r.id))).toHaveLength(7);
+    const g = new Game(buildPathMap(MEADOW), { upgrades: upgrades([], TOWER_IDS) });
     expect(g.build('howitzer', 4, 0)).toEqual({ ok: false, reason: 'locked' });
   });
 });

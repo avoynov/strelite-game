@@ -9,7 +9,7 @@ import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
 import { PlaceholderTowerView } from './towers/placeholderTowerView';
 import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTowerView';
-import { spriteScale } from './towers/towerArt';
+import { shotEffects, spriteScale } from './towers/towerArt';
 import type { TowerView } from './towers/towerView';
 
 export type Selection =
@@ -47,9 +47,21 @@ interface ShotOrigin {
 
 const FLOAT_LIFE = 0.9;
 const RAIL_LIFE = 0.35;
+
+/** Screen rotation of a direction on the ground (`a` = atan2(dy, dx) in grid cells). */
+function screenAngle(a: number): number {
+  return Math.atan2((Math.cos(a) + Math.sin(a)) / 2, Math.cos(a) - Math.sin(a));
+}
+
+/** World pixels on screen that `tiles` of ground span in direction `a`. */
+function groundLengthPx(tiles: number, a: number): number {
+  return Math.hypot(isoX(Math.cos(a), Math.sin(a)), isoY(Math.cos(a), Math.sin(a))) * tiles;
+}
 /** Size of the burst a destroyed vehicle goes up in; units not listed just fall. */
 const VEHICLE_BURST: Record<string, number> = { truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
 const BURST_LIFE = 0.45;
+/** Seconds before a railgun shot that its charge glow starts building. */
+const RAIL_CHARGE = 0.9;
 /** Height in tiles at which rounds arrive (roughly the middle of a vehicle). */
 const HIT_HEIGHT = 0.2;
 /** Closest zoom: one tile this many CSS pixels wide. */
@@ -82,6 +94,7 @@ export class BoardRenderer {
   /** Rendered one-shot animations, when the art has them. */
   private readonly effects: Effects | null;
   private readonly shotOrigins = new Map<number, ShotOrigin>();
+  private readonly shotFxCache = new Map<string, string[]>();
   private overlayKey = '';
   private groundSprite: TilingSprite | null = null;
   private groundDensity: Density = 1;
@@ -285,16 +298,26 @@ export class BoardRenderer {
     entry.view.fire();
     const m = entry.view.muzzle();
     this.shotOrigins.set(projectileId, { dx: m.gx - tower.x, dy: m.gy - tower.y, h: m.heightM / METRES_PER_TILE });
+    // Only what this gun's art asks for: powder guns flash and smoke, engines fire silently.
     const fx = this.effects;
-    if (fx?.has('muzzle_flash')) {
-      // Flame along the barrel as it lies on screen; drawn just over the gun it belongs to.
-      const a = entry.view instanceof SpriteTowerView ? entry.view.aimAngle() : tower.aim;
-      const rotation = Math.atan2((Math.cos(a) + Math.sin(a)) / 2, Math.cos(a) - Math.sin(a));
-      const size = tower.size / 3;
-      const opts = { height: (m.heightM / METRES_PER_TILE) * RISE, zBias: depth(tower.x, tower.y) - depth(m.gx, m.gy) + 0.01 };
-      fx.play('muzzle_flash', m.gx, m.gy, { ...opts, rotation, size: 0.5 + 0.5 * size });
-      fx.play('muzzle_smoke', m.gx, m.gy, { ...opts, zBias: opts.zBias + 0.01, size: 0.6 + 0.6 * size, lift: 10 });
+    const wanted = this.shotFx(tower.def);
+    if (!fx || !wanted.length) return;
+    const a = entry.view instanceof SpriteTowerView ? entry.view.aimAngle() : tower.aim;
+    const size = tower.size / 3;
+    const opts = { height: (m.heightM / METRES_PER_TILE) * RISE, zBias: depth(tower.x, tower.y) - depth(m.gx, m.gy) + 0.01 };
+    // Flame along the barrel as it lies on screen; drawn just over the gun it belongs to.
+    if (wanted.includes('muzzle_flash')) fx.play('muzzle_flash', m.gx, m.gy, { ...opts, rotation: screenAngle(a), size: 0.5 + 0.5 * size });
+    if (wanted.includes('muzzle_smoke')) fx.play('muzzle_smoke', m.gx, m.gy, { ...opts, zBias: opts.zBias + 0.01, size: 0.6 + 0.6 * size, lift: 10 });
+  }
+
+  /** Effects a gun shows when it fires (cached per gun id). */
+  private shotFx(def: string): string[] {
+    let list = this.shotFxCache.get(def);
+    if (!list) {
+      list = shotEffects(this.art?.manifest, def);
+      this.shotFxCache.set(def, list);
     }
+    return list;
   }
 
   onBurst(gx: number, gy: number, radius: number): void {
@@ -315,15 +338,28 @@ export class BoardRenderer {
     this.effects?.play('shell_burst', e.gx, e.gy, { size: VEHICLE_BURST[e.kind], zBias: 0.2 });
   }
 
-  /** A railgun slug: a bright line out to the end of its range. */
-  onRail(x1: number, y1: number, x2: number, y2: number): void {
+  /** A railgun slug: the rendered beam when the art has it, else a bright drawn line out to the end of its range. */
+  onRail(towerId: number, x1: number, y1: number, x2: number, y2: number): void {
+    const tower = this.game.towerById(towerId);
+    const m = this.towerViews.get(towerId)?.view.muzzle();
+    if (tower && m && this.shotFx(tower.def).includes('rail_beam') && this.effects?.has('rail_beam')) {
+      const a = Math.atan2(y2 - y1, x2 - x1);
+      const len = Math.hypot(x2 - m.gx, y2 - m.gy);
+      this.effects.play('rail_beam', m.gx, m.gy, {
+        height: (m.heightM / METRES_PER_TILE) * RISE,
+        rotation: screenAngle(a),
+        lengthPx: groundLengthPx(len, a),
+        zBias: 0.5,
+      });
+      return;
+    }
     this.rails.push({ x1, y1, x2, y2, age: 0 });
   }
 
   // ---- per frame -----------------------------------------------------------
 
   private createTowerView(t: Tower): PixiTowerView {
-    const spec = { tower: t.def, level: t.level + 1, size: t.size };
+    const spec = { tower: t.def, level: t.level + 1, size: t.size, flash: this.shotFx(t.def).includes('muzzle_flash') };
     const view = this.art?.level(t.def, t.level + 1) ? new SpriteTowerView(this.art, spec, METRES_PER_TILE) : new PlaceholderTowerView(spec);
     view.place(t.x, t.y);
     view.setAim(t.aim);
@@ -456,21 +492,57 @@ export class BoardRenderer {
     }
     for (const id of this.shotOrigins.keys()) if (!live.has(id)) this.shotOrigins.delete(id);
 
-    // Greek fire: a flickering tongue of flame from the siphon to its target.
+    // Greek fire: a jet of flame from the siphon to its target (rendered when the art has it).
     for (const t of this.game.towers) {
       if (!t.firing) continue;
       const target = this.game.enemies.find((e) => e.id === t.targetId);
       if (!target) continue;
       const m = this.towerViews.get(t.id)?.view.muzzle();
-      const x0 = isoX(m?.gx ?? t.x, m?.gy ?? t.y);
-      const y0 = isoY(m?.gx ?? t.x, m?.gy ?? t.y, (m?.heightM ?? 1) / METRES_PER_TILE);
+      const mx = m?.gx ?? t.x;
+      const my = m?.gy ?? t.y;
+      const mh = (m?.heightM ?? 1) / METRES_PER_TILE;
+      const heat = Math.min(1, t.heat / 3);
+      if (this.shotFx(t.def).includes('fire_stream')) {
+        const a = Math.atan2(target.y - my, target.x - mx);
+        const len = Math.hypot(target.x - mx, target.y - my);
+        const shown = this.effects?.hold(`flame:${t.id}`, 'fire_stream', mx, my, {
+          height: mh * RISE,
+          rotation: screenAngle(a),
+          lengthPx: groundLengthPx(len, a),
+          size: 0.7 + 0.3 * heat,
+          zBias: 0.4,
+        });
+        if (shown) continue;
+      }
+      const x0 = isoX(mx, my);
+      const y0 = isoY(mx, my, mh);
       const x1 = isoX(target.x, target.y);
       const y1 = isoY(target.x, target.y, HIT_HEIGHT);
       const flicker = 0.75 + 0.25 * Math.sin(this.game.time * 40 + t.id);
-      const heat = Math.min(1, t.heat / 3);
       g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 9 * flicker, color: 0xd9531e, alpha: 0.35 + 0.25 * heat, cap: 'round' });
       g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 4 * flicker, color: 0xffc04a, alpha: 0.8, cap: 'round' });
       g.circle(x1, y1, 6 + 6 * heat * flicker).fill({ color: 0xff8a2a, alpha: 0.5 });
+    }
+
+    // Railgun charge: a glow at the muzzle building up over the last moments before the slug.
+    for (const t of this.game.towers) {
+      if (!t.targetId || !this.shotFx(t.def).includes('rail_charge')) continue;
+      const k = 1 - Math.min(1, t.cooldown / RAIL_CHARGE);
+      if (k <= 0) continue;
+      const m = this.towerViews.get(t.id)?.view.muzzle();
+      if (!m) continue;
+      const h = m.heightM / METRES_PER_TILE;
+      const shown = this.effects?.hold(`charge:${t.id}`, 'rail_charge', m.gx, m.gy, {
+        height: h * RISE,
+        size: 0.4 + 0.6 * k,
+        zBias: depth(t.x, t.y) - depth(m.gx, m.gy) + 0.01,
+      });
+      if (shown) continue;
+      const x = isoX(m.gx, m.gy);
+      const y = isoY(m.gx, m.gy, h);
+      const pulse = 0.85 + 0.15 * Math.sin(this.game.time * 30 + t.id);
+      g.circle(x, y, (3 + 7 * k) * pulse).fill({ color: 0x7fd4ff, alpha: 0.35 * k });
+      g.circle(x, y, (1.5 + 2.5 * k) * pulse).fill({ color: 0xffffff, alpha: 0.6 * k });
     }
 
     // Railgun traces.

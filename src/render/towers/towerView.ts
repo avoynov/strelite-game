@@ -32,4 +32,6 @@ export interface TowerViewSpec {
   level: number;
   /** Footprint side in tiles. */
   size: number;
+  /** A powder gun: its view may flash at the muzzle when it fires. */
+  flash: boolean;
 }

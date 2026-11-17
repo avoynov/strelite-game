@@ -236,8 +236,8 @@ export class SpriteTowerView implements TowerView {
 
   fire(): void {
     this.recoilAge = 0;
-    // The board plays the rendered flash and smoke when the art has them.
-    if (this.art.manifest.effects?.muzzle_flash) return;
+    // Silent engines never flash; the board plays the rendered flash when the art has it.
+    if (!this.spec.flash || this.art.manifest.effects?.muzzle_flash) return;
     this.flashAge = 0;
     const m = this.lv.muzzlePx[this.frame] ?? [0, 0];
     const r = 1.1 * this.art.manifest.pxPerMetre['@1x'] * (this.spec.size / 3);

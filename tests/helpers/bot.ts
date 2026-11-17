@@ -53,7 +53,7 @@ export function spend(g: Game, only?: readonly TowerId[]): void {
     const cost = TOWERS[want].levels[0].cost;
     const upgradable = g.towers
       .map((t) => ({ t, cost: g.upgradeCost(t) }))
-      .filter((u): u is { t: (typeof g.towers)[number]; cost: number } => u.cost !== null)
+      .filter((u): u is { t: (typeof g.towers)[number]; cost: number } => u.cost !== null && g.canRaise(u.t))
       .sort((a, b) => a.cost - b.cost)[0];
     // Alternate: every other purchase is an upgrade when one is affordable.
     if (upgradable && g.money >= upgradable.cost && g.towers.length >= 4 && guard % 2 === 1) {
@@ -79,12 +79,15 @@ export function run(g: Game, seconds: number): void {
 }
 
 /** Play a whole game with the bot; returns per-wave lives for tuning. */
-export function playOut(g: Game, only?: readonly TowerId[]): number[] {
+export function playOut(g: Game, only?: readonly TowerId[], onStep?: () => void): number[] {
   const lives: number[] = [];
   while (g.phase === 'build') {
     spend(g, only);
     g.startWave();
-    for (let i = 0; i < 20000 && g.phase === 'wave'; i++) g.step(TICK);
+    for (let i = 0; i < 20000 && g.phase === 'wave'; i++) {
+      g.step(TICK);
+      onStep?.();
+    }
     lives.push(g.lives);
   }
   return lives;

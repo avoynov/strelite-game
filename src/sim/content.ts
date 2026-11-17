@@ -68,8 +68,6 @@ export interface TowerDef {
   rampTime?: number;
   /** Shells cannot be dropped closer than this, in tiles. */
   minRange?: number;
-  /** First map level on which the gun can be built. */
-  unlockLevel: number;
   /** Level 1 first; always at least one. */
   levels: readonly [TowerLevel, ...TowerLevel[]];
 }
@@ -126,7 +124,6 @@ export const TOWERS = {
     targeting: 'first',
     pierce: 0,
     hitsAir: true,
-    unlockLevel: 1,
     levels: levels({ cost: 40, damage: 6, fireInterval: 0.2, range: 5, projectileSpeed: 22 }),
   },
   /** Scorpion: long-range bolt thrower; hunts drones and fast riders, the bolt goes through two. */
@@ -139,7 +136,6 @@ export const TOWERS = {
     pierce: 0.3,
     hitsAir: true,
     passThrough: 1,
-    unlockLevel: 3,
     levels: levels({ cost: 90, damage: 40, fireInterval: 1.8, range: 7, projectileSpeed: 30 }),
   },
   /** 76 mm field gun: the middle of the range; best against trucks and APCs. */
@@ -152,7 +148,6 @@ export const TOWERS = {
     maxArmor: 10,
     pierce: 0.5,
     hitsAir: false,
-    unlockLevel: 1,
     levels: levels({ cost: 90, damage: 45, fireInterval: 1.3, range: 6, projectileSpeed: 28 }),
   },
   /** 155 mm howitzer: bursts over an area; made for crowds and columns. */
@@ -165,7 +160,6 @@ export const TOWERS = {
     pierce: 0.3,
     hitsAir: false,
     minRange: 2.5,
-    unlockLevel: 2,
     levels: levels({ cost: 170, damage: 170, fireInterval: 4.5, range: 10, projectileSpeed: 7, splash: 1.3 }),
   },
   /** Greek fire siphon: short range; the flame grows hotter the longer it holds one target. */
@@ -179,7 +173,6 @@ export const TOWERS = {
     hitsAir: false,
     rampFrom: 10,
     rampTime: 2,
-    unlockLevel: 5,
     levels: levels({ cost: 160, damage: 70, fireInterval: 0.5, range: 3.5, projectileSpeed: 0 }, 0.25),
   },
   /** Trebuchet: the heaviest blow and the slowest stone; for tanks and fortresses. */
@@ -192,7 +185,6 @@ export const TOWERS = {
     pierce: 0,
     hitsAir: false,
     minRange: 3,
-    unlockLevel: 4,
     levels: levels({ cost: 200, damage: 520, fireInterval: 7.5, range: 12, projectileSpeed: 5, splash: 0.6 }),
   },
   /** Railgun: charges, then a slug through everything on a straight line; ignores armour. */
@@ -204,7 +196,6 @@ export const TOWERS = {
     targeting: 'line',
     pierce: 1,
     hitsAir: false,
-    unlockLevel: 8,
     levels: levels({ cost: 400, damage: 1200, fireInterval: 9, range: 14, projectileSpeed: 0 }),
   },
 } as const satisfies Record<string, TowerDef>;
@@ -228,8 +219,11 @@ export const ENEMY_IDS = Object.keys(ENEMIES) as EnemyId[];
 
 export const ECONOMY = {
   startMoney: 200,
-  /** Extra starting gold per map level above the first: more guns to choose from. */
-  startMoneyPerLevel: 75,
+  /** Extra starting gold per map level above the first, up to `startMoneyLevelCap`. */
+  startMoneyPerLevel: 60,
+  startMoneyLevelCap: 20,
+  /** Share of the gold of the weaker waves before a level's first one given as extra starting gold. */
+  headStart: 1,
   startLives: 20,
   /** Fraction of total invested money returned on sell. */
   sellRefund: 0.7,

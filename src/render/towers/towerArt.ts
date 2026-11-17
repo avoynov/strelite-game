@@ -26,6 +26,12 @@ export interface TowerArtDef {
   name: { bg: string; en: string };
   /** True while the gun is a stand-in for the final roster. */
   placeholder: boolean;
+  /**
+   * What the game shows when the gun fires, by effect name. Powder guns flash
+   * and smoke; torsion and counterweight engines release silently; the siphon
+   * shows its fire stream; the rail cannon its charge, then its beam.
+   */
+  shotEffects?: string[];
   levels: TowerArtLevel[];
 }
 
@@ -58,6 +64,29 @@ export interface EffectArtDef {
   fps: number;
   anchor: [number, number];
   blend: 'add' | 'normal';
+  /** Plays over and over while held (fire stream, rail charge) instead of once. */
+  loop?: boolean;
+  /** Length in metres of a line effect drawn along +x (fire stream, rail beam). */
+  lengthM?: number;
+}
+
+/**
+ * Shot effects per gun when the manifest does not say (guns whose art is not
+ * in yet). Same rule as the art pipeline's SHOT_FX: only powder guns flash.
+ */
+export const DEFAULT_SHOT_EFFECTS: Record<string, string[]> = {
+  crossbow: [],
+  scorpion: [],
+  trebuchet: [],
+  zis3: ['muzzle_flash', 'muzzle_smoke'],
+  howitzer: ['muzzle_flash', 'muzzle_smoke'],
+  greekfire: ['fire_stream'],
+  railgun: ['rail_charge', 'rail_beam'],
+};
+
+/** The effects a gun shows when it fires: the manifest's word first, then the default above. */
+export function shotEffects(manifest: Pick<TowerArtManifest, 'towers'> | null | undefined, tower: string): string[] {
+  return manifest?.towers[tower]?.shotEffects ?? DEFAULT_SHOT_EFFECTS[tower] ?? [];
 }
 
 export interface TowerArtManifest {

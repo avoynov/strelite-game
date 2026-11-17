@@ -36,8 +36,6 @@ interface RosterFields {
   hitsAir?: boolean;
   /** Enemies a bolt passes through after the first. */
   passThrough?: number;
-  /** Map level from which the gun can be built. */
-  unlockLevel?: number;
   projectile: string;
 }
 type ArsenalDef = TowerDef & RosterFields;
@@ -211,7 +209,7 @@ export class Arsenal {
           <span class="ars-num" aria-hidden="true">${pad2(i + 1)}</span>
           <div class="ars-ring" aria-hidden="true"></div>
           <div class="ars-gun" data-def="${id}" data-lv="${lvN}"></div>
-          ${this.cb.isUnlocked && !this.cb.isUnlocked(id) ? `<p class="ars-lock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>${t('arsenal.locked', { n: (def as ArsenalDef).unlockLevel ?? '' })}</p>` : ''}
+          ${this.cb.isUnlocked && !this.cb.isUnlocked(id) ? `<p class="ars-lock"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>${t('arsenal.locked')}</p>` : ''}
         </div>
         <div class="ars-info">
           <ul class="ars-tags">${traits.map((x) => `<li>${x}</li>`).join('')}</ul>

@@ -16,6 +16,10 @@ export interface HudCallbacks {
   /** Start over, on the given map level (default: the current one). */
   restart(level?: number): void;
   openArsenal(): void;
+  openLab(): void;
+  openLevels(): void;
+  /** Gold this battle has put in the research treasury so far. */
+  banked(): number;
 }
 
 const SPEEDS = [1, 2, 3];
@@ -57,6 +61,12 @@ export class Hud {
     });
   }
 
+  /** Start the given map level (from the level list). */
+  restartAt(level: number): void {
+    this.cb.restart(level);
+    this.update();
+  }
+
   setGame(game: Game): void {
     this.game = game;
     this.invalidate();
@@ -80,11 +90,9 @@ export class Hud {
 
   showResult(r: ActionResult): void {
     if (r.ok) return;
-    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
+    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
     if (r.reason === 'locked') {
-      const sel = this.cb.getSelection();
-      const def = sel?.kind === 'place' ? sel.def : this.cb.getArmed();
-      if (def) this.showToast(t('reason.locked', { n: TOWERS[def].unlockLevel }));
+      this.showToast(t('reason.locked'));
       return;
     }
     const k = key[r.reason];
@@ -97,9 +105,10 @@ export class Hud {
     const top = `
       <div class="stat" title="${t('hud.money')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${g.money}</b></div>
       <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
-      <div class="stat wave">${t('hud.level', { n: g.level })} · ${t('hud.wave', { n: g.wave, total: g.totalWaves })}</div>
+      <button class="stat wave" data-action="levels" title="${t('action.levels')}"><span>${t('hud.level', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></button>
       <div class="spacer"></div>
       ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>` : ''}
+      <button class="chip chip-ico" data-action="lab" aria-label="${t('action.lab')}" title="${t('action.lab')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg></button>
       <button class="chip" data-action="speed" aria-label="${t('action.speed')}">${speed}×</button>
       <button class="chip" data-action="lang">${t('lang.switch')}</button>`;
     if (top !== this.lastTop) {
@@ -117,8 +126,11 @@ export class Hud {
       ? `<div class="end-card">
            <h2>${t(g.phase === 'won' ? 'end.won' : 'end.lost')}</h2>
            <p>${t('end.summary', { n: g.phase === 'won' ? g.wave : Math.max(0, g.wave - 1) })}</p>
+           <p class="end-banked"><span class="ico ico-gold" aria-hidden="true"></span>${t('end.banked', { n: this.cb.banked() })}</p>
            ${g.phase === 'won' ? `<button class="btn primary" data-action="next">${t('action.nextLevel', { n: g.level + 1 })}</button>` : ''}
-           <button class="btn${g.phase === 'won' ? '' : ' primary'}" data-action="restart">${t('action.restart')}</button>
+           <button class="btn${g.phase === 'won' ? '' : ' primary'}" data-action="restart">${t(g.phase === 'won' ? 'action.restart' : 'action.retry')}</button>
+           <button class="btn" data-action="lab">${t('action.lab')}</button>
+           <button class="btn" data-action="levels">${t('action.levels')}</button>
          </div>`
       : '';
     if (end !== this.lastEnd) {
@@ -135,14 +147,14 @@ export class Hud {
     let body: string;
 
     if (sel?.kind === 'place') {
-      const lvl: TowerLevel = TOWERS[sel.def].levels[0];
+      const lvl: TowerLevel = g.levelStats(sel.def, 0);
       const ok = g.canBuildAt(sel.def, sel.cx, sel.cy);
       body = `
         <div class="row">
           ${this.iconHtml(sel.def)}
           <div class="info">
             <div class="title">${escapeHtml(t(`tower.${sel.def}`))}</div>
-            ${this.statsHtml(TOWERS[sel.def], lvl)}
+            ${this.statsHtml(g.defOf(sel.def), lvl)}
           </div>
           <div class="actions">
             <button class="btn primary" data-action="build" ${ok && g.money >= lvl.cost ? '' : 'disabled'}>
@@ -162,7 +174,7 @@ export class Hud {
         <div class="row">
           <div class="info">
             <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
-            ${this.statsHtml(TOWERS[tower.def], lvl)}
+            ${this.statsHtml(g.defOf(tower.def), lvl)}
             <div class="stats muted">
               <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
               <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
@@ -172,6 +184,8 @@ export class Hud {
           <div class="actions">
             ${up === null
               ? `<button class="btn" disabled>${t('tower.maxLevel')}</button>`
+              : !g.canRaise(tower)
+              ? `<button class="btn" data-action="lab">${t('tower.levelLocked', { n: tower.level + 2 })}</button>`
               : `<button class="btn primary" data-action="upgrade" ${g.money < up ? 'disabled' : ''}>${t('action.upgrade')}<span class="cost"><span class="ico ico-gold"></span>${up}</span></button>`}
             <button class="btn" data-action="sell">${t('action.sell')}<span class="cost">+${g.sellValue(tower)}</span></button>
           </div>
@@ -271,6 +285,12 @@ export class Hud {
         break;
       case 'arsenal':
         this.cb.openArsenal();
+        break;
+      case 'lab':
+        this.cb.openLab();
+        break;
+      case 'levels':
+        this.cb.openLevels();
         break;
     }
     this.update();

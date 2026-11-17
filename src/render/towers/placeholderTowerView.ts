@@ -60,6 +60,7 @@ export class PlaceholderTowerView implements TowerView {
   }
 
   fire(): void {
+    if (!this.spec.flash) return;
     this.flashAge = 0;
     this.draw();
   }
