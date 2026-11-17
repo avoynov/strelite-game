@@ -21,11 +21,28 @@ export interface ArsenalCallbacks {
   close(def: TowerId): void;
 }
 
+/**
+ * Fields the new roster adds to TowerDef (gameplay thread). Read optionally so the
+ * screen works with both the old and the new content.ts.
+ */
+interface RosterFields {
+  targeting?: string;
+  /** 'armored' ignores enemies above this armor. */
+  maxArmor?: number;
+  /** Share of armor ignored, 0..1, per gun. */
+  pierce?: number;
+  hitsAir?: boolean;
+  /** Enemies a bolt passes through after the first. */
+  passThrough?: number;
+  projectile: string;
+}
+type ArsenalDef = TowerDef & RosterFields;
+
 interface StatSpec {
   key: string;
   label: () => string;
   unit?: () => string;
-  value: (lvl: TowerLevel) => number | undefined;
+  value: (lvl: TowerLevel, def: ArsenalDef) => number | undefined;
   format: (v: number) => string;
   /** sqrt keeps a 12-damage gun visible next to a 400-damage one. */
   curve: 'linear' | 'sqrt';
@@ -39,6 +56,7 @@ const STATS: StatSpec[] = [
   { key: 'dps', label: () => t('stat.dpsLong'), value: (l) => l.damage / l.fireInterval, format: (v) => v.toFixed(1), curve: 'sqrt' },
   { key: 'range', label: () => t('stat.rangeLong'), unit: () => t('unit.tiles'), value: (l) => l.range, format: fmt, curve: 'linear' },
   { key: 'splash', label: () => t('stat.splashLong'), unit: () => t('unit.tiles'), value: (l) => l.splash, format: fmt, curve: 'linear' },
+  { key: 'pierce', label: () => t('stat.pierce'), value: (_, d) => d.pierce, format: (v) => `${Math.round(v * 100)}%`, curve: 'linear' },
 ];
 
 const SEGMENTS = 12;
@@ -68,7 +86,7 @@ export class Arsenal {
   constructor(private readonly cb: ArsenalCallbacks) {
     for (const s of STATS) {
       let m = 0;
-      for (const id of TOWER_IDS) for (const l of (TOWERS[id] as TowerDef).levels) m = Math.max(m, s.value(l) ?? 0);
+      for (const id of TOWER_IDS) for (const l of (TOWERS[id] as TowerDef).levels) m = Math.max(m, s.value(l, TOWERS[id] as ArsenalDef) ?? 0);
       this.max.set(s.key, m);
     }
     this.el = document.createElement('div');
@@ -158,11 +176,11 @@ export class Arsenal {
     const lvl = def.levels[lvN - 1]!;
     const base = def.levels[0]!;
     const role = tMaybe(`tower.${id}.role`);
-    const traits = this.traits(def);
+    const traits = this.traits(def as ArsenalDef);
 
-    const rows = STATS.filter((s) => TOWER_IDS.some((tid) => (TOWERS[tid] as TowerDef).levels.some((l) => s.value(l) !== undefined))).map((s) => {
-      const v = s.value(lvl);
-      const v0 = s.value(base);
+    const rows = STATS.filter((s) => TOWER_IDS.some((tid) => (TOWERS[tid] as TowerDef).levels.some((l) => s.value(l, TOWERS[tid] as ArsenalDef) !== undefined))).map((s) => {
+      const v = s.value(lvl, def as ArsenalDef);
+      const v0 = s.value(base, def as ArsenalDef);
       const max = this.max.get(s.key) || 1;
       const norm = (x: number | undefined) => (x === undefined ? 0 : s.curve === 'sqrt' ? Math.sqrt(x / max) : x / max);
       const on = Math.max(v ? 1 : 0, Math.round(norm(v) * SEGMENTS));
@@ -191,6 +209,7 @@ export class Arsenal {
           <ul class="ars-tags">${traits.map((x) => `<li>${x}</li>`).join('')}</ul>
           <h2 class="ars-name">${t(`tower.${id}`)}</h2>
           ${role ? `<p class="ars-role">${role}</p>` : ''}
+          ${this.targetHtml(def as ArsenalDef)}
           <div class="ars-levels">
             <span class="ars-lv-label">${t('arsenal.level')}</span>
             <div class="ars-lv-group">${lvButtons}</div>
@@ -202,15 +221,23 @@ export class Arsenal {
   }
 
   /** Short tags derived from the definition, so a new gun gets them for free. */
-  private traits(def: TowerDef): string[] {
-    const out = [t(def.projectile === 'shell' ? 'trait.shell' : 'trait.direct')];
+  private traits(def: ArsenalDef): string[] {
+    const out = [tMaybe(`trait.${def.projectile}`) ?? t('trait.direct')];
+    if (def.hitsAir !== undefined) out.push(t(def.hitsAir ? 'trait.air' : 'trait.groundOnly'));
+    if (def.passThrough) out.push(t('trait.passThrough', { n: def.passThrough }));
     const l1 = def.levels[0]!;
     if (l1.splash) out.push(t('trait.splash'));
-    if (l1.fireInterval <= 1.2) out.push(t('trait.fast'));
-    else if (l1.fireInterval >= 3) out.push(t('trait.slow'));
     if (def.minRange) out.push(t('trait.minRange', { n: fmt(def.minRange) }));
     out.push(t('trait.size', { n: def.size }));
     return out;
+  }
+
+  /** Which enemy the gun picks; every gun falls back to the first on the path. */
+  private targetHtml(def: ArsenalDef): string {
+    if (!def.targeting) return '';
+    const text = tMaybe(`target.${def.targeting}`, { n: def.maxArmor ?? '' }) ?? def.targeting;
+    const fallback = def.targeting === 'first' ? '' : `<small>${t('target.fallback')}</small>`;
+    return `<p class="ars-target"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg><span><span class="ars-target-label">${t('target.label')}</span> <b>${text}</b>${fallback}</span></p>`;
   }
 
   /** Draw (or redraw) every gun picture at the current turntable frame. */
