@@ -97,7 +97,7 @@ export class PlaceholderEnemyView implements EnemyView {
     quad(-r, r, half * 0.9, 0.3, kit.body);
     if (this.kind === 'tank') {
       const [tx, ty] = pt(-r * 0.1, 0, 0.42);
-      g.ellipse(tx, ty, isoX(r * 0.45, -r * 0.45), isoX(r * 0.45, -r * 0.45) / 2).fill(kit.dark);
+      g.ellipse(tx, ty, isoX(r * 0.26, -r * 0.26), isoX(r * 0.26, -r * 0.26) / 2).fill(kit.dark);
       const [bx, by] = pt(r * 1.25, 0, 0.42);
       g.moveTo(tx, ty).lineTo(bx, by).stroke({ width: 4, color: kit.dark, cap: 'round' });
     } else {
