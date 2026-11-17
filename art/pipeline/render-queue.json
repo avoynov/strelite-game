@@ -1,14 +1,14 @@
 {
  "note": "Editing this file on a claude/** branch starts the render-art workflow: every tower level, projectile set and enemy below renders in its own GitHub Actions job, then the results are packed into public/art and committed back to the branch.",
  "towers": {
-  "zis3": [
-   1
-  ]
+  "trebuchet": [1, 2, 3, 4, 5],
+  "ballista": [1, 2, 3, 4, 5],
+  "scorpion": [1, 2, 3, 4, 5],
+  "zis3": [1, 2, 3, 4, 5],
+  "howitzer": [1, 2, 3, 4, 5],
+  "greekfire": [1, 2, 3, 4, 5],
+  "railgun": [1, 2, 3, 4, 5]
  },
- "projectiles": [
-  "ballista"
- ],
- "enemies": [
-  "airship"
- ]
+ "projectiles": ["trebuchet", "ballista", "scorpion"],
+ "enemies": ["infantry", "bikers", "truck", "apc", "tank", "airship", "fortress"]
 }
