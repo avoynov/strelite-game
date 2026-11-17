@@ -1,11 +1,12 @@
 """Heavy bolt thrower (bg: „Скорпион“): the long-range sniper of the siege line. One long
 armour-piercing bolt per shot, drawn back slowly by two spoked handwheels. Built a little
-larger than history so it reads at game zoom: two rope skeins in a tall 1.9 m frame, a
-3.6 m stock, on a yoke that turns on a four-legged trestle. Front is local +Y.
+larger than history so it reads at game zoom: four arms in a cross, two from upright
+skeins (left and right) and two from level skeins (up and down), with two bowstrings that
+meet at the claw in the middle, where the bolt sits; a 3.6 m stock on a yoke that turns on
+a tall four-legged trestle. Front is local +Y.
 
-It must never be mistaken for the самострел: four legs instead of a tripod, no hopper,
-a long open stock, wide arms, big handwheels at the back and sighting gear that grows
-with each level.
+It must never be mistaken for the самострел: the cross of four arms and two strings, four
+legs instead of a tripod, no hopper, big handwheels at the back.
 
 Levels (each adds what a sniper would want):
   1  pale rough timber lashed with rope, wooden handwheels; a plain iron-tipped bolt
@@ -16,7 +17,9 @@ Levels (each adds what a sniper would want):
 
 The draw grows stronger with each level, and the machine shows why: handwheels straight
 on the axle (1), a ratchet and pawl (2), a reduction gear (3), worm screws that twist the
-skeins tighter (4), a block and tackle on the winch rope (5).
+skeins tighter (4), a block and tackle on the winch rope (5). The traverse under it changes
+too: a plain pivot (1), an iron index ring with a locking pin (2), a trail wheel on a ground
+rail (3), a worm-driven gear ring (4), a ball race under the yoke (5).
 
 Returns (root, turret). The trestle is static; the turret (yoke and machine) turns.
 
@@ -37,32 +40,34 @@ from .trebuchet import _band, _ball
 
 LEVELS = (1, 2, 3, 4, 5)
 FRAME_M = 9.0
-TARGET_Z = 1.3
+TARGET_Z = 1.9
 SPRITE_FRAME_M = 10.0
-SWEEP_M = 2.6
+SWEEP_M = 2.7
 FOOTPRINT_M = 3.0        # 2x2 tiles of 4 m
-Z = 1.7                  # line of the bolt
-SKEIN_X, FRAME_Y = 0.55, 0.85
+Z = 2.3                  # line of the bolt
+H = Z - 1.7              # how much taller the trestle is than a plain one
+SKEIN_X, FRAME_Y = 0.55, 1.15
+SKEIN_V = 0.78           # level skeins above and below the line of the bolt
 COCK_DEG = 38
-CLAW_Y0 = -1.55
+CLAW_Y0 = -1.45
 TILT = math.radians(4)
 
 STYLE = {
     1: dict(wood="timber_raw", arm="timber_raw", fit="iron_forged", rope="hemp", skein="hemp",
             bolt=None, band_w=0.08, head="iron_forged", shaft="timber_raw", fletch="leather",
-            wheel="timber_raw", arm_l=1.4),
+            wheel="timber_raw", arm_l=1.65, arm_v=1.25),
     2: dict(wood="timber_tarred", arm="timber_tarred", fit="iron_forged", rope="hemp", skein="hemp",
             bolt="iron_forged", band_w=0.09, head="iron_forged", shaft="timber_tarred", fletch="leather",
-            wheel="iron_forged", arm_l=1.4, sight=True),
+            wheel="iron_forged", arm_l=1.65, arm_v=1.25, sight=True),
     3: dict(wood="timber_oak", arm="timber_oak", fit="iron_forged", rope="hemp", skein="hemp",
             bolt="iron_black", band_w=0.12, head="iron_black", shaft="timber_oak", fletch="leather",
-            wheel="iron_black", arm_l=1.75, sight=True, quadrant="bronze_old"),
+            wheel="iron_black", arm_l=2.0, arm_v=1.4, sight=True, quadrant="bronze_old"),
     4: dict(wood="iron_black", arm="iron_black", fit="bronze_old", rope="steel_cable", skein="hemp",
             bolt="bronze_old", band_w=0.1, head="iron_black", shaft="timber_oak", fletch="bronze_old",
-            wheel="bronze_old", arm_l=1.75, sight=True, quadrant="bronze_old", shield="iron_black"),
+            wheel="bronze_old", arm_l=2.0, arm_v=1.4, sight=True, quadrant="bronze_old", shield="iron_black"),
     5: dict(wood="silver_satin", arm="silver_satin", fit="gold_trim", rope="steel_cable",
             skein="steel_cable", bolt="gold_trim", band_w=0.09, head="gold_trim", shaft="silver_satin",
-            fletch="gold_trim", wheel="gold_trim", arm_l=1.75, sight=True, quadrant="gold_trim",
+            fletch="gold_trim", wheel="gold_trim", arm_l=2.0, arm_v=1.4, sight=True, quadrant="gold_trim",
             shield="silver_satin", ornament=True, tackle=True),
 }
 
@@ -124,31 +129,60 @@ def _z(y):
 # -- static trestle -------------------------------------------------------------------------
 def _trestle(k, root, level, s):
     W = s["wood"]
-    _beam(k, root, "column", (0, 0, 0.0), (0, 0, 1.2), (0.26, 0.26), W)
+    top = 1.2 + H
+    _beam(k, root, "column", (0, 0, 0.0), (0, 0, top), (0.28, 0.28), W)
     for i in range(4):
         a = math.radians(45 + 90 * i)
-        foot = Vector((1.15 * math.cos(a), 1.15 * math.sin(a), 0.07))
-        _beam(k, root, "leg", foot, (0, 0, 0.85), (0.14, 0.14), W)
+        foot = Vector((1.25 * math.cos(a), 1.25 * math.sin(a), 0.07))
+        knee = Vector((0, 0, 0.85 + H))
+        _beam(k, root, "leg", foot, knee, (0.15, 0.15), W)
         _beam(k, root, "sill", foot * 0.12, foot + Vector((0, 0, -0.03)), (0.13, 0.11), W)
-        _band(k, root, Vector((0, 0, 0.85)) + (foot - Vector((0, 0, 0.85))) * 0.08,
-              foot - Vector((0, 0, 0.85)), (0.14, 0.14), level, s)
+        _band(k, root, knee + (foot - knee) * 0.08, foot - knee, (0.15, 0.15), level, s)
         if level > 1:
             k.box("foot_shoe", (0.2, 0.2, 0.04), foot + Vector((0, 0, -0.02)), s["fit"], parent=root,
                   bevel=0.004)
     for i in range(4):                                    # a square of braces between the legs
         a0, a1 = math.radians(45 + 90 * i), math.radians(135 + 90 * i)
-        p0 = Vector((0.62 * math.cos(a0), 0.62 * math.sin(a0), 0.45))
-        p1 = Vector((0.62 * math.cos(a1), 0.62 * math.sin(a1), 0.45))
+        p0 = Vector((0.88 * math.cos(a0), 0.88 * math.sin(a0), 0.24))
+        p1 = Vector((0.88 * math.cos(a1), 0.88 * math.sin(a1), 0.24))
         _beam(k, root, "brace", p0, p1, (0.07, 0.07), W)
-    _band(k, root, (0, 0, 1.08), (0, 0, 1), (0.26, 0.26), level, s, width=0.12)
-    k.cylinder("turn_plate", 0.24, 0.05, (0, 0, 1.2), s["fit"] if level > 1 else "iron_forged", segs=24,
+    _band(k, root, (0, 0, top - 0.12), (0, 0, 1), (0.28, 0.28), level, s, width=0.12)
+    k.cylinder("turn_plate", 0.26, 0.05, (0, 0, top), s["fit"] if level > 1 else "iron_forged", segs=24,
                parent=root)
+    # -- the traverse, a new kind per level
+    if level in (2, 3):                                   # index ring: holes for the locking pin
+        k.cylinder("index_ring", 0.46, 0.04, (0, 0, top - 0.06), s["fit"], segs=40, parent=root)
+        for i in range(16):
+            a = 2 * math.pi * i / 16
+            k.cylinder("index_hole", 0.025, 0.01, (0.4 * math.cos(a), 0.4 * math.sin(a), top - 0.02),
+                       "gunmetal", segs=8, parent=root, bevel=False)
+    if level >= 3:                                        # ground rail for the trail wheel
+        R = 2.05
+        k.torus("rail", R, 0.035, (0, 0, 0.07), s["fit"] if level > 3 else "iron_forged", parent=root, segs=96,
+                tube_segs=6)
+        for i in range(24):
+            a = 2 * math.pi * i / 24
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("sleeper", (0.34, 0.1, 0.05), d * R + Vector((0, 0, 0.025)), "timber_oak" if level < 5 else
+                  "timber_oak", rot=(0, 0, a), parent=root, bevel=0.004)
+    if level >= 4:                                        # gear ring for the worm traverse
+        m = s["fit"]
+        k.cylinder("traverse_ring", 0.5, 0.06, (0, 0, top - 0.1), m, segs=48, parent=root)
+        for i in range(36):
+            a = 2 * math.pi * i / 36
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("tooth", (0.05, 0.03, 0.06), d * 0.52 + Vector((0, 0, top - 0.07)), m, rot=(0, 0, a),
+                  parent=root, bevel=False)
+    if level >= 5:                                        # ball race: silver balls under the yoke
+        for i in range(18):
+            a = 2 * math.pi * i / 18
+            _ball(k, root, (0.3 * math.cos(a), 0.3 * math.sin(a), top + 0.08), 0.05, "silver", subdiv=2)
 
 
 def _bolt_rack(k, root, level, s):
     """Spare bolts on the ground: a rope-tied bundle (1) or a small two-trestle rack."""
     from .trebuchet import ground_spot
-    c = ground_spot(2.55, -42)
+    c = ground_spot(2.95, -42)
     rot = Vector((c.x, c.y, 0)).to_track_quat("Y", "Z").to_euler()
     g = k.empty("rack", c, parent=root)
     g.rotation_euler = (0, 0, rot.z + math.pi / 2)
@@ -172,21 +206,57 @@ def _bolt_rack(k, root, level, s):
 # -- turret --------------------------------------------------------------------------------
 def _yoke(k, t, level, s):
     W = s["wood"]
-    k.cylinder("yoke_hub", 0.2, 0.12, (0, 0, 1.24), W, segs=18, parent=t)
+    hz = 1.24 + H
+    k.cylinder("yoke_hub", 0.22, 0.12, (0, 0, hz), W, segs=18, parent=t)
     for sx in (-1, 1):
-        _beam(k, t, "yoke_cheek", (sx * 0.22, -0.05, 1.26), (sx * 0.22, -0.05, Z - 0.12), (0.09, 0.34), W)
+        _beam(k, t, "yoke_cheek", (sx * 0.22, -0.05, hz + 0.02), (sx * 0.22, -0.05, Z - 0.12), (0.09, 0.34), W)
         k.cylinder("trunnion", 0.065, 0.06, (sx * 0.3, -0.05, Z - 0.22), s["fit"] if level > 1 else W, segs=12,
                    rot=(0, math.pi / 2, 0), parent=t)
-    _beam(k, t, "yoke_bar", (-0.26, -0.05, 1.28), (0.26, -0.05, 1.28), (0.12, 0.1), W)
+    _beam(k, t, "yoke_bar", (-0.26, -0.05, hz + 0.04), (0.26, -0.05, hz + 0.04), (0.12, 0.1), W)
+    p0 = Vector((0, -0.15, hz + 0.04))
+    p1 = Vector((0, -1.3, Z - 0.2))
     if level >= 3:                                        # elevation screw
-        k.tube("elev_screw", (0, -0.15, 1.28), (0, -1.3, Z - 0.2), 0.035, s["fit"], parent=t, segs=10)
+        k.tube("elev_screw", p0, p1, 0.035, s["fit"], parent=t, segs=10)
+        d = (p1 - p0).normalized()
         for i in range(9):
-            p = Vector((0, -0.15, 1.28)).lerp(Vector((0, -1.3, Z - 0.2)), 0.1 + i * 0.09)
-            d = Vector((0, -1.15, Z - 1.48)).normalized()
-            k.torus("thread", 0.045, 0.01, p, s["fit"], rot=d.to_track_quat("Z", "Y").to_euler(), parent=t,
-                    segs=12, tube_segs=4)
+            k.torus("thread", 0.045, 0.01, p0.lerp(p1, 0.1 + i * 0.09), s["fit"],
+                    rot=d.to_track_quat("Z", "Y").to_euler(), parent=t, segs=12, tube_segs=4)
     else:
-        _beam(k, t, "elev_prop", (0, -0.1, 1.28), (0, -1.3, Z - 0.2), (0.08, 0.08), W)
+        _beam(k, t, "elev_prop", p0, p1, (0.08, 0.08), W)
+    if level in (2, 3):                                   # the locking pin for the index ring
+        c = Vector((0, -0.4, hz))
+        k.box("pin_bracket", (0.12, 0.2, 0.06), c + Vector((0, 0.12, 0.02)), s["fit"], parent=t, bevel=0.004)
+        k.tube("lock_pin", c + Vector((0, 0, -0.16)), c + Vector((0, 0, 0.18)), 0.022, s["fit"], parent=t, segs=8)
+        k.torus("pin_ring", 0.05, 0.01, c + Vector((0, 0, 0.23)), s["fit"], rot=(math.pi / 2, 0, 0), parent=t,
+                segs=12, tube_segs=4)
+    if level >= 3:                                        # trail wheel under the stock, on the ground rail
+        yw = -2.05
+        wc = Vector((0, yw, 0.18))
+        zst = _z(yw) - 0.25
+        for sx in (-1, 1):
+            _beam(k, t, "trail_leg", (sx * 0.16, yw + 0.05, zst), (sx * 0.1, yw, wc.z), (0.07, 0.07), s["wood"])
+        _beam(k, t, "trail_brace", (0, yw + 0.05, zst - 0.3), (0, -1.1, hz + 0.08), (0.06, 0.06), s["wood"])
+        k.cylinder("trail_wheel", 0.15, 0.08, wc - Vector((0.04, 0, 0)), s["wheel"], segs=20,
+                   rot=(0, math.pi / 2, 0), parent=t)
+        k.tube("trail_axle", (-0.12, yw, wc.z), (0.12, yw, wc.z), 0.025, s["fit"], parent=t, segs=8, bevel=False)
+    if level >= 4:                                        # worm and handwheel on the traverse ring
+        m = s["fit"]
+        wy = -0.6
+        zw = hz - 0.2
+        _beam(k, t, "worm_bracket", (0, -0.15, hz - 0.02), (0, wy, zw + 0.08), (0.08, 0.06), W)
+        k.tube("traverse_worm", (-0.2, wy, zw), (0.38, wy, zw), 0.05, "steel_worn" if level == 4 else "silver",
+               parent=t, segs=10, bevel=False)
+        for i in range(6):
+            k.torus("worm_thread", 0.055, 0.013, (-0.12 + i * 0.05, wy, zw), m, rot=(0.25, math.pi / 2, 0),
+                    parent=t, segs=12, tube_segs=4)
+        hw = Vector((0.42, wy, zw))
+        k.torus("traverse_wheel", 0.17, 0.022, hw, m, rot=(0, math.pi / 2, 0), parent=t, segs=20, tube_segs=5)
+        for i in range(4):
+            a = math.pi / 4 + i * math.pi / 2
+            r = Vector((0, math.cos(a), math.sin(a)))
+            k.beam("tw_spoke", hw + r * 0.03, hw + r * 0.16, (0.02, 0.02), m, parent=t, bevel=False)
+        k.tube("tw_handle", hw + Vector((0, 0, 0.17)), hw + Vector((0.12, 0, 0.17)), 0.016, W, parent=t, segs=6,
+               bevel=False)
 
 
 def _stock(k, t, level, s):
@@ -215,8 +285,24 @@ def _capitulum(k, t, level, s):
     zt, zb = _z(y) + 0.52, _z(y) - 0.44
     for z in (zt, zb):
         _beam(k, t, "frame_beam", (-0.88, y, z), (0.88, y, z), (0.22, 0.14), W)
-    for x in (-0.82, -0.24, 0.24, 0.82):
+    zc = _z(y)
+    for x in (-0.82, 0.82):
         _beam(k, t, "stile", (x, y, zb - 0.07), (x, y, zt + 0.07), (0.12, 0.16), W)
+    for x in (-0.24, 0.24):                               # centre stiles run on to hold the level skeins
+        _beam(k, t, "stile", (x, y, zc - SKEIN_V - 0.2), (x, y, zc + SKEIN_V + 0.2), (0.12, 0.16), W)
+    for sv in (-1, 1):
+        zv = zc + sv * SKEIN_V
+        k.cylinder("skein", 0.12, 0.36, (-0.18, y, zv), s["skein"], segs=16, rot=(0, math.pi / 2, 0), parent=t,
+                   bevel=False)
+        for i in range(3):
+            k.torus("skein_coil", 0.122, 0.012, (-0.1 + i * 0.1, y, zv), s["skein"], rot=(0, math.pi / 2, 0),
+                    parent=t, segs=16, tube_segs=5)
+        for sx in (-1, 1):
+            k.cylinder("washer", 0.15, 0.05, (sx * 0.3 - (0.05 if sx < 0 else 0), y, zv), s["fit"] if level > 1 else W,
+                       segs=20, rot=(0, math.pi / 2, 0), parent=t)
+            _beam(k, t, "washer_lever", (sx * 0.33, y, zv - 0.18), (sx * 0.33, y, zv + 0.18), (0.045, 0.045),
+                  s["fit"] if level > 1 else "iron_forged")
+        _beam(k, t, "cap_beam", (-0.3, y, zv + sv * 0.2), (0.3, y, zv + sv * 0.2), (0.14, 0.16), W)
     for sx in (-1, 1):
         x = sx * SKEIN_X
         k.cylinder("skein", 0.12, zt - zb - 0.06, (x, y, zb + 0.03), s["skein"], segs=16, parent=t, bevel=False)
@@ -277,19 +363,21 @@ def _capitulum(k, t, level, s):
                     k.beam("ray", c + d * 0.12, c + d * (0.22 if i % 2 else 0.28), (0.025, 0.012), "gold_trim",
                            parent=t, bevel=False, section_end=(0.006, 0.01))
     if s.get("ornament"):
-        for x in (-0.82, -0.24, 0.24, 0.82):
+        for x in (-0.82, 0.82):
             _ball(k, t, (x, y, zt + 0.2), 0.075, "gold_trim", subdiv=2)
+        for x in (-0.3, 0.3):
+            _ball(k, t, (x, y, zc + SKEIN_V + 0.36), 0.075, "gold_trim", subdiv=2)
 
 
 def _sights(k, t, level, s):
     if not s.get("sight"):
         return
     fit = s["fit"]
-    y = FRAME_Y
-    zt = _z(y) + 0.52
-    # front sight: a post on the top beam with a ring
-    _beam(k, t, "sight_post", (0, y, zt + 0.07), (0, y, zt + 0.42), (0.04, 0.04), fit)
-    k.torus("sight_ring", 0.06, 0.012, (0, y, zt + 0.48), fit, rot=(math.pi / 2, 0, 0), parent=t, segs=16,
+    y = FRAME_Y + 0.45
+    zt = _z(y) - 0.05
+    # front sight: a post at the nose of the stock with a ring
+    _beam(k, t, "sight_post", (0, y, zt), (0, y, zt + 0.3), (0.04, 0.04), fit)
+    k.torus("sight_ring", 0.06, 0.012, (0, y, zt + 0.36), fit, rot=(math.pi / 2, 0, 0), parent=t, segs=16,
             tube_segs=5)
     if s.get("quadrant"):
         q = s["quadrant"]
@@ -338,6 +426,30 @@ def _tip(sx, sweep_deg, arm_l):
     return Vector((sx * SKEIN_X, FRAME_Y, _z(FRAME_Y))) + _arm_dir(sx, sweep_deg) * arm_l
 
 
+def _vdir(sv, sweep_deg):
+    a = math.radians(sweep_deg)
+    return Vector((0.0, -math.sin(a), sv * math.cos(a)))
+
+
+def _vtip(sv, sweep_deg, arm_v):
+    return Vector((0, FRAME_Y, _z(FRAME_Y) + sv * SKEIN_V)) + _vdir(sv, sweep_deg) * arm_v
+
+
+def _arm_parts(k, t, level, s, a0, d, L):
+    W = s["arm"]
+    parts = [k.beam("arm", a0 + d * 0.05, a0 + d * L, (0.14, 0.2), W, parent=t, bevel=0.01,
+                    section_end=(0.08, 0.1)),
+             k.box("arm_tip", (0.09, 0.09, 0.12), a0 + d * (L - 0.02), s["fit"] if level > 1 else "iron_forged",
+                   parent=t, bevel=0.006)]
+    if level > 1:
+        for f in (0.35, 0.65):
+            parts.append(k.beam("arm_band", a0 + d * (L * f), a0 + d * (L * f + 0.07), (0.15, 0.2), s["fit"],
+                                parent=t, bevel=0.003))
+    if s.get("ornament"):
+        parts.append(_ball(k, t, a0 + d * (L + 0.06), 0.06, "gold_trim", subdiv=2))
+    return parts
+
+
 def _rig(k, t, level, s):
     W, L = s["arm"], s["arm_l"]
     zc = _z(FRAME_Y)
@@ -346,20 +458,16 @@ def _rig(k, t, level, s):
         piv = k.empty(f"arm_pivot_{'L' if sx < 0 else 'R'}", (sx * SKEIN_X, FRAME_Y, zc), parent=t)
         d = _arm_dir(sx, COCK_DEG)
         a0 = Vector((sx * SKEIN_X, FRAME_Y, zc))
-        parts = [k.beam("arm", a0 + d * 0.05, a0 + d * L, (0.14, 0.2), W, parent=t, bevel=0.01,
-                        section_end=(0.08, 0.1)),
-                 k.box("arm_tip", (0.09, 0.09, 0.12), a0 + d * (L - 0.02), s["fit"] if level > 1 else "iron_forged",
-                       parent=t, bevel=0.006)]
-        if level > 1:
-            for f in (0.35, 0.65):
-                parts.append(k.beam("arm_band", a0 + d * (L * f), a0 + d * (L * f + 0.07), (0.15, 0.2), s["fit"],
-                                    parent=t, bevel=0.003))
-        if s.get("ornament"):
-            parts.append(_ball(k, t, a0 + d * (L + 0.06), 0.06, "gold_trim", subdiv=2))
-        for o in parts:
-            if o is not None:
-                _keep_world(o, piv)
+        for o in _arm_parts(k, t, level, s, a0, d, L):
+            _keep_world(o, piv)
         arms[sx] = piv
+    varms = {}
+    for sv in (-1, 1):                                    # the upper and lower arms
+        a0 = Vector((0, FRAME_Y, zc + sv * SKEIN_V))
+        piv = k.empty(f"arm_pivot_{'D' if sv < 0 else 'U'}", a0, parent=t)
+        for o in _arm_parts(k, t, level, s, a0, _vdir(sv, COCK_DEG), s["arm_v"]):
+            _keep_world(o, piv)
+        varms[sv] = piv
     slider = k.empty("slider", (0, 0, 0), parent=t)
     zs = _z(CLAW_Y0) + 0.06
     for o in (k.beam("slider_bar", (0, CLAW_Y0 - 0.45, zs - 0.03), (0, FRAME_Y + 0.45, _z(FRAME_Y + 0.45) + 0.03),
@@ -441,11 +549,14 @@ def _rig(k, t, level, s):
     _bolt(k, t, (0, CLAW_Y0 - 0.02, zs + 0.09), (0, 1, math.tan(TILT)), level, s)
     for o in set(bpy.data.objects) - before:
         _keep_world(o, carrier)
-    strings = []
+    strings, vstrings = [], []
     for sx in (-1, 1):
         o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
         strings.append((sx, o))
+        o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
+        vstrings.append((sx, o))
     _RIG.update(t=t, arms=arms, slider=slider, wheels=axis, carrier=carrier, strings=strings, zs=zs, arm_l=L,
+                varms=varms, vstrings=vstrings, arm_v=s["arm_v"], zc=zc,
                 ropes=ropes,
                 gears=gears)
     set_fire_frame(0)
@@ -460,6 +571,8 @@ def _pose(f):
 def _apply(sweep, slide, hooked, bolt, wheel_deg):
     for sx, piv in _RIG["arms"].items():
         piv.rotation_euler = (0, 0, sx * math.radians(sweep - COCK_DEG) * -1)
+    for sv, piv in _RIG["varms"].items():
+        piv.rotation_euler = (sv * math.radians(sweep - COCK_DEG), 0, 0)
     _RIG["slider"].location = (0, slide, slide * math.tan(TILT))
     _RIG["wheels"].rotation_euler = (math.radians(-wheel_deg), 0, 0)
     for p, ratio in _RIG["gears"]:
@@ -469,6 +582,13 @@ def _apply(sweep, slide, hooked, bolt, wheel_deg):
     for sx, o in _RIG["strings"]:
         tip = _tip(sx, sweep, _RIG["arm_l"])
         end = claw if hooked else Vector((0, tip.y, tip.z))
+        d = end - tip
+        o.location = tip
+        o.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
+        o.scale = (1, 1, max(d.length, 0.01))
+    for sv, o in _RIG["vstrings"]:
+        tip = _vtip(sv, sweep, _RIG["arm_v"])
+        end = claw if hooked else Vector((0, tip.y, _RIG["zc"]))
         d = end - tip
         o.location = tip
         o.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
@@ -486,12 +606,12 @@ def key_fire_animation(scene):
     prefs.keyframe_new_interpolation_type = "LINEAR"
     for f in range(FIRE_FRAMES + 1):
         _apply(*_pose(f))
-        for piv in _RIG["arms"].values():
+        for piv in list(_RIG["arms"].values()) + list(_RIG["varms"].values()):
             piv.keyframe_insert("rotation_euler", frame=f)
         for o, p in ((_RIG["slider"], "location"), (_RIG["wheels"], "rotation_euler"),
                      (_RIG["carrier"], "location")) + tuple((p, "rotation_euler") for p, _ in _RIG["gears"]):
             o.keyframe_insert(p, frame=f)
-        for o in [o for _, o in _RIG["strings"]] + [r[0] for r in _RIG["ropes"]]:
+        for o in [o for _, o in _RIG["strings"] + _RIG["vstrings"]] + [r[0] for r in _RIG["ropes"]]:
             for p in ("location", "rotation_euler", "scale"):
                 o.keyframe_insert(p, frame=f)
     prefs.keyframe_new_interpolation_type = old

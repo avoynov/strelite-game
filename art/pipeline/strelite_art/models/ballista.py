@@ -16,6 +16,9 @@ No level carries a shield: the machine stays light and open. The draw grows stro
 each level, and every level adds a new kind of mechanism to show why: plain cranks (1), a
 ratchet and pawl that hold more tension (2), a reduction gear on the winch (3), a crossbeam
 in front whose extra ropes pull the arms forward (4), steel leaf springs along the arms (5).
+The traverse on the tripod changes too: a plain pivot (1), a tiller bar to push it round (2),
+a toothed ring and a crank (3), a ring of rollers under the yoke (4), a gunner's ring
+walkway on the legs (5).
 
 Returns (root, turret). The tripod is static; the turret (yoke and machine) turns.
 
@@ -162,6 +165,22 @@ def _tripod(k, root, level, s):
     _band(k, root, (0, 0, 0.95), (0, 0, 1), (0.22, 0.22), level, s, width=0.1)
     k.cylinder("turn_plate", 0.2, 0.05, (0, 0, 1.06), s["fit"] if level > 1 else "iron_forged", segs=20,
                parent=root)
+    if level >= 3:                                       # toothed traverse ring on the post
+        m = s["fit"]
+        k.cylinder("traverse_ring", 0.3, 0.05, (0, 0, 0.98), m, segs=40, parent=root)
+        for i in range(28):
+            a = 2 * math.pi * i / 28
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("tooth", (0.045, 0.028, 0.05), d * 0.315 + Vector((0, 0, 1.005)), m, rot=(0, 0, a), parent=root,
+                  bevel=False)
+    if level >= 5:                                       # a ring walkway for the gunner on the legs
+        R = 1.0
+        k.torus("walk_ring", R, 0.04, (0, 0, 0.42), "gold_trim", parent=root, segs=64, tube_segs=6)
+        for i in range(20):
+            a = 2 * math.pi * i / 20
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("walk_board", (0.36, 0.12, 0.04), d * (R - 0.1) + Vector((0, 0, 0.45)), "silver_satin",
+                  rot=(0, 0, a), parent=root, bevel=0.004)
 
 
 # -- turret --------------------------------------------------------------------------------
@@ -173,6 +192,26 @@ def _yoke(k, t, level, s):
         k.cylinder("trunnion", 0.06, 0.06, (sx * 0.27, -0.05, Z - 0.2), s["fit"] if level > 1 else W, segs=12,
                    rot=(0, math.pi / 2, 0), parent=t)
     _beam(k, t, "yoke_bar", (-0.24, -0.05, 1.14), (0.24, -0.05, 1.14), (0.12, 0.1), W)
+    if level >= 2:                                       # tiller bar to push the machine round
+        _beam(k, t, "tiller", (0, -0.15, 1.16), (0.35, -1.25, 1.02), (0.06, 0.06), s["fit"] if level > 3 else W)
+        k.tube("tiller_grip", (0.3, -1.25, 1.02), (0.55, -1.25, 1.02), 0.03, "leather", parent=t, segs=8,
+               bevel=False)
+    if level >= 3:                                       # pinion and crank on the toothed ring
+        m = s["fit"]
+        c = Vector((-0.38, -0.18, 1.0))
+        k.cylinder("traverse_pinion", 0.08, 0.06, c, m, segs=10, parent=t)
+        k.tube("pinion_shaft", c, c + Vector((0, 0, 0.3)), 0.02, m, parent=t, segs=8, bevel=False)
+        k.beam("pinion_crank", c + Vector((0, 0, 0.3)), c + Vector((-0.18, -0.08, 0.3)), (0.035, 0.03), m, parent=t,
+               bevel=False)
+        k.tube("pinion_knob", c + Vector((-0.18, -0.08, 0.3)), c + Vector((-0.18, -0.08, 0.42)), 0.02, W, parent=t,
+               segs=6, bevel=False)
+        _beam(k, t, "pinion_bracket", (-0.15, -0.1, 1.12), c + Vector((0, 0, 0.12)), (0.05, 0.05), m)
+    if level >= 4:                                       # rollers under the yoke
+        for i in range(12):
+            a = 2 * math.pi * i / 12
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.tube("roller", d * 0.08 + Vector((0, 0, 1.1)), d * 0.24 + Vector((0, 0, 1.1)), 0.022,
+                   "bronze_old" if level == 4 else "gold_trim", parent=t, segs=8, bevel=False)
     # prop from the hub to the rear of the stock, setting the elevation
     _beam(k, t, "elev_prop", (0, -0.1, 1.12), (0, -1.15, Z - 0.17), (0.07, 0.07), W)
 
