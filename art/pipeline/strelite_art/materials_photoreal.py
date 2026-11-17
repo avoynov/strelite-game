@@ -105,6 +105,9 @@ SPEC = {
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
     "ember":         ("ember", {}),
+    "arc_glow":      ("arc", {}),
+    "enamel_white":  ("painted", dict(color=(0.82, 0.81, 0.77), rough=0.3, wear=0.5, dust=0.3)),
+    "porcelain":     ("plain", dict(color=(0.86, 0.84, 0.78), rough=0.15, dust=0.3)),
     "clay":          ("plain", dict(color=(0.60, 0.34, 0.20), rough=0.8, dust=0.9)),
     "leather":       ("plain", dict(color=(0.30, 0.18, 0.10), rough=0.62, dust=0.6)),
     "steel_cable":   ("metal", dict(color=(0.70, 0.71, 0.72), rough=0.3, dust=0.2)),
@@ -801,10 +804,20 @@ def _ember(name):
     return mat
 
 
+def _arc(name):
+    """Charged coils and capacitor cores: dark glass with an electric blue glow."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((0.02, 0.04, 0.08, 1), 0.15)
+    bsdf.inputs["Emission Color"].default_value = (0.35, 0.65, 1.0, 1)
+    bsdf.inputs["Emission Strength"].default_value = 16.0
+    return mat
+
+
 _BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood, "timber": _timber,
              "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
              "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
-             "screen": _screen, "ember": _ember}
+             "screen": _screen, "ember": _ember, "arc": _arc}
 
 
 def build(name):
