@@ -13,7 +13,7 @@ export default defineConfig({
       workbox: {
         // The normal-density art ships with the app for offline play; the sharp
         // @2x sheets are fetched and kept only once a player zooms in.
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}', 'art/towers.json', 'art/**/*@1x.{webp,json}'],
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}', 'art/towers.json', 'art/**/*@1x.{webp,json}', 'art/portraits.json', 'art/portraits/*.webp'],
         runtimeCaching: [
           {
             urlPattern: /\/art\/.*@2x\.(webp|json)$/,

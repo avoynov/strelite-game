@@ -46,3 +46,8 @@ export function t(key: MessageKey, params?: Record<string, string | number>): st
   if (!params) return s;
   return s.replace(/\{(\w+)\}/g, (m, k: string) => (k in params ? String(params[k]) : m));
 }
+
+/** Translate a key built at run time, or undefined when no such text exists (e.g. a new gun's blurb). */
+export function tMaybe(key: string, params?: Record<string, string | number>): string | undefined {
+  return key in tables[current] ? t(key as MessageKey, params) : undefined;
+}
