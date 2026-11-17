@@ -40,6 +40,7 @@ NAMES = {
     "trebuchet": {"bg": "Требушет", "en": "Trebuchet"},
     "ballista": {"bg": "Самострел", "en": "Repeating ballista"},
     "scorpion": {"bg": "Скорпион", "en": "Heavy bolt thrower"},
+    "greekfire": {"bg": "Гръцки огън", "en": "Greek fire siphon"},
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
 }
 

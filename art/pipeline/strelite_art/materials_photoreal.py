@@ -104,6 +104,8 @@ SPEC = {
     "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
+    "ember":         ("ember", {}),
+    "clay":          ("plain", dict(color=(0.60, 0.34, 0.20), rough=0.8, dust=0.9)),
     "leather":       ("plain", dict(color=(0.30, 0.18, 0.10), rough=0.62, dust=0.6)),
     "steel_cable":   ("metal", dict(color=(0.70, 0.71, 0.72), rough=0.3, dust=0.2)),
 }
@@ -787,10 +789,22 @@ def _screen(name):
     return mat
 
 
+def _ember(name):
+    """Glowing coals: dark char with an orange glow that varies across the bed."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.coords()
+    hot = g.ramp(g.noise(P, 9, detail=5, rough=0.6), 0.42, 0.68)
+    bsdf = g.finish(g.mix(hot, (0.03, 0.025, 0.02, 1), (0.30, 0.08, 0.02, 1)), 0.8, 0.0)
+    bsdf.inputs["Emission Color"].default_value = (1.0, 0.38, 0.08, 1)
+    g.L.new(g.math("MULTIPLY", hot, 14.0), bsdf.inputs["Emission Strength"])
+    return mat
+
+
 _BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood, "timber": _timber,
              "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
              "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
-             "screen": _screen}
+             "screen": _screen, "ember": _ember}
 
 
 def build(name):
