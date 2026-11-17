@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ECONOMY, ENEMIES, TICK, TOWERS } from '../src/sim/content';
-import { angleDelta, Game } from '../src/sim/game';
+import { angleDelta, Game, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
 import { waveSpec } from '../src/sim/waves';
 import { playOut, run } from './helpers/bot';
@@ -95,8 +95,14 @@ describe('fighting', () => {
     for (const [x, y] of [[2, 3], [5, 3], [8, 3], [10, 3], [4, 7]] as const) expect(g.build('zis3', x, y).ok).toBe(true);
     const moneyBefore = g.money;
     g.startWave();
-    run(g, 90);
+    const events: GameEvent[] = [];
+    for (let i = 0; i < 90 / TICK; i++) {
+      g.step(TICK);
+      events.push(...g.drainEvents());
+    }
     const spec = waveSpec(1).groups[0]!;
+    // Every direct hit is announced as an impact, for the board's hit effect.
+    expect(events.filter((e) => e.type === 'impact').length).toBe(events.filter((e) => e.type === 'hit').length);
     expect(g.lives).toBe(ECONOMY.startLives);
     expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveSpec(1).clearBonus);
     const sum = (k: 'dealt' | 'kills' | 'wasted') => g.towers.reduce((s, t) => s + t.stats[k], 0);

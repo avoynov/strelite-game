@@ -2,8 +2,9 @@ import { Assets, Container, Graphics, Matrix, Text, TilingSprite, type Texture }
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import type { Game, Tower } from '../sim/game';
 import { Camera, type Rect } from './camera';
-import { PlaceholderEnemyView } from './enemyView';
-import { diamond, isoX, isoY, project, TILE_W, unproject } from './iso';
+import { Effects } from './effects';
+import { PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
+import { depth, diamond, isoX, isoY, project, RISE, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
 import { PlaceholderTowerView } from './towers/placeholderTowerView';
@@ -18,6 +19,7 @@ export type Selection =
   | { kind: 'place'; def: TowerId; cx: number; cy: number };
 
 type PixiTowerView = TowerView & { node: Container };
+type PixiEnemyView = EnemyView & { node: Container };
 
 interface FloatText {
   node: Text;
@@ -71,7 +73,9 @@ export class BoardRenderer {
   private floatTexts: FloatText[] = [];
   private bursts: Burst[] = [];
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
-  private readonly enemyViews = new Map<number, PlaceholderEnemyView>();
+  private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
+  /** Rendered one-shot animations, when the art has them. */
+  private readonly effects: Effects | null;
   private readonly shotOrigins = new Map<number, ShotOrigin>();
   private overlayKey = '';
   private groundSprite: TilingSprite | null = null;
@@ -94,10 +98,17 @@ export class BoardRenderer {
     this.root.addChild(this.world, this.floats);
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
+    this.effects = art ? new Effects(art, this.objects, this.artScale()) : null;
+  }
+
+  /** Sprite scale that puts @1x art at real size on the board. */
+  private artScale(): number {
+    return this.art ? spriteScale(TILE_W, METRES_PER_TILE, this.art.manifest.pxPerMetre['@1x']) : 1;
   }
 
   destroy(): void {
     this.offArt?.();
+    this.effects?.destroy();
     this.root.destroy({ children: true });
   }
 
@@ -269,10 +280,33 @@ export class BoardRenderer {
     entry.view.fire();
     const m = entry.view.muzzle();
     this.shotOrigins.set(projectileId, { dx: m.gx - tower.x, dy: m.gy - tower.y, h: m.heightM / METRES_PER_TILE });
+    const fx = this.effects;
+    if (fx?.has('muzzle_flash')) {
+      // Flame along the barrel as it lies on screen; drawn just over the gun it belongs to.
+      const a = entry.view instanceof SpriteTowerView ? entry.view.aimAngle() : tower.aim;
+      const rotation = Math.atan2((Math.cos(a) + Math.sin(a)) / 2, Math.cos(a) - Math.sin(a));
+      const size = tower.size / 3;
+      const opts = { height: (m.heightM / METRES_PER_TILE) * RISE, zBias: depth(tower.x, tower.y) - depth(m.gx, m.gy) + 0.01 };
+      fx.play('muzzle_flash', m.gx, m.gy, { ...opts, rotation, size: 0.5 + 0.5 * size });
+      fx.play('muzzle_smoke', m.gx, m.gy, { ...opts, zBias: opts.zBias + 0.01, size: 0.6 + 0.6 * size, lift: 10 });
+    }
   }
 
   onBurst(gx: number, gy: number, radius: number): void {
-    this.bursts.push({ gx, gy, radius, age: 0 });
+    // The rendered burst is made for a 1.3-tile blast; bigger shells get a bigger cloud.
+    if (this.effects?.has('shell_burst')) this.effects.play('shell_burst', gx, gy, { size: radius / 1.3, zBias: 0.2 });
+    else this.bursts.push({ gx, gy, radius, age: 0 });
+  }
+
+  /** A direct round struck: a small spray of earth and smoke at the target. */
+  onImpact(gx: number, gy: number): void {
+    this.effects?.play('shell_burst', gx, gy, { size: 0.3, zBias: 0.2 });
+  }
+
+  /** A unit was destroyed: vehicles go up in a burst of their own. */
+  onKill(enemyId: number): void {
+    const e = this.enemyViews.get(enemyId);
+    if (e && e.kind !== 'infantry') this.effects?.play('shell_burst', e.gx, e.gy, { size: e.kind === 'tank' ? 0.85 : 0.65, zBias: 0.2 });
   }
 
   // ---- per frame -----------------------------------------------------------
@@ -313,17 +347,21 @@ export class BoardRenderer {
     const seen = new Set<number>();
     for (const e of this.game.enemies) {
       seen.add(e.id);
-      let view = this.enemyViews.get(e.id);
-      if (!view) {
-        view = new PlaceholderEnemyView(e.def, ENEMIES[e.def].radius);
-        this.enemyViews.set(e.id, view);
+      let entry = this.enemyViews.get(e.id);
+      if (!entry) {
+        const def = this.art?.manifest.enemies?.[e.def];
+        const view: PixiEnemyView = this.art && def ? new SpriteEnemyView(this.art, def, e.def, this.artScale(), METRES_PER_TILE) : new PlaceholderEnemyView(e.def, ENEMIES[e.def].radius);
+        entry = { view, kind: e.def, gx: e.x, gy: e.y };
+        this.enemyViews.set(e.id, entry);
         this.objects.addChild(view.node);
       }
-      view.place(e.px + (e.x - e.px) * alpha, e.py + (e.y - e.py) * alpha);
-      view.setHeading(e.heading);
-      view.setHealth(e.hp / e.maxHp);
+      entry.gx = e.px + (e.x - e.px) * alpha;
+      entry.gy = e.py + (e.y - e.py) * alpha;
+      entry.view.place(entry.gx, entry.gy);
+      entry.view.setHeading(e.heading);
+      entry.view.setHealth(e.hp / e.maxHp);
     }
-    for (const [id, view] of this.enemyViews) {
+    for (const [id, { view }] of this.enemyViews) {
       if (seen.has(id)) continue;
       view.destroy();
       this.enemyViews.delete(id);
@@ -430,6 +468,7 @@ export class BoardRenderer {
     this.syncEnemies(alpha);
     this.drawOverlay(selection, armed);
     this.drawShots(alpha, dtSeconds);
+    this.effects?.update(dtSeconds);
 
     // Floating texts rise and fade; they live in screen space so they stay crisp at any zoom.
     this.floatTexts = this.floatTexts.filter((f) => {
