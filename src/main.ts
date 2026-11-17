@@ -9,6 +9,7 @@ import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
 import { buildPathMap, MEADOW } from './sim/maps';
 import { attachGestures } from './ui/gestures';
+import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
@@ -61,8 +62,23 @@ async function start(): Promise<void> {
       armed = null;
       hud.setGame(game);
       relayout();
+      arsenal.open(); // a new level starts with the arsenal again
+    },
+    openArsenal: () => arsenal.open(armed ?? undefined),
+  });
+
+  // Before the level: browse the guns; the one on screen when leaving is armed for placing.
+  const arsenal = new Arsenal({
+    portrait: (def, level, frame) => art?.portrait(def, level, frame),
+    onArt: (fn) => art?.onChange(fn) ?? (() => {}),
+    directions: art?.manifest.directions ?? 32,
+    close: (def) => {
+      armed = def;
+      selection = null;
+      hud.update();
     },
   });
+  document.body.appendChild(arsenal.el);
 
   const relayout = () => {
     hud.update();
@@ -93,10 +109,12 @@ async function start(): Promise<void> {
   onLangChange(() => {
     document.title = t('game.title');
     hud.invalidate();
+    arsenal.invalidate();
     relayout();
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
+  if (!new URLSearchParams(location.search).has('noarsenal')) arsenal.open();
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
