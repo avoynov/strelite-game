@@ -63,6 +63,20 @@ export const bg = {
   'trait.size': 'Заема {n}×{n}',
   'tower.zis3.role': 'Леко и бързо оръдие. Не хаби щети по пехота и камиони.',
   'tower.howitzer.role': 'Бавна и тежка. Снарядът избухва и поразява всичко наоколо: за танкове и тълпи.',
+  'stat.pierce': "Пробив на броня",
+  'trait.beam': "Огнена струя",
+  'trait.rail': "Релсов изстрел",
+  'trait.air': "Сваля въздушни",
+  'trait.groundOnly': "Само наземни",
+  'trait.passThrough': "Пронизва +{n}",
+  'target.label': "Цел:",
+  'target.first': "първият по пътя",
+  'target.airFast': "въздушните, после най-бързият",
+  'target.armored': "най-бронираният (до броня {n})",
+  'target.crowd': "най-гъстата група",
+  'target.strongest': "този с най-много живот",
+  'target.line': "линията с най-много общ живот",
+  'target.fallback': "Иначе първият по пътя; държи целта до край.",
 } as const;
 
 export type MessageKey = keyof typeof bg;
