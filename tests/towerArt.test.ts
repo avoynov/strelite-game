@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { TOWERS } from '../src/sim/content';
+import { METRES_PER_TILE, TOWERS } from '../src/sim/content';
 import { aimFrameName, frameForAim, spriteScale, stickyFrameForAim, type TowerArtManifest } from '../src/render/towers/towerArt';
 
 const ART = fileURLToPath(new URL('../public/art', import.meta.url));
@@ -32,6 +32,15 @@ describe('tower art', () => {
     expect(stickyFrameForAim(-0.55 * step, 32, 0)).toBe(0); // across the 31 -> 0 wrap
     expect(stickyFrameForAim(-0.7 * step, 32, 0)).toBe(31);
     expect(stickyFrameForAim(Math.PI, 32, 3)).toBe(16);
+  });
+
+  // The soil patch may spill a little over the edge of the footprint, the fortifications may not.
+  it.skipIf(!existsSync(join(ART, 'towers.json')))('fits every gun inside the footprint the game gives it', () => {
+    const manifest = JSON.parse(readFileSync(join(ART, 'towers.json'), 'utf8')) as TowerArtManifest;
+    for (const [id, tower] of Object.entries(manifest.towers)) {
+      const size = TOWERS[id as keyof typeof TOWERS]?.size ?? 0;
+      for (const lv of tower.levels) expect(lv.footprintRadiusM, `${id} L${lv.level}`).toBeLessThanOrEqual((size * METRES_PER_TILE) / 2 + 1);
+    }
   });
 
   // The art arrives level by level, so check whatever the manifest lists so far.
