@@ -208,8 +208,11 @@ def render_enemy(model, a):
     materials.clear_cache()
     frame_m = a.frame or model.SPRITE_FRAME_M
     size = int(round(frame_m * a.ppm / 2)) * 2
-    scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m, ground="patch",
+    flying = getattr(model, "FLYING", False)        # no ground shadow: the game draws one
+    scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m,
+                              ground="none" if flying else "patch",
                               target_z=0.0, projection="ortho", catcher_hole=0.0)
+    scene.render.film_transparent = True
     scene.cycles.seed = 1
     scene.render.use_persistent_data = True
     root, _ = model.build("photoreal", 1)
@@ -228,7 +231,8 @@ def render_enemy(model, a):
         bpy.ops.render.render(write_still=True)
         print(f"[render] enemy {a.model} dir_{i:02d}: {time.time() - t:.1f}s", flush=True)
     meta = {"model": a.model, "dirs": a.dirs, "pxPerMetre": a.ppm, "frame": [size, size],
-            "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M}
+            "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M,
+            "flying": flying, "flightHeightM": getattr(model, "FLIGHT_HEIGHT_M", None)}
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
 

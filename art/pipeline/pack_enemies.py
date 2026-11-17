@@ -19,6 +19,10 @@ NAMES = {
     "infantry": {"bg": "Пехота", "en": "Infantry"},
     "truck": {"bg": "Камион", "en": "Truck"},
     "tank": {"bg": "Танк", "en": "Tank"},
+    "bikers": {"bg": "Мотоциклисти", "en": "Motorcycle raiders"},
+    "drone": {"bg": "Дрон", "en": "Drone"},
+    "apc": {"bg": "БТР", "en": "Armoured personnel carrier"},
+    "fortress": {"bg": "Крепост", "en": "Land fortress"},
 }
 
 
@@ -60,6 +64,9 @@ def pack_model(src, dst, model):
         "directions": n,
         "lengthM": meta["lengthM"],
         "radiusM": meta["radiusM"],
+        **({"flying": True, "flightHeightM": meta.get("flightHeightM"),
+            "shadow": "no shadow in the sprite: draw a dark ellipse on the ground below it"}
+           if meta.get("flying") else {}),
     }
 
 
