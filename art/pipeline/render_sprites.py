@@ -51,10 +51,15 @@ def main(argv=None):
                     help="patch mode: metres across the render (default: the model's SPRITE_FRAME_M)")
     ap.add_argument("--lens", type=float, default=stage.PHOTO_LENS_MM, help="photoreal lens, mm")
     ap.add_argument("--tag", default="", help="suffix for the output file name")
+    ap.add_argument("--enemy", action="store_true",
+                    help="moving unit: the whole model turns; writes <out>/enemies/<model>/dir_NN.png")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "out"))
     a = ap.parse_args(argv)
 
     model = importlib.import_module(f"strelite_art.models.{a.model}")
+    if a.enemy:
+        render_enemy(model, a)
+        return
     if a.style == "photoreal" and a.ground == "patch":
         for level in a.levels:
             render_tower_layers(model, a, level)
@@ -148,6 +153,38 @@ def render_tower_layers(model, a, level):
         "sweepRadiusM": getattr(model, "SWEEP_M", None),
         "aims": aims,
     }
+    with open(os.path.join(out_dir, "meta.json"), "w") as f:
+        json.dump(meta, f, indent=1)
+
+
+def render_enemy(model, a):
+    """A moving unit in `--dirs` headings: dir_NN.png faces game angle NN * 2*pi/dirs
+    (atan2(dy, dx) in grid cells, 0 = screen lower-right), shadow kept in alpha."""
+    from strelite_art import materials_photoreal
+    materials.clear_cache()
+    frame_m = a.frame or model.SPRITE_FRAME_M
+    size = int(round(frame_m * a.ppm / 2)) * 2
+    scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m, ground="patch",
+                              target_z=0.0, projection="ortho", catcher_hole=0.0)
+    scene.cycles.seed = 1
+    scene.render.use_persistent_data = True
+    root, _ = model.build("photoreal", 1)
+    materials_photoreal.stamp(scene)
+    out_dir = os.path.join(a.out, "enemies", a.model)
+    os.makedirs(out_dir, exist_ok=True)
+    for i in range(a.dirs):
+        if a.only_dir is not None and i not in a.only_dir:
+            continue
+        heading = 2 * math.pi * i / a.dirs
+        root.rotation_euler = (0, 0, -heading - math.pi / 2)
+        scene.render.filepath = os.path.join(out_dir, f"dir_{i:02d}.png")
+        if a.resume and os.path.exists(scene.render.filepath) and os.path.getsize(scene.render.filepath) > 0:
+            continue
+        t = time.time()
+        bpy.ops.render.render(write_still=True)
+        print(f"[render] enemy {a.model} dir_{i:02d}: {time.time() - t:.1f}s", flush=True)
+    meta = {"model": a.model, "dirs": a.dirs, "pxPerMetre": a.ppm, "frame": [size, size],
+            "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M}
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
 
