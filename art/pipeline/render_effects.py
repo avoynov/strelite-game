@@ -205,7 +205,7 @@ def write(dst, name, frames, anchor, blend):
             if scale != 1.0:
                 h, w = pm.shape[:2]
                 size = (int(w * scale), int(h * scale))
-                chans = [np.asarray(Image.fromarray(pm[..., c], "F").resize(size, Image.LANCZOS)) for c in range(4)]
+                chans = [np.asarray(Image.fromarray(np.ascontiguousarray(pm[..., c], dtype=np.float32), "F").resize(size, Image.LANCZOS)) for c in range(4)]
                 pm = np.clip(np.nan_to_num(np.stack(chans, -1)), 0, 1)
                 pm[..., :3] = np.minimum(pm[..., :3], pm[..., 3:4])
             fr.append(pm)

@@ -37,6 +37,29 @@ export interface GroundArtDef {
   metres: number;
 }
 
+/** A moving unit rendered in `directions` headings, frames `${frames}_NN`. */
+export interface EnemyArtDef {
+  name: { bg: string; en: string };
+  placeholder: boolean;
+  /** Spritesheet path without the "@1x.json" / "@2x.json" suffix. */
+  sheet: string;
+  /** Frame prefix: frame `${frames}_NN` faces angle NN * 2π / directions. */
+  frames: string;
+  directions: number;
+  lengthM: number;
+  radiusM: number;
+}
+
+/** A short animation: frames `${frames}_00` … played once at `fps`. */
+export interface EffectArtDef {
+  sheet: string;
+  frames: string;
+  count: number;
+  fps: number;
+  anchor: [number, number];
+  blend: 'add' | 'normal';
+}
+
 export interface TowerArtManifest {
   version: number;
   /** Pixels per metre along screen x; along screen y the ground is squashed to half. */
@@ -47,6 +70,13 @@ export interface TowerArtManifest {
   towers: Record<string, TowerArtDef>;
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
+  enemies?: Record<string, EnemyArtDef>;
+  effects?: Record<string, EffectArtDef>;
+}
+
+/** Frame name `${prefix}_NN`. */
+export function frameName(prefix: string, n: number): string {
+  return `${prefix}_${String(n).padStart(2, '0')}`;
 }
 
 /**

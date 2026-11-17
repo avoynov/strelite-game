@@ -58,7 +58,12 @@ export class TowerArt {
 
   /** Start loading a level's sheet at a density; resolves when it can be drawn. */
   request(lv: TowerArtLevel, density: Density = this.density): Promise<void> {
-    const key = `${lv.sheet}@${density}x`;
+    return this.requestSheet(lv.sheet, density);
+  }
+
+  /** Start loading any sheet (towers, enemies, effects) at a density. */
+  requestSheet(sheet: string, density: Density = this.density): Promise<void> {
+    const key = `${sheet}@${density}x`;
     let p = this.loading.get(key);
     if (!p) {
       // Both densities use the same frame names, so each gets its own cache prefix.
@@ -67,18 +72,20 @@ export class TowerArt {
           this.sheets.set(key, sheet);
           this.listeners.forEach((fn) => fn());
         })
-        .catch((err: unknown) => console.warn(`tower art ${key} failed to load`, err));
+        .catch((err: unknown) => console.warn(`art ${key} failed to load`, err));
       this.loading.set(key, p);
     }
     return p;
   }
 
-  /** Load the first level of every tower, so the first build shows at once. */
+  /** Load the first level of every tower, the enemies and the effects, so they show at once. */
   async preload(): Promise<void> {
-    await Promise.all(Object.keys(this.manifest.towers).map((id) => {
-      const lv = this.level(id, 1);
-      return lv ? this.request(lv) : undefined;
-    }));
+    const sheets = [
+      ...Object.keys(this.manifest.towers).map((id) => this.level(id, 1)?.sheet),
+      ...Object.values(this.manifest.enemies ?? {}).map((e) => e.sheet),
+      ...Object.values(this.manifest.effects ?? {}).map((e) => e.sheet),
+    ];
+    await Promise.all(sheets.map((s) => (s ? this.requestSheet(s) : undefined)));
   }
 
   /**
@@ -100,8 +107,15 @@ export class TowerArt {
 
   /** A frame at the wanted density if loaded, else at the other one, else undefined. */
   texture(lv: TowerArtLevel, frame: string): Texture | undefined {
+    return this.sheetTexture(lv.sheet, frame);
+  }
+
+  /** Like texture(), for any sheet; also starts loading the wanted density. */
+  sheetTexture(sheet: string, frame: string): Texture | undefined {
     const other: Density = this.density === 1 ? 2 : 1;
-    return this.sheets.get(`${lv.sheet}@${this.density}x`)?.textures[frame] ?? this.sheets.get(`${lv.sheet}@${other}x`)?.textures[frame];
+    const want = this.sheets.get(`${sheet}@${this.density}x`);
+    if (!want) void this.requestSheet(sheet);
+    return want?.textures[frame] ?? this.sheets.get(`${sheet}@${other}x`)?.textures[frame];
   }
 }
 
@@ -167,8 +181,10 @@ export class SpriteTowerView implements TowerView {
   }
 
   fire(): void {
-    this.flashAge = 0;
     this.recoilAge = 0;
+    // The board plays the rendered flash and smoke when the art has them.
+    if (this.art.manifest.effects?.muzzle_flash) return;
+    this.flashAge = 0;
     const m = this.lv.muzzlePx[this.frame] ?? [0, 0];
     const r = 1.1 * this.art.manifest.pxPerMetre['@1x'] * (this.spec.size / 3);
     this.flash.clear();
@@ -196,6 +212,11 @@ export class SpriteTowerView implements TowerView {
       const d = (-RECOIL_M * kick * this.art.manifest.pxPerMetre['@1x']) / Math.SQRT2;
       this.gun.position.set((Math.cos(a) - Math.sin(a)) * d, ((Math.cos(a) + Math.sin(a)) * d) / 2);
     }
+  }
+
+  /** Barrel direction of the current aim frame, in radians (same convention as setAim). */
+  aimAngle(): number {
+    return (this.frame * 2 * Math.PI) / this.art.manifest.directions;
   }
 
   muzzle(): { gx: number; gy: number; heightM: number } {

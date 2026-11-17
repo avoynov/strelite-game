@@ -116,7 +116,11 @@ async function start(): Promise<void> {
     for (const ev of game.drainEvents()) {
       if (ev.type === 'shot') board.onShot(ev.towerId, ev.projectileId);
       else if (ev.type === 'burst') board.onBurst(ev.x, ev.y, ev.radius);
-      else if (ev.type === 'kill') board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+      else if (ev.type === 'impact') board.onImpact(ev.x, ev.y);
+      else if (ev.type === 'kill') {
+        board.onKill(ev.enemyId);
+        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+      }
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;

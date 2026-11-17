@@ -80,6 +80,8 @@ export type GameEvent =
   | { type: 'shot'; towerId: number; projectileId: number }
   | { type: 'hit'; enemyId: number; dealt: number; overkill: number; x: number; y: number }
   | { type: 'burst'; x: number; y: number; radius: number }
+  /** A direct round struck its target. */
+  | { type: 'impact'; x: number; y: number }
   | { type: 'fizzle'; projectileId: number; x: number; y: number }
   | { type: 'kill'; enemyId: number; reward: number; x: number; y: number }
   | { type: 'leak'; enemyId: number }
@@ -476,6 +478,7 @@ export class Game {
       }
       if (p.kind === 'direct') {
         const target = this.enemies.find((e) => e.id === p.targetId)!;
+        this.events.push({ type: 'impact', x: target.x, y: target.y });
         if (tower) tower.stats.wasted += this.damageEnemy(target, p.damage, tower);
       } else {
         this.events.push({ type: 'burst', x: p.tx, y: p.ty, radius: p.splash });
