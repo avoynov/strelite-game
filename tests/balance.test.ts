@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
 import { Game } from '../src/sim/game';
-import { levelMap } from '../src/sim/levels';
-import { buildPathMap } from '../src/sim/maps';
+import { levelArcMap, levelMap } from '../src/sim/levels';
+import { buildArcMap, buildPathMap } from '../src/sim/maps';
 import { battleTakings, RESEARCH, upgrades } from '../src/sim/research';
 import { playOut } from './helpers/bot';
 
@@ -25,8 +25,9 @@ export const STAGES: string[][] = [
 ];
 const FULL = STAGES.length - 1;
 const upTo = (k: number) => STAGES.slice(0, k + 1).flat();
-const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][]) => {
-  const g = new Game(buildPathMap(levelMap(level)), { level, upgrades: upgrades(upTo(stage), TOWER_IDS) });
+const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][], arc = false) => {
+  const map = arc ? buildArcMap(levelArcMap(level)) : buildPathMap(levelMap(level));
+  const g = new Game(map, { level, upgrades: upgrades(upTo(stage), TOWER_IDS) });
   playOut(g, only);
   return g;
 };
@@ -78,5 +79,26 @@ describe('balance', () => {
 
   it('no single gun wins map level 20 alone, even fully researched', () => {
     for (const id of TOWER_IDS) expect(play(20, FULL, [id]).phase, `${id} alone`).toBe('lost');
+  });
+});
+
+/** Arc mode: the same ladder; the widening arc asks for a little more of the tree. */
+const ARC_NEEDS: [level: number, stage: number][] = [
+  [1, 1],
+  [5, 6],
+  [12, 6],
+];
+
+describe('balance in arc mode', () => {
+  it('a new player loses map level 1 in arc mode too', () => {
+    expect(play(1, 0, undefined, true).phase).toBe('lost');
+  });
+
+  it.each(ARC_NEEDS)('arc map level %i is won with research stage %i', (level, stage) => {
+    expect(play(level, stage, undefined, true).phase).toBe('won');
+  });
+
+  it.each(ARC_NEEDS.filter(([, stage]) => stage >= 2))('arc map level %i is lost two stages short of %i', (level, stage) => {
+    expect(play(level, stage - 2, undefined, true).phase).toBe('lost');
   });
 });

@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import type { Mode } from '../sim/maps';
 import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
 
 /**
@@ -9,8 +10,10 @@ import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
 export interface LevelsCallbacks {
   /** Highest map level won (0 for none). */
   won(): number;
-  /** The level being played now. */
+  /** The level being played now, or 0 when it is in the other mode. */
   current(): number;
+  mode(): Mode;
+  setMode(mode: Mode): void;
   play(level: number): void;
   close(): void;
 }
@@ -31,6 +34,13 @@ export class LevelSelect {
       if (!btn || btn.disabled) return;
       if (btn.dataset.lv === 'close') {
         this.close();
+        return;
+      }
+      if (btn.dataset.lv === 'mode-path' || btn.dataset.lv === 'mode-arc') {
+        this.cb.setMode(btn.dataset.lv === 'mode-arc' ? 'arc' : 'path');
+        this.page = levelPages(this.cb.won()) - 1;
+        this.render();
+        this.el.querySelector('.lv.next')?.scrollIntoView({ block: 'center' });
         return;
       }
       if (btn.dataset.lv === 'prev' || btn.dataset.lv === 'next') {
@@ -92,6 +102,9 @@ export class LevelSelect {
           <h1 class="lab-title">${t('levels.title')}</h1>
         </div>
       </header>
+      <div class="lv-modes" role="tablist">
+        ${(['path', 'arc'] as const).map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
+      </div>
       ${pages > 1
         ? `<nav class="lv-pages">
             <button class="chip" data-lv="prev" ${this.page === 0 ? 'disabled' : ''} aria-label="${t('levels.prev')}">‹</button>
