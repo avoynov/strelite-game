@@ -285,7 +285,7 @@ def main():
         "projection": "2:1 dimetric, orthographic, camera elevation 30 deg: one ground metre is "
                       "pxPerMetre wide along screen x and half of that along screen y",
         "pxPerMetre": {"@1x": ppm1, "@2x": ppm1 * 2},
-        "suggestedMetresPerTile": 12,
+        "suggestedMetresPerTile": 4,
         "directions": dirs,
         "aimZero": "frame 0 aims along grid +x (screen lower-right); frames advance with "
                    "atan2(dy, dx) in grid cells, i.e. clockwise on screen",

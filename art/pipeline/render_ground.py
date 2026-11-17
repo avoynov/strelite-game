@@ -7,8 +7,9 @@ directions. The render covers a little more than one tile; the overlap is
 cross-faded along an irregular line, which hides the seam in soil and grass.
 
 Usage:
-    python3 render_ground.py --metres 64 --ppm 32 --samples 32 --dst ../../public/art
-Output: <dst>/ground/field@2x.webp, field@1x.webp and an entry in <dst>/towers.json
+    python3 render_ground.py                              # the field, 64 m
+    python3 render_ground.py --kind road --metres 32      # packed earth for the road
+Output: <dst>/ground/<name>@2x.webp, <name>@1x.webp and an entry in <dst>/towers.json
 """
 import argparse
 import json
@@ -27,7 +28,7 @@ def render(a, path):
     import bpy
 
     from strelite_art import scene as stage
-    from strelite_art.terrain import Field
+    from strelite_art.terrain import Field, Road
     width_m = a.metres + a.overlap
     w = int(round(width_m * a.ppm))
     scene = stage.build_stage("photoreal", w, a.samples, frame_m=width_m, ground="none",
@@ -35,8 +36,11 @@ def render(a, path):
     scene.render.resolution_x, scene.render.resolution_y = w, w // 2
     scene.render.film_transparent = False
     t = time.time()
-    Field(width_m * math.sqrt(2) + 4.0, seed=a.seed, grass=a.grass,
-          patchiness=a.patchiness).build(scene)
+    size = width_m * math.sqrt(2) + 4.0
+    if a.kind == "road":
+        Road(size, seed=a.seed).build(scene)
+    else:
+        Field(size, seed=a.seed, grass=a.grass, patchiness=a.patchiness).build(scene)
     print(f"[ground] terrain built in {time.time() - t:.0f}s", flush=True)
     scene.render.filepath = path
     t = time.time()
@@ -78,14 +82,17 @@ def main():
     ap.add_argument("--ppm", type=float, default=32.0)
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--seed", type=int, default=31)
-    ap.add_argument("--grass", type=float, default=0.6, help="0 bare soil .. 1 meadow")
-    ap.add_argument("--patchiness", type=float, default=1.3,
+    ap.add_argument("--kind", choices=["field", "road"], default="field")
+    ap.add_argument("--grass", type=float, default=0.85, help="0 bare soil .. 1 meadow")
+    ap.add_argument("--patchiness", type=float, default=0.4,
                     help="edge hardness between turf and bare soil; lower is calmer")
-    ap.add_argument("--name", default="field")
-    ap.add_argument("--raw", default=os.path.join(here, "..", "out", "ground_raw.png"))
+    ap.add_argument("--name", default=None, help="file and manifest name (default: --kind)")
+    ap.add_argument("--raw", default=None)
     ap.add_argument("--dst", default=os.path.join(here, "..", "..", "public", "art"))
     ap.add_argument("--reuse", action="store_true", help="skip the render, reuse --raw")
     a = ap.parse_args()
+    a.name = a.name or a.kind
+    a.raw = a.raw or os.path.join(here, "..", "out", f"ground_{a.name}_raw.png")
     if not a.reuse:
         os.makedirs(os.path.dirname(a.raw), exist_ok=True)
         render(a, a.raw)
