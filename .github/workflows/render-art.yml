@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           F=frag/files
           mkdir -p "$F"
-          git ls-files -mo --exclude-standard public/art | grep -v '^public/art/towers.json$' | while read -r p; do
+          git ls-files -mo --exclude-standard public/art | { grep -v '^public/art/towers.json$' || true; } | while read -r p; do
             mkdir -p "$F/$(dirname "${p#public/art/}")"; cp "$p" "$F/${p#public/art/}"; done
           cp public/art/towers.json frag/towers.json
           printf '{"kind":"%s","model":"%s","level":%s}' "${{ matrix.kind }}" "${{ matrix.model }}" \
