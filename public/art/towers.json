@@ -6,7 +6,7 @@
   "@1x": 16.0,
   "@2x": 32.0
  },
- "suggestedMetresPerTile": 12,
+ "suggestedMetresPerTile": 4,
  "directions": 32,
  "aimZero": "frame 0 aims along grid +x (screen lower-right); frames advance with atan2(dy, dx) in grid cells, i.e. clockwise on screen",
  "frameForAim": "Math.round(aim / (2 * Math.PI / directions)) mod directions",
@@ -933,7 +933,7 @@
      "sheet": "towers/zis3_L1",
      "base": "zis3_L1_base",
      "aim": "zis3_L1_aim",
-     "footprintRadiusM": 4.8,
+     "footprintRadiusM": 4.0,
      "sweepRadiusM": 2.8,
      "muzzlePx": [
       [
@@ -1233,7 +1233,7 @@
      "sheet": "towers/zis3_L2",
      "base": "zis3_L2_base",
      "aim": "zis3_L2_aim",
-     "footprintRadiusM": 4.8,
+     "footprintRadiusM": 4.0,
      "sweepRadiusM": 2.8,
      "muzzlePx": [
       [
@@ -1533,7 +1533,7 @@
      "sheet": "towers/zis3_L3",
      "base": "zis3_L3_base",
      "aim": "zis3_L3_aim",
-     "footprintRadiusM": 4.8,
+     "footprintRadiusM": 4.0,
      "sweepRadiusM": 2.8,
      "muzzlePx": [
       [

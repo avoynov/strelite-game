@@ -29,7 +29,8 @@ TARGET_Z = 0.7
 SPRITE_FRAME_M = 14.0   # game sprites: metres across the render
 GUN_SHIFT = 1.0         # the gun sits this far forward of the rotation centre
 SWEEP_M = 2.8           # ground-level parts (spades) turn inside this radius
-FOOTPRINT_M = 4.8       # all static art stays inside this radius
+FOOTPRINT_M = 4.0       # all static art stays inside this radius (2x2 tiles of 4 m)
+AMMO_DEG = (-140, -72)  # sector of the ammunition point, toward the camera
 WALL_IN = 2.95          # inner face of the breastwork / the pit wall
 PIT_DEPTH = 0.55
 ELEVATION_DEG = 12.0
@@ -55,10 +56,10 @@ def build(style, level=1):
 
 def ground(level):
     from ..terrain import Patch
-    patch = Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.8,
-                  r_bare={1: SWEEP_M + 0.5, 2: 3.9, 3: 4.5}[level], seed=23)
+    patch = Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.7,
+                  r_bare={1: SWEEP_M + 0.4, 2: 3.5, 3: 3.75}[level], seed=23, ragged=0.5)
     if level >= 3:
-        patch.pit(WALL_IN + 0.07, PIT_DEPTH, bank=0.3, bank_width=1.2)
+        patch.pit(WALL_IN + 0.07, PIT_DEPTH, bank=0.24, bank_width=0.75, gap=AMMO_DEG)
     return patch
 
 
@@ -292,8 +293,9 @@ def _props(k, root, level):
     """Static kit. The ammunition point is on the sunny side toward the camera."""
     crate76 = dict(size=(0.38, 0.86, 0.26), text="76 ОФ  5 БР.", mat="wood", batten="wood",
                    decal_name="decal_crate76")
-    r0 = {1: 3.7, 2: 3.85, 3: 4.42}[level]
-    stacks = [(-116, 1), (-101, 1)] if level == 1 else [(-128, 3), (-114, 3), (-100, 2), (-87, 2)]
+    r0 = 3.5                        # crates stand between the gun's sweep and the footprint edge
+    gz = ground(level).height if level >= 3 else (lambda x, y: 0.0)     # the pit's spoil bank
+    stacks = [(-116, 1), (-100, 1)] if level == 1 else [(-130, 3), (-114.5, 3), (-99, 2), (-83.5, 2)]
     for i, (deg, high) in enumerate(stacks):
         for j in range(high):
             p = pol(r0 + 0.02 * (j % 2), deg + (1.0 if j % 2 else 0), 0.26 * j)
@@ -307,30 +309,34 @@ def _props(k, root, level):
     for i, dd in enumerate((-9.5, -7.5)):
         _round76(k, root, pol(r0 + 0.06 * i, deg0 + dd), (math.pi / 2, 0, i * 1.1))
     # spent cases thrown clear to the far left
-    rh = {1: 3.6, 2: 3.9, 3: 4.5}[level]
+    rh = {1: 3.4, 2: 3.66, 3: 3.5}[level]
     heap = [(0.0, 172, 25, 0.0), (0.22, 177, -18, 0.0), (0.05, 183, 60, 0.0), (0.3, 168, 5, 0.0),
             (0.16, 188, -40, 0.0)]
     if level >= 2:
         heap += [(0.1, 193, 15, 0.0), (0.28, 181, 80, 0.0), (0.02, 164, -10, 0.0), (0.12, 176, 40, 0.2)]
     for i, (dr, deg, skew, roll) in enumerate(heap):
-        _spent_case(k, root, pol(rh + dr, deg, 0.05 + (0.08 if roll else 0.0)), math.radians(deg + skew), roll)
+        c = pol(rh + dr * 0.7, deg)
+        c.z = gz(c.x, c.y) + 0.05 + (0.08 if roll else 0.0)
+        _spent_case(k, root, c, math.radians(deg + skew), roll)
     # entrenching shovel stuck in the ground, bucket
-    a = pol(r0 + 0.35, -136)
+    a = pol(r0 + 0.28, -139)
     k.tube("shovel_shaft", a + Vector((0, 0, 0.12)), a + Vector((0.08, 0.05, 1.05)), 0.018, "wood",
            parent=root, segs=10)
     k.box("shovel_blade", (0.19, 0.012, 0.26), a + Vector((0, 0, 0.1)), "steel_worn",
           rot=(0.06, 0, 0.9), parent=root, bevel=False)
-    b = pol(r0 + 0.4, -79)
+    b = pol(r0 + 0.25, -74)
     k.cylinder("bucket", 0.11, 0.26, b, "steel_worn", segs=20, parent=root, radius_top=0.14)
     k.torus("bucket_rim", 0.14, 0.008, (b.x, b.y, 0.26), "steel_worn", parent=root, segs=20, tube_segs=6)
 
     if level == 2:
         r_out, _ = fort.sandbag_wall(k, root, WALL_IN, [(20, 215)], courses=4, seed=8)
-        fort.pennant(k, root, pol(r_out + 0.3, 250), height=2.2, yaw=0.5)
+        fort.pennant(k, root, pol(r_out - 0.2, 222), height=2.2, yaw=0.5)
     elif level == 3:
         fort.log_wall(k, root, WALL_IN, [(150, 485)], z0=-PIT_DEPTH - 0.08, z1=0.2)
-        fort.lean_to_net(k, root, r0 - 0.42, r0 + 0.75, -131, -84, top_z=1.75, seed=4)
-        fort.pennant(k, root, pol(4.45, 250), height=2.2, yaw=0.5)
+        fort.lean_to_net(k, root, r0 - 0.25, FOOTPRINT_M - 0.03, -133, -80, top_z=2.0, seed=4)
+        flag = pol(3.55, 224)
+        flag.z = gz(flag.x, flag.y) - 0.05
+        fort.pennant(k, root, flag, height=2.25, yaw=0.5)
         # steps cut into the far side of the pit, faced with planks
         for i in range(3):
             p = pol(WALL_IN - 0.25 + 0.3 * i, 137.5, -PIT_DEPTH + 0.18 * (i + 1) - 0.02)
