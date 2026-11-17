@@ -6,11 +6,13 @@ two twisted rope skeins in a 1.5 m frame, arms 1.15 m, a 2.9 m stock, on a yoke 
 on a tripod post. Front is local +Y.
 
 Levels change the machine and its bolt, in the same language as the trebuchet:
-  1  rough-hewn timber, rope lashings, hemp skeins, a plank hopper; iron-tipped bolts
-  2  tarred timber with iron bands; iron heads, leather fletching
-  3  dark oak under black iron straps, iron-capped skeins; long iron heads
-  4  frame of blackened iron with bronze fittings and arm guards; barbed heads
-  5  silver frame with gold fittings, silver-wire skeins; gold-headed bolts
+  1  pale rough-hewn timber, rope lashings, hemp skeins; iron-tipped bolts
+  2  red-painted timber with forged-iron bands and corner bolts; red fletching
+  3  honey-coloured oak, black iron plates, an iron drum and chain; long iron heads
+  4  blackened steel, bronze skein caps and fittings, arm guards, a tall double hopper
+     of eight bolts; barbed heads
+  5  silver with gold fittings, finials and a crest, silver-wire skeins; gold-headed bolts
+No level carries a shield: the machine stays light and open.
 
 Returns (root, turret). The tripod is static; the turret (yoke and machine) turns.
 
@@ -44,18 +46,20 @@ TILT = math.radians(3)   # stock raised a little at the front
 
 STYLE = {
     1: dict(wood="timber_raw", arm="timber_raw", fit="iron_forged", rope="hemp", skein="hemp",
-            bolt=None, band_w=0.07, head="iron_forged", shaft="timber_raw", fletch="hemp", mag=True),
-    2: dict(wood="timber_tarred", arm="timber_tarred", fit="iron_forged", rope="hemp", skein="hemp",
-            bolt=None, band_w=0.07, head="iron_forged", shaft="timber_tarred", fletch="leather", mag=True),
-    3: dict(wood="timber_oak", arm="timber_oak", fit="iron_black", rope="hemp", skein="hemp",
-            bolt="iron_black", band_w=0.1, head="iron_black", shaft="timber_oak", fletch="leather",
-            mag=True),
-    4: dict(wood="iron_black", arm="timber_oak", fit="bronze_old", rope="hemp", skein="hemp",
+            bolt=None, band_w=0.07, head="iron_forged", shaft="timber_raw", fletch="hemp",
+            drum="timber_raw", chain="iron_forged", mag=5),
+    2: dict(wood="timber_red", arm="timber_red", fit="iron_forged", rope="hemp", skein="hemp",
+            bolt="iron_forged", band_w=0.07, head="iron_forged", shaft="timber_raw", fletch="paint_red",
+            drum="timber_red", chain="iron_forged", mag=5),
+    3: dict(wood="timber_honey", arm="timber_honey", fit="iron_black", rope="hemp", skein="hemp",
+            bolt="iron_black", band_w=0.1, head="iron_black", shaft="timber_honey", fletch="leather",
+            drum="iron_black", chain="iron_black", mag=5),
+    4: dict(wood="iron_black", arm="iron_black", fit="bronze_old", rope="steel_cable", skein="hemp",
             bolt="bronze_old", band_w=0.09, head="iron_black", shaft="timber_oak", fletch="bronze_old",
-            mag=True),
+            drum="bronze_old", chain="iron_black", mag=8, caps="bronze_old"),
     5: dict(wood="silver_satin", arm="silver_satin", fit="gold_trim", rope="steel_cable",
             skein="steel_cable", bolt="gold_trim", band_w=0.08, head="gold_trim", shaft="silver_satin",
-            fletch="gold_trim", mag=True),
+            fletch="gold_trim", drum="gold_trim", chain="gold_trim", mag=8, caps="gold_trim", ornament=True),
 }
 
 # Firing animation, one row per frame: arm sweep (deg back; 40 = cocked), slider shift
@@ -84,6 +88,7 @@ def build(style, level=1):
     s = STYLE[level]
     root = k.empty("ballista")
     _tripod(k, root, level, s)
+    _bolt_crate(k, root, level, s)
     turret = k.empty("turret", (0, 0, 0), parent=root)
     turret["node"] = "turret"
     mp.set_reference(turret)
@@ -96,6 +101,31 @@ def build(style, level=1):
     m["marker"] = "muzzle"
     _rig(k, turret, level, s)
     return root, turret
+
+
+def _bolt_crate(k, root, level, s):
+    """An open crate of spare bolts on the ground beside the machine."""
+    from .trebuchet import ground_spot
+    c = ground_spot(2.65, -40)
+    W = s["wood"]
+    rot = Vector((c.x, c.y, 0)).to_track_quat("Y", "Z").to_euler()
+    crate = k.empty("crate", c, parent=root)
+    crate.rotation_euler = (0, 0, rot.z + math.pi / 2)
+    k.box("crate_floor", (0.6, 1.0, 0.05), (0, 0, 0.03), W, parent=crate, bevel=0.005)
+    for sx in (-1, 1):
+        k.box("crate_side", (0.04, 1.0, 0.26), (sx * 0.3, 0, 0.15), W, parent=crate, bevel=0.005)
+        k.box("crate_end", (0.6, 0.04, 0.26), (0, sx * 0.5, 0.15), W, parent=crate, bevel=0.005)
+    if level > 1:
+        for sy in (-0.3, 0.3):
+            k.box("crate_band", (0.64, 0.05, 0.28), (0, sy, 0.15), s["fit"], parent=crate, bevel=0.003)
+    else:
+        for sy in (-0.3, 0.3):
+            k.torus("crate_rope", 0.36, 0.014, (0, sy, 0.15), s["rope"], rot=(math.pi / 2, 0, 0), parent=crate,
+                    segs=16, tube_segs=5)
+    for i in range(7):                                   # bolts, heads out at one end
+        x = -0.22 + (i % 4) * 0.15
+        z = 0.1 + (i // 4) * 0.06
+        _bolt(k, crate, (x, -0.6, z), (0, 1, 0.02 * (i % 3)), level, s)
 
 
 def ground(level):
@@ -180,12 +210,31 @@ def _capitulum(k, t, level, s):
                        segs=20, parent=t)
             _beam(k, t, "washer_lever", (x - 0.17, y, z + sg * 0.03), (x + 0.17, y, z + sg * 0.03), (0.04, 0.04),
                   s["fit"] if level > 1 else "iron_forged")
+        if level == 2:                                   # forged corner irons on the frame
+            for z in (zt, zb):
+                k.box("corner_iron", (0.22, 0.03, 0.18), (sx * 0.72, y + 0.085, z), s["fit"], parent=t,
+                      bevel=0.004)
         if level >= 3:                                   # iron plates on the outer stiles
             k.box("frame_plate", (0.14, 0.03, 0.6), (sx * 0.72, y + 0.085, _z(y) + 0.03), s["fit"], parent=t,
                   bevel=0.005)
     if level >= 3:
         for z in (zt, zb):
             k.box("beam_plate", (1.6, 0.03, 0.08), (0, y + 0.075, z), s["fit"], parent=t, bevel=0.004)
+    if s.get("caps"):                                    # metal caps over the skein ends
+        for sx in (-1, 1):
+            for z in (zt + 0.13, zb - 0.16):
+                k.cylinder("skein_cap", 0.17, 0.07, (sx * SKEIN_X, y, z), s["caps"], segs=24, parent=t,
+                           radius_top=0.13)
+    if s.get("ornament"):                                # gold finials on the stiles, a crest between
+        for x in (-0.72, -0.2, 0.2, 0.72):
+            _ball(k, t, (x, y, zt + 0.17), 0.07, "gold_trim", subdiv=2)
+        k.cylinder("crest", 0.2, 0.04, (0, y + 0.09, zt - 0.02), "gold_trim", segs=28,
+                   rot=(math.pi / 2, 0, 0), parent=t)
+        k.cylinder("crest_boss", 0.08, 0.05, (0, y + 0.13, zt - 0.02), "silver", segs=20,
+                   rot=(math.pi / 2, 0, 0), parent=t)
+        for sx in (-1, 1):
+            k.beam("scroll", (sx * 0.22, y + 0.09, zt - 0.02), (sx * 0.62, y + 0.09, zt + 0.05), (0.03, 0.03),
+                   "gold_trim", parent=t, bevel=0.004)
     # breastwork in front: a curved guard for the arms on levels 4 and 5
     if level >= 4:
         for sx in (-1, 1):
@@ -280,7 +329,7 @@ def _rig(k, t, level, s):
     _hopper(k, t, level, s, zs)
     drum = next(o for o in t.children if o.get("rig_name") == "drum")
     y, z = drum.location.y, drum.location.z
-    parts = [k.tube("drum", (-0.17, y, z), (0.17, y, z), 0.09, W, parent=t, segs=14)]
+    parts = [k.tube("drum", (-0.17, y, z), (0.17, y, z), 0.09, s["drum"], parent=t, segs=14)]
     for sx in (-1, 1):                                   # a crank each side, and the drive sprocket
         a0 = 0.6 if sx > 0 else 0.6 + math.pi
         r = Vector((0, math.cos(a0), math.sin(a0)))
@@ -302,7 +351,7 @@ def _rig(k, t, level, s):
                    rot=(0, math.pi / 2, 0), parent=t, bevel=0.004)
         for dz in (0.11, -0.11):
             k.beam("chain", (sx * 0.2, y, z + dz), (sx * 0.2, yf, zf + dz * 0.8), (0.025, 0.02),
-                   "iron_forged" if level < 5 else "gold_trim", parent=t, bevel=False)
+                   s["chain"], parent=t, bevel=False)
     # the loaded bolt, on its own carrier so it can fly off
     carrier = k.empty("bolt_carrier", (0, 0, 0), parent=t)
     before = set(bpy.data.objects)
@@ -324,7 +373,8 @@ def _hopper(k, t, level, s, zs):
     W = s["wood"]
     y0, y1 = CLAW_Y0 + 0.2, CLAW_Y0 + 0.95
     zb = zs + 0.24
-    h = 0.5
+    n = s["mag"]
+    h = 0.5 if n <= 5 else 0.78
     ym = (y0 + y1) / 2
     for sx in (-1, 1):
         k.box("hopper_side", (0.04, y1 - y0, h), (sx * 0.14, ym, _z(ym) - Z + zb + h / 2), W, parent=t, bevel=0.006)
@@ -338,7 +388,7 @@ def _hopper(k, t, level, s, zs):
         else:
             k.box("hopper_band", (0.32, 0.05, 0.06), (0, yy, _z(yy) - Z + zb + h * 0.75), s["fit"], parent=t,
                   bevel=0.003)
-    for i in range(5):                                   # the stack of bolts
+    for i in range(n):                                   # the stack of bolts
         tail = Vector((0, CLAW_Y0 - 0.02, zb + 0.06 + i * 0.085))
         _bolt(k, t, tail, (0, 1, math.tan(TILT)), level, s)
 

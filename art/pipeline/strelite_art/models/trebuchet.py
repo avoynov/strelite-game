@@ -37,7 +37,7 @@ FRAME_M = 14.0
 TARGET_Z = 2.2
 SPRITE_FRAME_M = 16.0
 SWEEP_M = 4.15           # rear corners of the frame turn inside this radius
-FOOTPRINT_M = 5.0        # 3x3 tiles of 4 m
+FOOTPRINT_M = 5.6        # 3x3 tiles of 4 m
 PLATFORM_Z = 0.2         # top of the turntable
 PIVOT = Vector((0.0, 0.0, 4.3))
 LONG, SHORT = 5.2, 1.6
@@ -95,6 +95,7 @@ def build(style, level=1):
     s = STYLE[level]
     root = k.empty("trebuchet")
     _platform(k, root, level, s)
+    _ammo_pile(k, root, level, s)
     turret = k.empty("turret", (0, 0, PLATFORM_Z), parent=root)
     turret["node"] = "turret"
     mp.set_reference(turret)
@@ -217,7 +218,7 @@ def _tag(before, role):
 
 def ground(level):
     from ..terrain import Patch
-    return Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.7, r_bare=3.6, seed=37, ragged=0.5)
+    return Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.7, r_bare=4.2, seed=37, ragged=0.5)
 
 
 # -- helpers -----------------------------------------------------------------------------
@@ -277,6 +278,34 @@ def _rock(k, parent, loc, r, seed, rounded=False):
     o.location = loc
     o.rotation_euler = (rnd.uniform(-0.4, 0.4), rnd.uniform(-0.4, 0.4), rnd.uniform(0, 6.3))
     return k._finish(o, "stone", bevel=False, parent=parent)
+
+
+def ground_spot(r, turn_deg):
+    """A point on the ground r metres out, toward the camera turned by turn_deg (so ground
+    props sit in front of the machine on screen, where they are seen)."""
+    from ..scene import camera_vectors
+    _, back, right = camera_vectors()
+    b = Vector((back.x, back.y, 0)).normalized()
+    rr = Vector((right.x, right.y, 0)).normalized()
+    a = math.radians(turn_deg)
+    return (b * math.cos(a) + rr * math.sin(a)) * r
+
+
+def _ammo_pile(k, root, level, s):
+    """Spare rounds stacked on the ground beside the machine: three below, one on top, on a
+    plank pallet from level 2."""
+    c = ground_spot(4.75, -38)
+    r = PROJ_R
+    z0 = 0.0
+    if level >= 2:
+        for i in range(4):
+            k.beam("pallet", c + Vector((-0.75, -0.5 + i * 0.33, 0.05)), c + Vector((0.75, -0.5 + i * 0.33, 0.05)),
+                   (0.3, 0.07), s["plat"], parent=root, bevel=0.006)
+        z0 = 0.09
+    pts = [Vector((-0.33, -0.2, 0)), Vector((0.33, -0.2, 0)), Vector((0.0, 0.37, 0))]
+    for i, p in enumerate(pts):
+        _projectile(k, root, c + p + Vector((0, 0, z0 + r)), r, level, seed=10 + i)
+    _projectile(k, root, c + Vector((0, -0.01, z0 + r + 0.48)), r, level, seed=20)
 
 
 # -- static turntable ----------------------------------------------------------------------
