@@ -1889,5 +1889,41 @@
    "radiusM": 3.0
   }
  },
- "enemiesNote": "enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen lower-right); anchor = the unit's ground centre; shadow included"
+ "enemiesNote": "enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen lower-right); anchor = the unit's ground centre; shadow included",
+ "effects": {
+  "muzzle_flash": {
+   "sheet": "effects/muzzle_flash",
+   "frames": "muzzle_flash",
+   "count": 4,
+   "fps": 24,
+   "anchor": [
+    0.25,
+    0.5
+   ],
+   "blend": "add",
+   "note": "flame points along +x: rotate the sprite to the barrel's screen angle"
+  },
+  "muzzle_smoke": {
+   "sheet": "effects/muzzle_smoke",
+   "frames": "muzzle_smoke",
+   "count": 12,
+   "fps": 24,
+   "anchor": [
+    0.5,
+    0.62
+   ],
+   "blend": "normal"
+  },
+  "shell_burst": {
+   "sheet": "effects/shell_burst",
+   "frames": "shell_burst",
+   "count": 16,
+   "fps": 24,
+   "anchor": [
+    0.5,
+    0.76
+   ],
+   "blend": "normal"
+  }
+ }
 }
