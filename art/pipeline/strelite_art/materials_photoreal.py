@@ -85,6 +85,22 @@ SPEC = {
     "webbing":       ("plain", dict(color=(0.22, 0.22, 0.19), rough=0.8, dust=0.8)),
     "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2)),
     "boot":          ("plain", dict(color=(0.07, 0.065, 0.06), rough=0.6, dust=1.2)),
+    # --- siege engines: one material set per upgrade level
+    "timber_raw":    ("timber", dict(light=(0.54, 0.45, 0.34), dark=(0.31, 0.24, 0.17), rough=0.85,
+                                     weather=0.55, dust=0.8)),
+    "timber_oak":    ("timber", dict(light=(0.34, 0.21, 0.11), dark=(0.17, 0.10, 0.05), rough=0.5,
+                                     weather=0.1, dust=0.45, checks=0.4)),
+    "timber_tarred": ("timber", dict(light=(0.50, 0.33, 0.19), dark=(0.27, 0.15, 0.07), rough=0.7,
+                                     weather=0.35, dust=0.6, checks=0.7)),
+    "iron_black":    ("metal", dict(color=(0.06, 0.06, 0.065), rough=0.32, dust=0.4, rust=0.1)),
+    "bronze_old":    ("metal", dict(color=(0.78, 0.50, 0.28), rough=0.34, dust=0.25, rust=0.0)),
+    "iron_forged":   ("metal", dict(color=(0.10, 0.10, 0.10), rough=0.48, dust=0.6, rust=0.35)),
+    "silver":        ("metal", dict(color=(0.95, 0.95, 0.94), rough=0.17, dust=0.12)),
+    "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
+    "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
+    "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
+    "leather":       ("plain", dict(color=(0.30, 0.18, 0.10), rough=0.62, dust=0.6)),
+    "steel_cable":   ("metal", dict(color=(0.70, 0.71, 0.72), rough=0.3, dust=0.2)),
 }
 
 
@@ -432,6 +448,40 @@ def _wood(name, color):
     return mat
 
 
+def _timber(name, light, dark, rough=0.8, weather=0.6, dust=0.7, checks=1.0):
+    """Hewn structural timber: grain and seasoning checks run along local Z (the
+    length of a Kit.beam), darker latewood, silvery weathering on upward faces.
+    Low roughness and little weathering read as oiled hardwood."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    off = g.node("ShaderNodeVectorMath", operation="ADD")
+    g.L.new(g.own(), off.inputs[0])
+    g.L.new(g.rnd(), off.inputs[1])
+    P = off.outputs["Vector"]
+    grain = g.noise(g.scale_vec(P, (70, 70, 2.5)), 1.0, detail=6, rough=0.65, distortion=1.2)
+    rings = g.noise(g.scale_vec(P, (9, 9, 0.6)), 1.0, detail=3, rough=0.5, distortion=2.5)
+    t = g.math("ADD", g.math("MULTIPLY", grain, 0.55), g.math("MULTIPLY", rings, 0.45))
+    col = g.mix(g.ramp(t, 0.36, 0.66), rgb(dark), rgb(light))
+    # seasoning checks: thin dark cracks along the grain
+    vor = g.node("ShaderNodeTexVoronoi", feature="DISTANCE_TO_EDGE")
+    g.L.new(g.scale_vec(P, (7, 7, 0.35)), vor.inputs["Vector"])
+    vor.inputs["Scale"].default_value = 1.0
+    crack = g.math("MULTIPLY", g.ramp(vor.outputs["Distance"], 0.035, 0.0),
+                   g.math("MULTIPLY", g.ramp(g.noise(P, 1.3, detail=2), 0.45, 0.6), checks))
+    col = g.mix(g.math("MULTIPLY", crack, 0.8), col, rgb(tuple(c * 0.35 for c in dark)))
+    # adze marks: broad shallow facets across the faces
+    adze = g.noise(g.scale_vec(P, (3, 3, 9)), 1.0, detail=2, rough=0.4)
+    col = g.mix(1.0, col, g.math("ADD", 0.9, g.math("MULTIPLY", adze, 0.2)), "MULTIPLY")
+    Pw = g.coords()
+    dust_m, top, _ = _dust_mask(g, Pw, dust)
+    col = g.mix(g.math("MULTIPLY", top, weather), col, rgb((0.52, 0.50, 0.46)))
+    col = g.mix(dust_m, col, rgb(DUST))
+    h = g.math("SUBTRACT", g.math("ADD", g.math("MULTIPLY", grain, 0.6), g.math("MULTIPLY", adze, 0.4)),
+               g.math("MULTIPLY", crack, 0.8))
+    g.finish(col, g.mixf(dust_m, rough, 0.95), 0.0, height=h, bump=0.6, bump_dist=0.004)
+    return mat
+
+
 def _stone(name):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
@@ -732,7 +782,7 @@ def _screen(name):
     return mat
 
 
-_BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood,
+_BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood, "timber": _timber,
              "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
              "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
              "screen": _screen}
