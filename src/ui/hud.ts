@@ -15,6 +15,7 @@ export interface HudCallbacks {
   setSpeed(speed: number): void;
   /** Start over, on the given map level (default: the current one). */
   restart(level?: number): void;
+  openArsenal(): void;
 }
 
 const SPEEDS = [1, 2, 3];
@@ -98,6 +99,7 @@ export class Hud {
       <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
       <div class="stat wave">${t('hud.level', { n: g.level })} · ${t('hud.wave', { n: g.wave, total: g.totalWaves })}</div>
       <div class="spacer"></div>
+      ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>` : ''}
       <button class="chip" data-action="speed" aria-label="${t('action.speed')}">${speed}×</button>
       <button class="chip" data-action="lang">${t('lang.switch')}</button>`;
     if (top !== this.lastTop) {
@@ -266,6 +268,9 @@ export class Hud {
         break;
       case 'next':
         this.cb.restart(g.level + 1);
+        break;
+      case 'arsenal':
+        this.cb.openArsenal();
         break;
     }
     this.update();

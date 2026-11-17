@@ -3,12 +3,14 @@ import './style.css';
 import { getLang, onLangChange, t } from './i18n';
 import { BoardRenderer, type Selection } from './render/boardRenderer';
 import { PALETTE } from './render/palette';
+import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
 import { TICK, TOWERS, type TowerId } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
 import { buildPathMap, MEADOW } from './sim/maps';
 import { attachGestures } from './ui/gestures';
+import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
@@ -38,8 +40,9 @@ async function start(): Promise<void> {
   document.title = t('game.title');
 
   const app = new Application();
-  const [art] = await Promise.all([
+  const [art, portraits] = await Promise.all([
     TowerArt.load(ART_URL),
+    PortraitArt.load(ART_URL),
     app.init({
       resizeTo: window,
       background: PALETTE.background,
@@ -49,6 +52,7 @@ async function start(): Promise<void> {
     }),
   ]);
   await art?.preload();
+  portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
 
   let game = new Game(buildPathMap(MEADOW), { level: startLevel() });
@@ -82,8 +86,25 @@ async function start(): Promise<void> {
       armed = null;
       hud.setGame(game);
       relayout();
+      arsenal.open(); // a new level starts with the arsenal again
+    },
+    openArsenal: () => arsenal.open(armed ?? undefined),
+  });
+
+  // Before the level: browse the guns; the one on screen when leaving is armed for placing.
+  const arsenal = new Arsenal({
+    // Clean render of the gun alone; the board atlas (with its soil patch) until one exists.
+    portrait: (def, level, frame) =>
+      portraits?.has(def) ? portraits.portrait(def, level, frame, art?.manifest.directions ?? 32) : art?.portrait(def, level, frame),
+    onArt: (fn) => art?.onChange(fn) ?? (() => {}),
+    directions: art?.manifest.directions ?? 32,
+    close: (def) => {
+      armed = def;
+      selection = null;
+      hud.update();
     },
   });
+  document.body.appendChild(arsenal.el);
 
   const relayout = () => {
     hud.update();
@@ -114,10 +135,12 @@ async function start(): Promise<void> {
   onLangChange(() => {
     document.title = t('game.title');
     hud.invalidate();
+    arsenal.invalidate();
     relayout();
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
+  if (!new URLSearchParams(location.search).has('noarsenal')) arsenal.open();
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
