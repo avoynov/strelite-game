@@ -1,10 +1,11 @@
-import { Assets, Container, Graphics, Text, TilingSprite, type Texture } from 'pixi.js';
+import { Assets, Container, Graphics, Matrix, Text, TilingSprite, type Texture } from 'pixi.js';
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import type { Game, Tower } from '../sim/game';
 import { Camera, type Rect } from './camera';
 import { PlaceholderEnemyView } from './enemyView';
 import { diamond, isoX, isoY, project, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
+import { roadCentreLines, stripOutline } from './road';
 import { PlaceholderTowerView } from './towers/placeholderTowerView';
 import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTowerView';
 import { spriteScale } from './towers/towerArt';
@@ -75,6 +76,7 @@ export class BoardRenderer {
   private overlayKey = '';
   private groundSprite: TilingSprite | null = null;
   private groundDensity: Density = 1;
+  private roadTexture: Texture | null = null;
   private readonly bounds: Rect;
   private screenW = 0;
   private screenH = 0;
@@ -192,69 +194,58 @@ export class BoardRenderer {
     void this.loadGround();
   }
 
-  /** Swap the flat stand-in ground for the rendered, seamless field once it exists. */
+  /** Swap the flat stand-in ground and road for the rendered, seamless textures once they exist. */
   private async loadGround(): Promise<void> {
-    const def = this.art?.manifest.ground?.field;
-    if (!this.art || !def) return;
+    const ground = this.art?.manifest.ground;
+    if (!this.art || !ground?.field) return;
     const density = this.art.density;
     if (this.groundSprite && density === this.groundDensity) return;
-    let texture: Texture;
-    try {
-      texture = await Assets.load<Texture>(`${this.artUrl}/${def.image}@${density}x.webp`);
-    } catch {
-      return;
-    }
-    if (this.root.destroyed || density !== this.art.density) return;
-    texture.source.addressMode = 'repeat';
+    const load = async (image: string | undefined): Promise<Texture | null> => {
+      if (!image) return null;
+      try {
+        const texture = await Assets.load<Texture>(`${this.artUrl}/${image}@${density}x.webp`);
+        texture.source.addressMode = 'repeat';
+        return texture;
+      } catch {
+        return null;
+      }
+    };
+    const [field, road] = await Promise.all([load(ground.field.image), load(ground.road?.image)]);
+    if (this.root.destroyed || density !== this.art.density || !field) return;
     this.groundDensity = density;
+    this.roadTexture = road;
     if (this.groundSprite) {
-      this.groundSprite.texture = texture;
-      return;
+      this.groundSprite.texture = field;
+    } else {
+      const scale = spriteScale(TILE_W, METRES_PER_TILE, ground.field.sizePx1x[0] / ground.field.metres);
+      this.groundSprite = new TilingSprite({ texture: field, tileScale: { x: scale, y: scale } });
+      this.groundLayer.removeChildren().forEach((c) => c.destroy());
+      this.groundLayer.addChild(this.groundSprite);
+      this.drawGround();
     }
-    const scale = spriteScale(TILE_W, METRES_PER_TILE, def.sizePx1x[0] / def.metres);
-    this.groundSprite = new TilingSprite({ texture, tileScale: { x: scale, y: scale } });
-    this.groundLayer.removeChildren().forEach((c) => c.destroy());
-    this.groundLayer.addChild(this.groundSprite);
-    this.drawGround();
+    this.drawMap();
   }
 
   /**
-   * Road cells outside the map: the road continues straight back from the
-   * spawn and straight on past the goal, off the edge of the screen.
+   * The road, drawn over the ground: the rendered packed-earth texture cut to
+   * the road's shape, with two wider, fainter copies underneath so the edge
+   * fades into the field instead of ending in a hard line.
    */
-  private roadOutside(range: number): Array<{ x: number; y: number }> {
-    const cells: Array<{ x: number; y: number }> = [];
-    const { flow, map } = this.game;
-    const extend = (from: { x: number; y: number }, dx: number, dy: number) => {
-      for (let i = 1; i <= range; i++) cells.push({ x: from.x + dx * i, y: from.y + dy * i });
-    };
-    for (const s of map.spawns) {
-      const n = flow.next(s.x, s.y);
-      if (n) extend(s, s.x - n.x, s.y - n.y);
-    }
-    for (const g of map.goals) {
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        if (flow.distanceAt(g.x + dx, g.y + dy) === 1) extend(g, -dx, -dy);
-      }
-    }
-    return cells;
-  }
-
-  /** The road, drawn over the ground. */
   private drawMap(): void {
     const g = this.map;
-    const { grid } = this.game.map;
     g.clear();
-
     const r = this.visibleWorld();
     const reach = Math.ceil(Math.max(r.w, r.h) / TILE_W) + 2;
-    const road = this.roadOutside(reach);
-    for (let y = 0; y < grid.rows; y++) {
-      for (let x = 0; x < grid.cols; x++) if (grid.get(x, y) === 'path') road.push({ x, y });
+    const def = this.art?.manifest.ground?.road;
+    const scale = def ? spriteScale(TILE_W, METRES_PER_TILE, def.sizePx1x[0] / def.metres) : 1;
+    const matrix = new Matrix().scale(scale, scale);
+    for (const line of roadCentreLines(this.game, reach)) {
+      for (const [half, alpha] of [[0.6, 0.3], [0.55, 0.55], [0.5, 1]] as const) {
+        const pts = stripOutline(line, half).flatMap((p) => [isoX(p.x, p.y), isoY(p.x, p.y)]);
+        if (this.roadTexture) g.poly(pts).fill({ texture: this.roadTexture, matrix, textureSpace: 'global', alpha });
+        else g.poly(pts).fill({ color: PALETTE.path, alpha: alpha * 0.8 });
+      }
     }
-    // A wider, fainter verge under a packed-earth lane.
-    for (const c of road) g.poly(diamond(c.x - 0.1, c.y - 0.1, c.x + 1.1, c.y + 1.1)).fill({ color: PALETTE.pathEdge, alpha: 0.35 });
-    for (const c of road) g.poly(diamond(c.x, c.y, c.x + 1, c.y + 1)).fill({ color: PALETTE.path, alpha: 0.8 });
   }
 
   // ---- events from the simulation ------------------------------------------

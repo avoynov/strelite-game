@@ -45,7 +45,8 @@ export interface TowerArtManifest {
   /** Number of aim frames per tower level. */
   directions: number;
   towers: Record<string, TowerArtDef>;
-  ground?: Record<string, GroundArtDef>;
+  /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
+  ground?: { field?: GroundArtDef; road?: GroundArtDef };
 }
 
 /**
