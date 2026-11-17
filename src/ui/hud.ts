@@ -1,11 +1,16 @@
 import { getLang, setLang, t, type MessageKey } from '../i18n';
-import { TOWERS, type TowerId } from '../sim/content';
+import { TOWER_IDS, TOWERS, type TowerId, type TowerLevel } from '../sim/content';
 import type { ActionResult, Game } from '../sim/game';
 import type { Selection } from '../render/boardRenderer';
 
 export interface HudCallbacks {
   getSelection(): Selection | null;
   setSelection(sel: Selection | null): void;
+  /** Gun picked in the build menu, if any. */
+  getArmed(): TowerId | null;
+  setArmed(def: TowerId | null): void;
+  /** CSS for a small picture of a gun, or '' when there is no art for it. */
+  towerIcon(def: TowerId): string;
   getSpeed(): number;
   setSpeed(speed: number): void;
   restart(): void;
@@ -29,8 +34,6 @@ export class Hud {
   private lastPanel = '';
   private lastEnd = '';
   private toastTimer = 0;
-  /** Default tower for the build button; Phase 5 adds a picker. */
-  private buildDef: TowerId = 'crossbow';
 
   constructor(
     root: HTMLElement,
@@ -48,7 +51,7 @@ export class Hud {
     this.endScreen = root.querySelector('#end-screen')!;
     root.addEventListener('click', (ev) => {
       const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-action]');
-      if (btn && !btn.disabled) this.onAction(btn.dataset.action!);
+      if (btn && !btn.disabled) this.onAction(btn.dataset.action!, btn.dataset.def);
     });
   }
 
@@ -75,7 +78,7 @@ export class Hud {
 
   showResult(r: ActionResult): void {
     if (r.ok) return;
-    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', notBuildable: 'hint.notBuildable' };
+    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
     const k = key[r.reason];
     if (k) this.showToast(t(k));
   }
@@ -118,49 +121,64 @@ export class Hud {
   private panelHtml(): string {
     const g = this.game;
     const sel = this.cb.getSelection();
-    let body = `<p class="hint">${t('hint.tapCell')}</p>`;
+    const armed = this.cb.getArmed();
+    let body: string;
 
-    if (sel?.kind === 'cell') {
-      const def = TOWERS[this.buildDef];
-      const lvl = def.levels[0];
-      const name = escapeHtml(t(`tower.${this.buildDef}`));
+    if (sel?.kind === 'place') {
+      const lvl: TowerLevel = TOWERS[sel.def].levels[0];
+      const ok = g.canBuildAt(sel.def, sel.cx, sel.cy);
+      body = `
+        <div class="row">
+          ${this.iconHtml(sel.def)}
+          <div class="info">
+            <div class="title">${escapeHtml(t(`tower.${sel.def}`))}</div>
+            ${this.statsHtml(lvl)}
+          </div>
+          <div class="actions">
+            <button class="btn primary" data-action="build" ${ok && g.money >= lvl.cost ? '' : 'disabled'}>
+              ${t('action.build')}<span class="cost"><span class="ico ico-gold"></span>${lvl.cost}</span>
+            </button>
+            <button class="btn" data-action="cancel">${t('action.cancel')}</button>
+          </div>
+        </div>`;
+    } else if (sel?.kind === 'tower' && g.towerById(sel.id)) {
+      const tower = g.towerById(sel.id)!;
+      const lvl = g.levelOf(tower);
+      const up = g.upgradeCost(tower);
+      const s = tower.stats;
+      const total = s.dealt + s.wasted;
+      const wastedPct = total > 0 ? Math.round((s.wasted / total) * 100) : 0;
       body = `
         <div class="row">
           <div class="info">
-            <div class="title">${name}</div>
-            ${this.statsHtml(lvl.damage, lvl.fireInterval, lvl.range)}
+            <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
+            ${this.statsHtml(lvl)}
+            <div class="stats muted">
+              <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
+              <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
+              <span>${t('stat.kills')} ${s.kills}</span>
+            </div>
           </div>
-          <button class="btn primary" data-action="build" ${g.money < lvl.cost ? 'disabled' : ''}>
-            ${t('action.build', { name })}<span class="cost"><span class="ico ico-gold"></span>${lvl.cost}</span>
-          </button>
+          <div class="actions">
+            ${up === null
+              ? `<button class="btn" disabled>${t('tower.maxLevel')}</button>`
+              : `<button class="btn primary" data-action="upgrade" ${g.money < up ? 'disabled' : ''}>${t('action.upgrade')}<span class="cost"><span class="ico ico-gold"></span>${up}</span></button>`}
+            <button class="btn" data-action="sell">${t('action.sell')}<span class="cost">+${g.sellValue(tower)}</span></button>
+          </div>
         </div>`;
-    } else if (sel?.kind === 'tower') {
-      const tower = g.towerAt(sel.x, sel.y);
-      if (tower) {
-        const lvl = g.levelOf(tower);
-        const up = g.upgradeCost(tower);
-        const s = tower.stats;
-        const total = s.dealt + s.wasted;
-        const wastedPct = total > 0 ? Math.round((s.wasted / total) * 100) : 0;
-        body = `
-          <div class="row">
-            <div class="info">
-              <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
-              ${this.statsHtml(lvl.damage, lvl.fireInterval, lvl.range)}
-              <div class="stats muted">
-                <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
-                <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
-                <span>${t('stat.kills')} ${s.kills}</span>
-              </div>
-            </div>
-            <div class="actions">
-              ${up === null
-                ? `<button class="btn" disabled>${t('tower.maxLevel')}</button>`
-                : `<button class="btn primary" data-action="upgrade" ${g.money < up ? 'disabled' : ''}>${t('action.upgrade')}<span class="cost"><span class="ico ico-gold"></span>${up}</span></button>`}
-              <button class="btn" data-action="sell">${t('action.sell')}<span class="cost">+${g.sellValue(tower)}</span></button>
-            </div>
-          </div>`;
-      }
+    } else {
+      // Build menu: one card per gun; the picked one stays armed for placing.
+      const cards = TOWER_IDS.map((id) => {
+        const cost = TOWERS[id].levels[0].cost;
+        return `
+          <button class="card${armed === id ? ' armed' : ''}${g.money < cost ? ' poor' : ''}" data-action="pick" data-def="${id}" aria-pressed="${armed === id}">
+            ${this.iconHtml(id)}
+            <span class="card-name">${escapeHtml(t(`tower.${id}`))}</span>
+            <span class="cost"><span class="ico ico-gold"></span>${cost}</span>
+          </button>`;
+      }).join('');
+      const hint = armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
+      body = `<div class="picker"><div class="cards">${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
     }
 
     const waveBtn = g.phase === 'build'
@@ -169,30 +187,48 @@ export class Hud {
     return `<div class="panel-body">${body}</div>${waveBtn}`;
   }
 
-  private statsHtml(damage: number, interval: number, range: number): string {
-    const rate = 1 / interval;
+  private iconHtml(def: TowerId): string {
+    const css = this.cb.towerIcon(def);
+    return css ? `<span class="gun-ico"><span style="${css}"></span></span>` : `<span class="gun-ico gun-ico-none"></span>`;
+  }
+
+  private statsHtml(lvl: TowerLevel): string {
+    const rate = 1 / lvl.fireInterval;
     return `<div class="stats">
-      <span>${t('stat.damage')} <b>${damage}</b></span>
-      <span>${t('stat.rate')} <b>${rate.toFixed(1)}</b></span>
-      <span>${t('stat.dps')} <b>${(damage * rate).toFixed(1)}</b></span>
-      <span>${t('stat.range')} <b>${range}</b></span>
+      <span>${t('stat.damage')} <b>${lvl.damage}</b></span>
+      <span>${t('stat.rate')} <b>${rate.toFixed(rate < 1 ? 2 : 1)}</b></span>
+      <span>${t('stat.dps')} <b>${(lvl.damage * rate).toFixed(1)}</b></span>
+      <span>${t('stat.range')} <b>${lvl.range}</b></span>
+      ${lvl.splash ? `<span>${t('stat.splash')} <b>${lvl.splash}</b></span>` : ''}
     </div>`;
   }
 
-  private onAction(action: string): void {
+  private onAction(action: string, def?: string): void {
     const g = this.game;
     const sel = this.cb.getSelection();
     switch (action) {
+      case 'pick': {
+        const id = TOWER_IDS.find((d) => d === def);
+        if (!id) break;
+        this.cb.setArmed(this.cb.getArmed() === id ? null : id);
+        if (g.money < TOWERS[id].levels[0].cost && this.cb.getArmed()) this.showToast(t('reason.noMoney'));
+        break;
+      }
       case 'build':
-        if (sel?.kind === 'cell') {
-          const r = g.build(this.buildDef, sel.x, sel.y);
+        if (sel?.kind === 'place') {
+          const r = g.build(sel.def, sel.cx, sel.cy);
           this.showResult(r);
-          if (r.ok) this.cb.setSelection({ kind: 'tower', x: sel.x, y: sel.y });
+          // Stay armed so several guns of a kind can be placed in a row.
+          if (r.ok) this.cb.setSelection(null);
         }
+        break;
+      case 'cancel':
+        this.cb.setSelection(null);
+        this.cb.setArmed(null);
         break;
       case 'upgrade':
       case 'sell': {
-        const tower = sel?.kind === 'tower' ? g.towerAt(sel.x, sel.y) : undefined;
+        const tower = sel?.kind === 'tower' ? g.towerById(sel.id) : undefined;
         if (!tower) break;
         if (action === 'upgrade') this.showResult(g.upgrade(tower.id));
         else {

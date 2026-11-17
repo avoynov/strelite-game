@@ -163,6 +163,11 @@ def get(name, style):
     key = (name, style)
     if key in _cache and _cache[key].name in bpy.data.materials:
         return _cache[key]
+    if style == "photoreal":
+        from . import materials_photoreal
+        mat = materials_photoreal.build(name)
+        _cache[key] = mat
+        return mat
     color, metallic, rough, scale = PALETTE[name]
     if name == "bore":
         mat = _bore(style)

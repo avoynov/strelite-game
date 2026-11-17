@@ -10,6 +10,18 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['icon.svg', 'apple-touch-icon.png'],
+      workbox: {
+        // The normal-density art ships with the app for offline play; the sharp
+        // @2x sheets are fetched and kept only once a player zooms in.
+        globPatterns: ['**/*.{js,css,html,svg,png,ico,webmanifest}', 'art/towers.json', 'art/**/*@1x.{webp,json}'],
+        runtimeCaching: [
+          {
+            urlPattern: /\/art\/.*@2x\.(webp|json)$/,
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'art-2x', expiration: { maxEntries: 60 } },
+          },
+        ],
+      },
       manifest: {
         name: 'Стрелите',
         short_name: 'Стрелите',
