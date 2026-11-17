@@ -55,6 +55,8 @@ def main(argv=None):
                     help="also render these firing-animation frames (all if no number) as fire_DD_FF.png "
                          "for the directions in --fire-dirs; the model must define FIRE_FRAMES")
     ap.add_argument("--fire-dirs", type=int, default=16, help="directions of the firing animation")
+    ap.add_argument("--fire-samples", type=int, default=None,
+                    help="samples for the firing frames (motion-blurred, so fewer are enough)")
     ap.add_argument("--enemy", action="store_true",
                     help="moving unit: the whole model turns; writes <out>/enemies/<model>/dir_NN.png")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "out"))
@@ -168,6 +170,8 @@ def render_tower_layers(model, a, level):
     if a.fire is not None and hasattr(model, "set_fire_frame"):
         frames = a.fire or list(range(1, model.FIRE_FRAMES + 1))
         model.key_fire_animation(scene)
+        if a.fire_samples:
+            scene.cycles.samples = a.fire_samples
         scene.render.use_motion_blur = True
         scene.render.motion_blur_shutter = 0.5
         for owner in (scene.render, scene.cycles):          # shutter closes at the frame
