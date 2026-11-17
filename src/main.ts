@@ -163,7 +163,7 @@ async function start(): Promise<void> {
       if (ev.type === 'shot') board.onShot(ev.towerId, ev.projectileId);
       else if (ev.type === 'burst') board.onBurst(ev.x, ev.y, ev.radius);
       else if (ev.type === 'impact') board.onImpact(ev.x, ev.y);
-      else if (ev.type === 'rail') board.onRail(ev.x1, ev.y1, ev.x2, ev.y2);
+      else if (ev.type === 'rail') board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
