@@ -457,11 +457,16 @@ def _traverse_gun(k, gun, level):
                parent=gun, bevel=False)
 
 
-def _traverse_ground(k, root, level):
+def _traverse_ground(k, root, level, deck_r=DECK_R, ring_r=RING_R, track_r=TRACK_R, deck_kind="planks",
+                     trim=None):
     """The ground under the gun: bare soil, a plank deck, a roller track, a toothed ring,
     a steel turntable on a ball race."""
     deck = STYLE[level]["deck"]
-    if 2 <= level <= 4:     # plank deck, boards across, two bearers showing at the edge
+    TRIM = trim or globals()["TRIM"]
+    DECK_R, RING_R, TRACK_R = deck_r, ring_r, track_r
+    if 2 <= level <= 4 and deck_kind == "stone":     # flagstones laid in rings
+        _flagstones(k, root, deck_r, deck, level)
+    elif 2 <= level <= 4:     # plank deck, boards across, two bearers showing at the edge
         w = 0.24
         n = int(2 * DECK_R / w)
         for i in range(n):
@@ -487,7 +492,7 @@ def _traverse_ground(k, root, level):
                        TRIM, segs=8, parent=root, bevel=False)
         k.cylinder("centre_boss", 0.22, 0.03, (0, 0, deck), TRIM, segs=24, parent=root)
     if level >= 3:          # roller track for the trails: sleepers, a rail from level 4
-        n = 44
+        n = int(2 * math.pi * TRACK_R / 0.35)
         for i in range(n):
             ang = 2 * math.pi * i / n
             k.box("sleeper", (0.42, 0.13, 0.05), (math.cos(ang) * TRACK_R, math.sin(ang) * TRACK_R, 0.025),
@@ -501,14 +506,36 @@ def _traverse_ground(k, root, level):
         else:
             for dr in (-0.07, 0.07):
                 k.torus("rail", TRACK_R + dr, 0.018, (0, 0, 0.068), "steel_worn" if level == 4 else "chrome",
-                        parent=root, segs=96, tube_segs=6)
+                        parent=root, segs=max(96, int(TRACK_R * 40)), tube_segs=6)
     if level >= 4:          # toothed traverse ring the pinion walks around
         k.torus("gear_ring", RING_R, 0.03, (0, 0, 0.04), "iron_black", parent=root, segs=80, tube_segs=6)
-        n = 96
+        n = int(2 * math.pi * RING_R / 0.1)
         for i in range(n):
             ang = 2 * math.pi * i / n
             k.box("ring_tooth", (0.05, 0.03, 0.06), (math.cos(ang) * (RING_R + 0.035), math.sin(ang) * (RING_R + 0.035),
                                                      0.04), "steel_worn", rot=(0, 0, ang), parent=root, bevel=False)
+
+
+def _flagstones(k, root, r, top, level):
+    """Dressed stone slabs in concentric rings: a heavier gun's platform."""
+    mat = "stone"
+    rings = int(r / 0.55)
+    k.cylinder("mortar_bed", r + 0.04, top * 0.6, (0, 0, 0), "iron_black", segs=64, parent=root, bevel=False)
+    k.cylinder("stone_core", 0.28, top, (0, 0, 0), mat, segs=16, parent=root)
+    for i in range(1, rings + 1):
+        r0, r1 = 0.3 + (i - 1) * (r - 0.3) / rings, 0.3 + i * (r - 0.3) / rings
+        n = max(6, int(2 * math.pi * (r0 + r1) / 2 / 0.6))
+        off = 0.5 * (i % 2)
+        for j in range(n):
+            g = 0.025 / ((r0 + r1) / 2)                  # 5 cm joints
+            a0 = 2 * math.pi * (j + off) / n + g
+            a1 = 2 * math.pi * (j + 1 + off) / n - g
+            pts = [(r0 + 0.025, a0), (r1 - 0.025, a0), (r1 - 0.025, a1), (r0 + 0.025, a1)]
+            h = top * (0.9 + 0.2 * ((i * 7 + j * 13) % 5) / 4)
+            outline = [(rr * math.cos(aa), rr * math.sin(aa)) for rr, aa in pts]
+            e = k.empty("flag", (0, 0, 0), parent=root)
+            e.rotation_euler = (math.pi / 2, 0, 0)          # prism: x,z outline -> ground plane
+            k.prism("flagstone", outline, h, mat, y=h / 2, parent=e, bevel=0.01)
 
 
 # --------------------------------------------------------------------------

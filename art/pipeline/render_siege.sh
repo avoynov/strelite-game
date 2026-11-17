@@ -15,5 +15,7 @@ for model in $MODELS; do
       --fire --fire-dirs "$FIRE_DIRS" --fire-samples 20 --ground patch --ppm 32 --samples 32 --resume --out "$OUT"
     python3 pack_atlas.py --src "$OUT" --dst ../../public/art --models "$model" --levels "$level"
   done
-  python3 render_projectiles.py --model "$model" --resume --out "$OUT"
+  if grep -q "^def build_round" "strelite_art/models/$model.py"; then
+    python3 render_projectiles.py --model "$model" --resume --out "$OUT"
+  fi
 done
