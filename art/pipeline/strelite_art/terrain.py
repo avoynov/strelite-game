@@ -123,6 +123,7 @@ class Terrain:
     # -- scatter -----------------------------------------------------------
     stone_count, grass_count = 2600, 14000
     tuft_scale = 1.0
+    max_stone_on_tramp = 0.022      # trampled ground is kept clear of bigger stones
 
     def _keep(self, j, i):
         """Scatter filter: may an object stand on grid cell (j, i)?"""
@@ -154,7 +155,7 @@ class Terrain:
             r = rnd.choice([0.008, 0.01, 0.012, 0.012, 0.016, 0.02, 0.026, 0.035, 0.06]) \
                 * rnd.uniform(0.7, 1.4)
             j, ii = self._ij(x, y)
-            if (self.tramp[j, ii] > 0.5 and r > 0.022) or not self._keep(j, ii):
+            if (self.tramp[j, ii] > 0.5 and r > self.max_stone_on_tramp) or not self._keep(j, ii):
                 continue
             o = bpy.data.objects.new("stone", rnd.choice(variants))
             o["terrain"] = True
@@ -244,6 +245,33 @@ class Field(Terrain):
         self.grass_count = int(s * s * 15)
 
 
+class Road(Field):
+    """Packed earth for the enemies' road: bare, pale, compacted soil with gravel and
+    no grass. Nothing in it has a direction (no ruts, no tracks), because the game
+    cuts the road's shape out of this tile for any heading. The relief and the stones
+    are coarser than real packed earth so that the surface still has texture at the
+    game's 16 to 32 pixels per metre."""
+    max_stone_on_tramp = 1.0
+
+    def __init__(self, size_m, cell=0.05, seed=47):
+        self.size, self.seed = size_m, seed
+        self.n = n = int(size_m / cell) + 1
+        rng = np.random.default_rng(seed)
+        s = size_m
+        h = _fbm(n, rng, [(int(s / 6), 0.012), (int(s / 1.4), 0.012), (int(s / 0.55), 0.011),
+                          (int(s / 0.23), 0.004)])
+        self.ax = np.linspace(-s / 2, s / 2, n, dtype=np.float32)
+        worn = _fbm(n, rng, [(int(s / 2.5), 0.5), (int(s / 0.9), 0.35), (int(s / 0.35), 0.25)])
+        tramp = np.clip(0.78 + worn * 0.3, 0.4, 1.0)
+        damp = _fbm(n, rng, [(int(s / 3.5), 0.6), (int(s / 1.3), 0.45), (int(s / 0.5), 0.3)])
+        self.rut = np.clip(0.2 + damp * 0.42, 0.0, 0.65).astype(np.float32)  # darker, firmer spots
+        self.h = h.astype(np.float32)
+        self.tramp, self.cover = tramp.astype(np.float32), np.zeros_like(self.h)
+        self.rng = random.Random(seed)
+        self.stone_count = int(s * s * 9)
+        self.grass_count = 0
+
+
 class Patch(Terrain):
     """The piece of ground a tower sprite brings with it: trampled soil under the
     gun that fades out (alpha) into whatever ground the game draws around it.
@@ -258,7 +286,7 @@ class Patch(Terrain):
     stone_count, grass_count = 0, 0
     CATCHER_INSET = 1.0     # the shadow catcher starts this far inside r_solid
 
-    def __init__(self, r_solid=6.0, r_out=6.8, r_bare=4.3, cell=0.04, seed=11):
+    def __init__(self, r_solid=6.0, r_out=6.8, r_bare=4.3, cell=0.04, seed=11, ragged=0.9):
         self.r_solid, self.r_out = r_solid, r_out
         self.size = s = 2 * r_out + 0.4
         self.seed = seed
@@ -269,7 +297,7 @@ class Patch(Terrain):
         self.r = r = np.sqrt(X * X + Y * Y)
         h = _fbm(n, rng, [(int(s / 1.6), 0.012), (int(s / 0.45), 0.009), (int(s / 0.13), 0.005)])
         edge = _fbm(n, rng, [(int(s / 1.3), 0.5), (int(s / 0.4), 0.25), (int(s / 0.12), 0.1)])
-        edge = np.clip(edge, -0.9, 0.9)         # so the soil is solid inside r_solid - 0.9
+        edge = np.clip(edge, -ragged, ragged)   # so the soil is solid inside r_solid - ragged
         alpha = 1.0 - _smooth((r + edge - r_solid) / (r_out - r_solid))
         alpha = np.where(r > r_out, 0.0, alpha)
         tramp_n = _fbm(n, rng, [(int(s / 2.5), 0.5), (int(s / 0.8), 0.3)])
@@ -302,10 +330,16 @@ class Patch(Terrain):
         self.cover *= 1 - m
         return self
 
-    def pit(self, radius, depth, bank=0.3, bank_width=1.3):
-        """Dig a round pit; the spoil is thrown up as a bank around it."""
+    def pit(self, radius, depth, bank=0.3, bank_width=1.3, gap=None):
+        """Dig a round pit; the spoil is thrown up as a bank around it. gap = (deg0, deg1)
+        keeps a sector of the rim level (no bank), e.g. for the ammunition point."""
         inside = _smooth((radius - self.r) / 0.06)
         ring = np.exp(-(((self.r - radius - bank_width * 0.45) / (bank_width * 0.42)) ** 2))
+        if gap is not None:
+            ang = np.degrees(np.arctan2(self.Y, self.X))
+            mid, half = (gap[0] + gap[1]) / 2, (gap[1] - gap[0]) / 2
+            off = np.abs((ang - mid + 180.0) % 360.0 - 180.0)
+            ring = ring * _smooth((off - half) / 9.0)
         lump = _fbm(self.n, np.random.default_rng(self.seed + 1),
                     [(int(self.size / 0.9), 0.35), (int(self.size / 0.3), 0.2)])
         self.h = (self.h * (1 - inside) + (self.h * 0.5 - depth) * inside
