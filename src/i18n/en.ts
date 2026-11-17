@@ -152,4 +152,7 @@ export const en: Record<MessageKey, string> = {
   'action.levels': "Levels",
   'action.back': "Back",
   'action.retry': "Try again",
+  'levels.prev': "Previous 100",
+  'levels.nextPage': "Next 100",
+  'levels.range': "Levels {from}–{to}",
 };

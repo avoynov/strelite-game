@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/sim/game';
-import { FIRST_LEVEL_WAVES, levelMap, levelSwing, levelWaves, MAX_WAVES, MIN_SWING } from '../src/sim/levels';
+import { FIRST_LEVEL_WAVES, levelMap, levelPages, levelSwing, levelWaves, MAX_WAVES, MIN_SWING } from '../src/sim/levels';
 import { buildPathMap } from '../src/sim/maps';
 
 describe('generated levels', () => {
@@ -17,6 +17,13 @@ describe('generated levels', () => {
   it('roads only get straighter, a step at a time, down to a floor', () => {
     for (let l = 2; l <= 600; l++) expect(levelSwing(l - 1) - levelSwing(l)).toBeGreaterThanOrEqual(0);
     expect(levelSwing(5000)).toBe(MIN_SWING);
+  });
+
+  it('lists levels in pages of 100, opening the next page once the player reaches it', () => {
+    expect(levelPages(0)).toBe(1);
+    expect(levelPages(99)).toBe(1);
+    expect(levelPages(100)).toBe(2);
+    expect(levelPages(250)).toBe(3);
   });
 
   it('is the same level every time for the same number', () => {

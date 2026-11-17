@@ -1,9 +1,9 @@
 import { t } from '../i18n';
-import { LEVELS_AHEAD, levelWaves } from '../sim/levels';
+import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
 
 /**
- * Level list: every level won so far, the next one to fight, and a long run of
- * locked ones after it, so the list always seems to go on a while further.
+ * Level list in pages of 100: levels won, the next one to fight and the locked
+ * rest of its page. The next page appears once the player reaches it.
  */
 
 export interface LevelsCallbacks {
@@ -17,6 +17,8 @@ export interface LevelsCallbacks {
 
 export class LevelSelect {
   readonly el: HTMLElement;
+  /** Page shown, 0-based. */
+  private page = 0;
 
   constructor(private readonly cb: LevelsCallbacks) {
     this.el = document.createElement('div');
@@ -31,6 +33,12 @@ export class LevelSelect {
         this.close();
         return;
       }
+      if (btn.dataset.lv === 'prev' || btn.dataset.lv === 'next') {
+        this.page += btn.dataset.lv === 'next' ? 1 : -1;
+        this.render();
+        this.el.querySelector('.lv-list')?.scrollTo(0, 0);
+        return;
+      }
       const level = Number(btn.dataset.lv);
       this.el.hidden = true;
       this.cb.play(level);
@@ -42,6 +50,8 @@ export class LevelSelect {
   }
 
   open(): void {
+    // Start on the page of the next level to fight.
+    this.page = levelPages(this.cb.won()) - 1;
     this.render();
     this.el.hidden = false;
     // Bring the next level to fight into view.
@@ -61,9 +71,12 @@ export class LevelSelect {
   private render(): void {
     const won = this.cb.won();
     const current = this.cb.current();
-    const last = won + 1 + LEVELS_AHEAD;
+    const pages = levelPages(won);
+    this.page = Math.min(Math.max(0, this.page), pages - 1);
+    const from = this.page * LEVELS_PER_PAGE + 1;
+    const to = from + LEVELS_PER_PAGE - 1;
     const items: string[] = [];
-    for (let n = 1; n <= last; n++) {
+    for (let n = from; n <= to; n++) {
       const state = n <= won ? 'won' : n === won + 1 ? 'next' : 'locked';
       items.push(`
         <li><button class="lv ${state}${n === current ? ' current' : ''}" data-lv="${n}" ${state === 'locked' ? 'disabled' : ''}>
@@ -79,6 +92,13 @@ export class LevelSelect {
           <h1 class="lab-title">${t('levels.title')}</h1>
         </div>
       </header>
+      ${pages > 1
+        ? `<nav class="lv-pages">
+            <button class="chip" data-lv="prev" ${this.page === 0 ? 'disabled' : ''} aria-label="${t('levels.prev')}">‹</button>
+            <span>${t('levels.range', { from, to })}</span>
+            <button class="chip" data-lv="next" ${this.page >= pages - 1 ? 'disabled' : ''} aria-label="${t('levels.nextPage')}">›</button>
+          </nav>`
+        : ''}
       <ol class="lv-list">${items.join('')}</ol>
       <footer class="lab-foot">
         <p class="lv-note">${t('levels.replay')}</p>

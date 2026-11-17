@@ -151,6 +151,9 @@ export const bg = {
   'action.levels': "Нива",
   'action.back': "Назад",
   'action.retry': "Опитай пак",
+  'levels.prev': "Предишни 100",
+  'levels.nextPage': "Следващи 100",
+  'levels.range': "Нива {from}–{to}",
 } as const;
 
 export type MessageKey = keyof typeof bg;

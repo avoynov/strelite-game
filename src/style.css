@@ -401,7 +401,8 @@ html, body {
   color: var(--text);
 }
 .lab[hidden], .levels[hidden] { display: none; }
-.levels { grid-template-rows: auto 1fr auto; }
+.levels { display: flex; flex-direction: column; }
+.levels .lv-list { flex: 1; }
 .lab-head {
   display: flex; align-items: end; justify-content: space-between; gap: 12px;
   padding: calc(var(--safe-top) + 18px) 16px 10px;
@@ -466,3 +467,5 @@ html, body {
 .lv:disabled { opacity: 0.35; }
 .lv:active:not(:disabled) { transform: scale(0.97); }
 .lv-note { margin: 0; font-size: 13px; color: var(--muted); }
+.lv-pages { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 16px 10px; font: 600 15px/1 var(--display); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
+.lv-pages .chip:disabled { opacity: 0.35; }

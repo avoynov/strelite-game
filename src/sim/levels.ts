@@ -17,8 +17,13 @@ export const FIRST_SWING = 7;
 export const STRAIGHTER_CHANCE = 0.12;
 /** The road never swings less than this (it keeps a few pockets for heavy guns). */
 export const MIN_SWING = 3;
-/** Levels shown ahead of the furthest one won, so the end is never in sight. */
-export const LEVELS_AHEAD = 100;
+/** The level list shows levels in pages of this many; a page opens once the player reaches it. */
+export const LEVELS_PER_PAGE = 100;
+
+/** Pages of the level list the player can see: up to the one holding the next level to win. */
+export function levelPages(won: number): number {
+  return Math.floor(won / LEVELS_PER_PAGE) + 1;
+}
 
 const COLS = 30;
 const BAND = 8;
