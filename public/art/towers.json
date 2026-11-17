@@ -1924,6 +1924,17 @@
     0.76
    ],
    "blend": "normal"
+  },
+  "stone_impact": {
+   "sheet": "effects/stone_impact",
+   "frames": "stone_impact",
+   "count": 14,
+   "fps": 24,
+   "anchor": [
+    0.5,
+    0.72
+   ],
+   "blend": "normal"
   }
  }
 }
