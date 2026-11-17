@@ -90,7 +90,7 @@ export class Hud {
 
   showResult(r: ActionResult): void {
     if (r.ok) return;
-    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
+    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', blocks: 'reason.blocks', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
     if (r.reason === 'locked') {
       this.showToast(t('reason.locked'));
       return;
@@ -105,7 +105,7 @@ export class Hud {
     const top = `
       <div class="stat" title="${t('hud.money')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${g.money}</b></div>
       <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
-      <button class="stat wave" data-action="levels" title="${t('action.levels')}"><span>${t('hud.level', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></button>
+      <button class="stat wave" data-action="levels" title="${t('action.levels')}"><span>${g.mode === 'arc' ? `${t('mode.arc')} · ` : ''}${t('hud.level', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></button>
       <div class="spacer"></div>
       ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>` : ''}
       <button class="chip chip-ico" data-action="lab" aria-label="${t('action.lab')}" title="${t('action.lab')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg></button>

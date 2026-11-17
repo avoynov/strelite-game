@@ -155,4 +155,9 @@ export const en: Record<MessageKey, string> = {
   'levels.prev': "Previous 100",
   'levels.nextPage': "Next 100",
   'levels.range': "Levels {from}–{to}",
+  'mode.path': "Road",
+  'mode.path.hint': "Enemies follow a road",
+  'mode.arc': "Arc",
+  'mode.arc.hint': "They come from a widening arc",
+  'reason.blocks': "That would shut the way to the goal.",
 };

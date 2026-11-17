@@ -4,7 +4,7 @@ import { ECONOMY, ENEMIES, TOWERS, type EnemyId, type TowerDef, type TowerId, ty
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
-import { levelWaves } from './levels';
+import { arcHalfWidth, arcHpFactor, levelWaves } from './levels';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
@@ -108,7 +108,7 @@ export type GameEvent =
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' };
 
 export interface GameOptions {
   /** Map level, 1-based: decides which guns can be built and which enemies attack. */
@@ -164,7 +164,8 @@ export function startMoney(level: number): number {
 }
 
 export class Game {
-  readonly flow: FlowField;
+  /** Distance field to the goal; rebuilt in arc mode whenever a gun is built or sold. */
+  flow: FlowField;
   money: number;
   lives = ECONOMY.startLives;
   /** Number of the current or last started wave, 0 before the first. */
@@ -205,11 +206,27 @@ export class Game {
     this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
     this.waves = opts.waves ?? waveSpec;
-    this.flow = new FlowField(map.grid, map.goals, (x, y) => map.grid.get(x, y) === 'path');
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
+    this.flow = this.makeFlow(this.occupied);
   }
 
   // ---- queries -------------------------------------------------------------
+
+  get mode(): 'path' | 'arc' {
+    return this.map.mode;
+  }
+
+  /** Arc mode: half-width (radians) of the sector the running or next wave comes from. */
+  arcWidth(): number {
+    const n = this.phase === 'wave' ? this.wave : Math.min(this.wave + 1, this.totalWaves);
+    return arcHalfWidth(n, this.totalWaves, this.level);
+  }
+
+  /** Arc mode: the edge cells the running or next wave comes in from. */
+  activeSpawns(): Cell[] {
+    const w = this.arcWidth();
+    return (this.map.arcSpawns ?? []).filter((s) => Math.abs(s.off) <= w);
+  }
 
   /** The tower whose footprint covers this cell. */
   towerAt(cx: number, cy: number): Tower | undefined {
@@ -300,7 +317,8 @@ export class Game {
   }
 
   canBuildAt(def: TowerId, cx: number, cy: number): boolean {
-    return this.placementError(def, cx, cy) === null;
+    if (this.placementError(def, cx, cy) !== null) return false;
+    return this.mode !== 'arc' || this.blockError(cx, cy, TOWERS[def].size) === null;
   }
 
   /** Enemies still to come in the running wave. */
@@ -325,6 +343,10 @@ export class Game {
     const d = TOWERS[def];
     const cost = d.levels[0].cost;
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    if (this.mode === 'arc') {
+      const block = this.blockError(cx, cy, d.size);
+      if (block) return { ok: false, reason: block };
+    }
     this.money -= cost;
     const tower: Tower = {
       id: this.nextId++,
@@ -344,6 +366,7 @@ export class Game {
     };
     this.towers.push(tower);
     this.markFootprint(tower, tower.id);
+    this.rebuildFlow();
     return { ok: true };
   }
 
@@ -366,6 +389,7 @@ export class Game {
     this.money += this.sellValue(t);
     this.markFootprint(t, 0);
     this.towers = this.towers.filter((o) => o !== t);
+    this.rebuildFlow();
     return { ok: true };
   }
 
@@ -412,8 +436,50 @@ export class Game {
     }
   }
 
-  /** A new gun starts pointing at the nearest stretch of road. */
+  /** Ground the walkers may use: the road in path mode; open, unbuilt ground in arc mode. */
+  private makeFlow(occupied: Int32Array): FlowField {
+    const { grid } = this.map;
+    if (this.map.mode === 'path') return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) === 'path');
+    return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked' && !occupied[grid.index(x, y)]);
+  }
+
+  /** Arc mode: after the guns changed, walk around them; a walker whose next cell is now built on steps back to its own. */
+  private rebuildFlow(): void {
+    if (this.mode !== 'arc') return;
+    this.flow = this.makeFlow(this.occupied);
+    for (const e of this.enemies) {
+      if (e.air || this.flow.distanceAt(e.target.x, e.target.y) >= 0) continue;
+      e.target = { x: Math.floor(e.x), y: Math.floor(e.y) };
+    }
+  }
+
+  /**
+   * Arc mode: a gun may not stand on a walker, nor shut the goal off from any
+   * edge enemies can come from or from any walker already on the field.
+   */
+  private blockError(cx: number, cy: number, size: number): 'occupied' | 'blocks' | null {
+    for (const e of this.enemies) {
+      if (e.air) continue;
+      const ex = Math.floor(e.x);
+      const ey = Math.floor(e.y);
+      const onIt = (x: number, y: number) => x >= cx && x < cx + size && y >= cy && y < cy + size;
+      if (onIt(ex, ey) || onIt(e.target.x, e.target.y)) return 'occupied';
+    }
+    const trial = this.occupied.slice();
+    for (let y = cy; y < cy + size; y++) for (let x = cx; x < cx + size; x++) trial[this.map.grid.index(x, y)] = -1;
+    const flow = this.makeFlow(trial);
+    const cut = (c: Cell) => flow.distanceAt(c.x, c.y) < 0;
+    if ((this.map.arcSpawns ?? []).some(cut)) return 'blocks';
+    if (this.enemies.some((e) => !e.air && cut({ x: Math.floor(e.x), y: Math.floor(e.y) }))) return 'blocks';
+    return null;
+  }
+
+  /** A new gun starts pointing at the nearest stretch of road (in arc mode: out towards the arc). */
   private initialAim(x: number, y: number): number {
+    if (this.mode === 'arc') {
+      const g = this.map.goals[0]!;
+      return Math.atan2(y - g.y - 1, x - g.x - 1);
+    }
     const { grid } = this.map;
     let best = Infinity;
     let aim = -Math.PI / 2;
@@ -438,12 +504,21 @@ export class Game {
       if (st.left <= 0) return;
       st.timer -= dt;
       while (st.left > 0 && st.timer <= 0) {
-        const s = this.map.spawns[this.spawned++ % this.map.spawns.length]!;
-        this.enemies.push(this.makeEnemy(g.enemy, g.hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
+        const s = this.spawnCell();
+        const hp = this.mode === 'arc' ? Math.round(g.hp * arcHpFactor(this.level)) : g.hp;
+        this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
       }
     });
+  }
+
+  /** Where the next enemy enters: the road's start, or (arc mode) a cell of the current arc, spread evenly over it. */
+  private spawnCell(): Cell {
+    const n = this.spawned++;
+    if (this.mode !== 'arc') return this.map.spawns[n % this.map.spawns.length]!;
+    const cells = this.activeSpawns();
+    return cells[Math.floor(hash01(n * 2654435761 + this.wave) * cells.length)] ?? this.map.arcSpawns![0]!;
   }
 
   private makeEnemy(def: EnemyId, hp: number, reward: number, x: number, y: number, target: Cell): Enemy {

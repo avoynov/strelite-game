@@ -275,6 +275,39 @@ export class BoardRenderer {
         else g.poly(pts).fill({ color: PALETTE.path, alpha: alpha * 0.8 });
       }
     }
+    if (this.game.mode === 'arc') this.drawArcField(g);
+  }
+
+  /** Arc mode: rock outcrops inside the field and the fortified goal (drawn stand-ins until there is art). */
+  private drawArcField(g: Graphics): void {
+    const { grid } = this.game.map;
+    const band = (x: number, y: number) => grid.inBounds(x, y) && Math.abs(x - y) <= 10;
+    for (let y = 0; y < grid.rows; y++) {
+      for (let x = 0; x < grid.cols; x++) {
+        if (grid.get(x, y) !== 'blocked' || !band(x, y)) continue;
+        const d = diamond(x, y, x + 1, y + 1);
+        g.poly(d).fill({ color: PALETTE.rockShade, alpha: 0.95 });
+        g.poly(diamond(x + 0.15, y + 0.15, x + 0.85, y + 0.85).map((v, i) => (i % 2 ? v - 6 : v))).fill({ color: PALETTE.rock });
+      }
+    }
+    const goals = this.game.map.goals;
+    const gx = Math.min(...goals.map((c) => c.x));
+    const gy = Math.min(...goals.map((c) => c.y));
+    const size = 2;
+    // Earth rampart, a raised stone keep and a flag.
+    g.poly(diamond(gx - 0.2, gy - 0.2, gx + size + 0.2, gy + size + 0.2)).fill({ color: PALETTE.pathEdge, alpha: 0.9 });
+    const lift = 18;
+    const top = diamond(gx + 0.3, gy + 0.3, gx + size - 0.3, gy + size - 0.3);
+    const raised = top.map((v, i) => (i % 2 ? v - lift : v));
+    // Side walls: the two lower faces of the keep.
+    const [, , rx, ry, bx, by, lx, ly] = top as [number, number, number, number, number, number, number, number];
+    g.poly([lx, ly, bx, by, bx, by - lift, lx, ly - lift]).fill({ color: PALETTE.rockShade });
+    g.poly([bx, by, rx, ry, rx, ry - lift, bx, by - lift]).fill({ color: PALETTE.rock });
+    g.poly(raised).fill({ color: PALETTE.towerBaseTop }).stroke({ width: 1, color: PALETTE.towerBaseSide });
+    const cx = isoX(gx + size / 2, gy + size / 2);
+    const cy = isoY(gx + size / 2, gy + size / 2) - lift;
+    g.moveTo(cx, cy).lineTo(cx, cy - 34).stroke({ width: 2, color: PALETTE.towerGun });
+    g.poly([cx, cy - 34, cx + 16, cy - 29, cx, cy - 24]).fill({ color: PALETTE.goal });
   }
 
   // ---- events from the simulation ------------------------------------------
@@ -420,10 +453,15 @@ export class BoardRenderer {
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level])]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.mode === 'arc' ? game.arcWidth() : 0]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
+
+    // Arc mode: mark the stretch of edge the running or next wave comes in from.
+    if (game.mode === 'arc') {
+      for (const c of game.activeSpawns()) o.poly(diamond(c.x, c.y, c.x + 1, c.y + 1)).fill({ color: PALETTE.invalid, alpha: 0.28 });
+    }
 
     // While a gun is picked for building, show where it can stand.
     if (selection?.kind === 'place' || (armed && !selection)) {

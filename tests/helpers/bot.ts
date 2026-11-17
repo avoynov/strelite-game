@@ -1,38 +1,62 @@
 import { TICK, TOWER_IDS, TOWERS, type TowerId } from '../../src/sim/content';
 import type { Game } from '../../src/sim/game';
 
-/** Number of road cells a gun at this anchor could reach. */
+/**
+ * How much each cell is walked: 1 per road cell in path mode; in arc mode the
+ * number of routes from the arc's edge cells to the goal that pass through it.
+ */
+const traffic = new WeakMap<object, Float32Array>();
+function trafficOf(g: Game): Float32Array {
+  const key = g.mode === 'arc' ? g.flow : g.map;
+  let t = traffic.get(key);
+  if (t) return t;
+  const { grid } = g.map;
+  t = new Float32Array(grid.cols * grid.rows);
+  if (g.mode === 'path') {
+    for (let i = 0; i < t.length; i++) if (grid.cells[i] === 'path') t[i] = 1;
+  } else {
+    for (const s of g.map.arcSpawns ?? []) {
+      // Edge cells the enemies come from all through the level count alike.
+      for (let c: { x: number; y: number } | null = s; c; c = g.flow.next(c.x, c.y)) t[grid.index(c.x, c.y)]! += 1 / 8;
+    }
+  }
+  traffic.set(key, t);
+  return t;
+}
+
+/** How much traffic a gun at this anchor could reach. */
 function coverage(g: Game, def: TowerId, cx: number, cy: number): number {
   const d = TOWERS[def];
   const range = d.levels[0].range;
   const min = 'minRange' in d ? d.minRange : 0;
   const x = cx + d.size / 2;
   const y = cy + d.size / 2;
+  const t = trafficOf(g);
+  const { grid } = g.map;
   let n = 0;
-  for (let py = 0; py < g.map.grid.rows; py++) {
-    for (let px = 0; px < g.map.grid.cols; px++) {
-      if (g.map.grid.get(px, py) !== 'path') continue;
+  for (let py = Math.max(0, Math.floor(y - range)); py <= Math.min(grid.rows - 1, y + range); py++) {
+    for (let px = Math.max(0, Math.floor(x - range)); px <= Math.min(grid.cols - 1, x + range); px++) {
+      const w = t[grid.index(px, py)]!;
+      if (!w) continue;
       const dist = Math.hypot(px + 0.5 - x, py + 0.5 - y);
-      if (dist <= range && dist >= min) n++;
+      if (dist <= range && dist >= min) n += Math.min(w, 4);
     }
   }
   return n;
 }
 
 function bestSpot(g: Game, def: TowerId): { cx: number; cy: number } | null {
-  let best: { cx: number; cy: number } | null = null;
-  let bestScore = 0;
+  const spots: { cx: number; cy: number; score: number }[] = [];
   for (let cy = 0; cy < g.map.grid.rows; cy++) {
     for (let cx = 0; cx < g.map.grid.cols; cx++) {
-      if (!g.canBuildAt(def, cx, cy)) continue;
+      if (g.placementError(def, cx, cy)) continue;
       const score = coverage(g, def, cx, cy);
-      if (score > bestScore) {
-        bestScore = score;
-        best = { cx, cy };
-      }
+      if (score > 0) spots.push({ cx, cy, score });
     }
   }
-  return best;
+  // Best first; the (costly) check that the spot keeps the way open only for the leaders.
+  spots.sort((a, b) => b.score - a.score);
+  return spots.find((p) => g.canBuildAt(def, p.cx, p.cy)) ?? null;
 }
 
 /** How much of its money a sensible player puts into each gun, relative to the others. */

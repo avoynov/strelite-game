@@ -8,8 +8,8 @@ import { TowerArt } from './render/towers/spriteTowerView';
 import { TICK, TOWERS, type TowerId } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
-import { buildPathMap } from './sim/maps';
-import { levelMap } from './sim/levels';
+import { buildArcMap, buildPathMap, type Mode } from './sim/maps';
+import { levelArcMap, levelMap } from './sim/levels';
 import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
@@ -19,8 +19,22 @@ import { ResearchStore } from './researchStore';
 import { battleTakings, researchItem } from './sim/research';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
-const LEVEL_KEY = 'strelite.level';
-const WON_KEY = 'strelite.won';
+const MODE_KEY = 'strelite.mode';
+
+function readMode(): Mode {
+  const fromUrl = new URLSearchParams(location.search).get('mode');
+  if (fromUrl === 'arc' || fromUrl === 'path') return fromUrl;
+  try {
+    return localStorage.getItem(MODE_KEY) === 'arc' ? 'arc' : 'path';
+  } catch {
+    return 'path';
+  }
+}
+
+let mode: Mode = readMode();
+/** Each mode keeps its own progress through the levels. */
+const levelKey = () => (mode === 'arc' ? 'strelite.level.arc' : 'strelite.level');
+const wonKey = () => (mode === 'arc' ? 'strelite.won.arc' : 'strelite.won');
 
 function readNumber(key: string): number {
   try {
@@ -30,22 +44,24 @@ function readNumber(key: string): number {
   }
 }
 
-function saveNumber(key: string, n: number): void {
+function saveString(key: string, v: string): void {
   try {
-    localStorage.setItem(key, String(n));
+    localStorage.setItem(key, v);
   } catch {
     // Private mode or blocked storage: it just is not remembered.
   }
 }
 
+const saveNumber = (key: string, n: number) => saveString(key, String(n));
+
 /** Highest map level won so far. */
-const wonLevel = () => readNumber(WON_KEY);
+const wonLevel = () => readNumber(wonKey());
 
 /** Map level to play: `?level=N` wins, else the last one played (never past the next unwon), else 1. */
 function startLevel(): number {
   const fromUrl = Number(new URLSearchParams(location.search).get('level'));
   if (fromUrl >= 1) return Math.floor(fromUrl);
-  return Math.min(Math.max(1, readNumber(LEVEL_KEY)), wonLevel() + 1);
+  return Math.min(Math.max(1, readNumber(levelKey())), wonLevel() + 1);
 }
 
 async function start(): Promise<void> {
@@ -71,7 +87,8 @@ async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // `?fastresearch` runs research timers 600× faster, for trying the tree out.
   const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
-  const newGame = (level: number) => new Game(buildPathMap(levelMap(level)), { level, upgrades: research.upgrades() });
+  const newGame = (level: number) =>
+    new Game(mode === 'arc' ? buildArcMap(levelArcMap(level)) : buildPathMap(levelMap(level)), { level, upgrades: research.upgrades() });
   let game = newGame(startLevel());
   /** Gold this battle put in the treasury when it ended; null while it runs. */
   let banked: number | null = null;
@@ -94,7 +111,7 @@ async function start(): Promise<void> {
     setSpeed: (s) => (loop.speed = s),
     restart: (level = game.level) => {
       const speed = loop.speed;
-      saveNumber(LEVEL_KEY, level);
+      saveNumber(levelKey(), level);
       board.destroy();
       game = newGame(level);
       banked = null;
@@ -116,7 +133,12 @@ async function start(): Promise<void> {
 
   const levels = new LevelSelect({
     won: wonLevel,
-    current: () => game.level,
+    current: () => (game.mode === mode ? game.level : 0),
+    mode: () => mode,
+    setMode: (m) => {
+      mode = m;
+      saveString(MODE_KEY, m);
+    },
     play: (level) => hud.restartAt(level),
     close: () => hud.update(),
   });
@@ -175,7 +197,10 @@ async function start(): Promise<void> {
       const g = board.gridAt(sx, sy);
       const size = TOWERS[armed].size;
       selection = { kind: 'place', def: armed, cx: Math.round(g.x - size / 2), cy: Math.round(g.y - size / 2) };
-      if (!game.canBuildAt(armed, selection.cx, selection.cy)) hud.showToast(t(game.placementError(armed, selection.cx, selection.cy) === 'occupied' ? 'reason.occupied' : 'hint.notBuildable'));
+      if (!game.canBuildAt(armed, selection.cx, selection.cy)) {
+        const err = game.placementError(armed, selection.cx, selection.cy);
+        hud.showToast(t(err === 'occupied' ? 'reason.occupied' : err ? 'hint.notBuildable' : 'reason.blocks'));
+      }
     } else {
       selection = null;
     }
@@ -225,7 +250,7 @@ async function start(): Promise<void> {
     if (banked === null && (game.phase === 'won' || game.phase === 'lost')) {
       banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
       research.bank(banked);
-      if (game.phase === 'won' && game.level > wonLevel()) saveNumber(WON_KEY, game.level);
+      if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);

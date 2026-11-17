@@ -469,3 +469,8 @@ html, body {
 .lv-note { margin: 0; font-size: 13px; color: var(--muted); }
 .lv-pages { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 0 16px 10px; font: 600 15px/1 var(--display); letter-spacing: 0.06em; font-variant-numeric: tabular-nums; }
 .lv-pages .chip:disabled { opacity: 0.35; }
+.lv-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 16px 12px; }
+.lv-mode { display: grid; gap: 2px; padding: 10px 12px; text-align: left; border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.04); color: var(--text); font: inherit; }
+.lv-mode b { font: 600 18px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; }
+.lv-mode span { font-size: 12px; color: var(--muted); }
+.lv-mode.on { border-color: var(--brass); background: rgba(211, 154, 63, 0.14); box-shadow: inset 0 0 0 1px var(--brass); }

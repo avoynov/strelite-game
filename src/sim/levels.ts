@@ -1,4 +1,4 @@
-import type { PathMapSpec } from './maps';
+import type { ArcMapSpec, PathMapSpec } from './maps';
 
 /**
  * Generated map levels. Nothing about a level is stored: its number seeds
@@ -75,4 +75,49 @@ export function levelMap(level: number): PathMapSpec {
     if (x === COLS - 1 || y === COLS - 1) break;
   }
   return { id: `level-${level}`, cols: COLS, rows: COLS, band: BAND, waypoints };
+}
+
+// ---- arc mode ---------------------------------------------------------------
+
+const ARC_BAND = 10;
+const DEG = Math.PI / 180;
+/**
+ * Arc mode dials, tuned with the bot (tests/balance.test.ts). Half-widths of
+ * the sector enemies come from, in radians: `start` on a level's first wave;
+ * `endFirst` on level 1's last wave, each level widening the last wave by
+ * `growth`, never past `max` (enemies never come from behind the goal).
+ * Enemy health in arc mode relative to path mode: `hpFirst` on level 1, less
+ * by `hpStep` each level (the widening arc already makes later levels harder),
+ * never under `hpMin`.
+ */
+export const ARC_TUNING = { start: 15 * DEG, endFirst: 40 * DEG, growth: 1 * DEG, max: 60 * DEG, hpFirst: 1.35, hpStep: 0.05, hpMin: 0.75 };
+
+/** Arc mode: enemy health relative to path mode on a level. */
+export function arcHpFactor(level: number): number {
+  return Math.max(ARC_TUNING.hpMin, ARC_TUNING.hpFirst - ARC_TUNING.hpStep * (level - 1));
+}
+
+/** Half-width of the sector enemies come from on wave n (1-based) of `total`. */
+export function arcHalfWidth(n: number, total: number, level: number): number {
+  const { start, endFirst, growth, max } = ARC_TUNING;
+  const end = Math.min(max, endFirst + growth * (level - 1));
+  const t = total > 1 ? (Math.max(1, Math.min(n, total)) - 1) / (total - 1) : 1;
+  return start + (end - start) * t;
+}
+
+/** The open field for a level in arc mode: the goal near the bottom, a few rock outcrops. */
+export function levelArcMap(level: number): ArcMapSpec {
+  const goal: [number, number] = [24, 24];
+  const rocks: Array<[number, number]> = [];
+  const count = 3 + Math.floor(rand(level, 3) * 4);
+  for (let i = 0; rocks.length < count && i < 60; i++) {
+    const x = Math.floor(rand(level, 200 + i * 2) * (COLS - 2));
+    const y = x + Math.round((rand(level, 201 + i * 2) * 2 - 1) * (ARC_BAND - 2));
+    if (y < 1 || y > COLS - 3) continue;
+    // Keep clear of the goal and of each other, so the field stays open.
+    if (Math.hypot(x - goal[0], y - goal[1]) < 6) continue;
+    if (rocks.some(([rx, ry]) => Math.abs(rx - x) < 4 && Math.abs(ry - y) < 4)) continue;
+    rocks.push([x, y]);
+  }
+  return { id: `arc-${level}`, cols: COLS, rows: COLS, band: ARC_BAND, goal, rocks, minSpawnDistance: 12 };
 }

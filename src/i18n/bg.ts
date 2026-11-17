@@ -154,6 +154,11 @@ export const bg = {
   'levels.prev': "Предишни 100",
   'levels.nextPage': "Следващи 100",
   'levels.range': "Нива {from}–{to}",
+  'mode.path': "Път",
+  'mode.path.hint': "Враговете вървят по път",
+  'mode.arc': "Дъга",
+  'mode.arc.hint': "Идват от все по-широка дъга",
+  'reason.blocks': "Така ще затвориш пътя до целта.",
 } as const;
 
 export type MessageKey = keyof typeof bg;
