@@ -8,34 +8,44 @@ import { TowerArt } from './render/towers/spriteTowerView';
 import { TICK, TOWERS, type TowerId } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
-import { buildPathMap, MEADOW } from './sim/maps';
+import { buildPathMap } from './sim/maps';
+import { levelMap } from './sim/levels';
+import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
 import { Lab, itemName } from './ui/lab';
 import { ResearchStore } from './researchStore';
-import { researchItem, victoryBonus } from './sim/research';
+import { battleTakings, researchItem } from './sim/research';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
 const LEVEL_KEY = 'strelite.level';
+const WON_KEY = 'strelite.won';
 
-/** Map level to play: `?level=N` wins, else the last one reached, else 1. */
-function startLevel(): number {
-  const fromUrl = Number(new URLSearchParams(location.search).get('level'));
-  if (fromUrl >= 1) return Math.floor(fromUrl);
+function readNumber(key: string): number {
   try {
-    return Math.max(1, Math.floor(Number(localStorage.getItem(LEVEL_KEY)) || 1));
+    return Math.max(0, Math.floor(Number(localStorage.getItem(key)) || 0));
   } catch {
-    return 1;
+    return 0;
   }
 }
 
-function saveLevel(level: number): void {
+function saveNumber(key: string, n: number): void {
   try {
-    localStorage.setItem(LEVEL_KEY, String(level));
+    localStorage.setItem(key, String(n));
   } catch {
-    // Private mode or blocked storage: the level just is not remembered.
+    // Private mode or blocked storage: it just is not remembered.
   }
+}
+
+/** Highest map level won so far. */
+const wonLevel = () => readNumber(WON_KEY);
+
+/** Map level to play: `?level=N` wins, else the last one played (never past the next unwon), else 1. */
+function startLevel(): number {
+  const fromUrl = Number(new URLSearchParams(location.search).get('level'));
+  if (fromUrl >= 1) return Math.floor(fromUrl);
+  return Math.min(Math.max(1, readNumber(LEVEL_KEY)), wonLevel() + 1);
 }
 
 async function start(): Promise<void> {
@@ -61,11 +71,10 @@ async function start(): Promise<void> {
   const params = new URLSearchParams(location.search);
   // `?fastresearch` runs research timers 600× faster, for trying the tree out.
   const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
-  const newGame = (level: number) => new Game(buildPathMap(MEADOW), { level, upgrades: research.upgrades() });
+  const newGame = (level: number) => new Game(buildPathMap(levelMap(level)), { level, upgrades: research.upgrades() });
   let game = newGame(startLevel());
-  /** Gold of this battle already put in the treasury. */
-  let banked = 0;
-  let wonBanked = false;
+  /** Gold this battle put in the treasury when it ended; null while it runs. */
+  let banked: number | null = null;
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
@@ -85,11 +94,10 @@ async function start(): Promise<void> {
     setSpeed: (s) => (loop.speed = s),
     restart: (level = game.level) => {
       const speed = loop.speed;
-      saveLevel(level);
+      saveNumber(LEVEL_KEY, level);
       board.destroy();
       game = newGame(level);
-      banked = 0;
-      wonBanked = false;
+      banked = null;
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -102,8 +110,17 @@ async function start(): Promise<void> {
     },
     openArsenal: () => arsenal.open(armed ?? undefined),
     openLab: () => lab.open(),
-    banked: () => banked,
+    openLevels: () => levels.open(),
+    banked: () => banked ?? 0,
   });
+
+  const levels = new LevelSelect({
+    won: wonLevel,
+    current: () => game.level,
+    play: (level) => hud.restartAt(level),
+    close: () => hud.update(),
+  });
+  document.body.appendChild(levels.el);
 
   const lab = new Lab({
     state: () => research.state,
@@ -170,6 +187,7 @@ async function start(): Promise<void> {
     hud.invalidate();
     arsenal.invalidate();
     lab.invalidate();
+    levels.invalidate();
     relayout();
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
@@ -203,15 +221,11 @@ async function start(): Promise<void> {
       }
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
     }
-    // Gold taken in battle goes to the research treasury as it comes in; a win adds a bonus.
-    if (game.goldEarned > banked) {
-      research.bank(game.goldEarned - banked);
-      banked = game.goldEarned;
-    }
-    if (game.phase === 'won' && !wonBanked) {
-      wonBanked = true;
-      research.bank(victoryBonus(game.level));
-      banked += victoryBonus(game.level);
+    // When the battle ends, the gold it earned and did not spend goes to the treasury (plus a win bonus).
+    if (banked === null && (game.phase === 'won' || game.phase === 'lost')) {
+      banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
+      research.bank(banked);
+      if (game.phase === 'won' && game.level > wonLevel()) saveNumber(WON_KEY, game.level);
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);

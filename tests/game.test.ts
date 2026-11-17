@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { ECONOMY, ENEMIES, TICK, TOWERS } from '../src/sim/content';
 import { angleDelta, Game, startMoney, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { waveSpec } from '../src/sim/waves';
+import { waveOfStrength, waveSpec, waveStrength } from '../src/sim/waves';
 import { run } from './helpers/bot';
 
-/** Level 2 by default: the first level with the howitzer. */
-const newGame = (level = 2) => new Game(buildPathMap(MEADOW), { level });
+/** Map level 2 on the fixed test map, its waves rising from strength 1 (so the first is small). */
+const newGame = (level = 2) => new Game(buildPathMap(MEADOW), { level, totalWaves: 15, waves: (n, l) => waveOfStrength(n, l) });
 /** Lives lost if a whole wave walks through. */
-const leakOf = (n: number) => waveSpec(n, 2).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
+const leakOf = (n: number) => waveOfStrength(n, 2).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
 
 describe('building', () => {
   it('needs the whole footprint on free build cells and charges money', () => {
@@ -101,15 +101,15 @@ describe('fighting', () => {
       g.step(TICK);
       events.push(...g.drainEvents());
     }
-    const spec = waveSpec(1, 2).groups[0]!;
+    const spec = waveOfStrength(1, 2).groups[0]!;
     // Every direct hit is announced as an impact, for the board's hit effect.
     expect(events.filter((e) => e.type === 'impact').length).toBe(events.filter((e) => e.type === 'hit').length);
     expect(g.lives).toBe(ECONOMY.startLives);
-    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveSpec(1, 2).clearBonus);
+    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveOfStrength(1, 2).clearBonus);
     const sum = (k: 'dealt' | 'kills' | 'wasted') => g.towers.reduce((s, t) => s + t.stats[k], 0);
     expect(sum('kills')).toBe(spec.count);
     expect(sum('dealt')).toBeCloseTo(spec.count * spec.hp);
-    // 45 damage into a 21 hp soldier: over half of every shot is overkill.
+    // 45 damage into a soldier with less: the rest of every shot is overkill.
     expect(sum('wasted')).toBeGreaterThanOrEqual(spec.count * (45 - spec.hp) - 1e-6);
   });
 
@@ -170,15 +170,23 @@ describe('fighting', () => {
 });
 
 describe('balance', () => {
-  it('mixes enemy kinds as the waves go on, each arriving with the map level of its counter', () => {
-    const kinds = (n: number, level: number) => waveSpec(n, level).groups.map((g) => g.enemy);
+  it('mixes enemy kinds as the waves grow stronger, each arriving with the map level of its counter', () => {
+    const kinds = (k: number, level: number) => waveOfStrength(k, level).groups.map((g) => g.enemy);
     expect(kinds(1, 1)).toEqual(['infantry']);
     expect(kinds(15, 1)).toEqual(['infantry', 'truck']);
     expect(kinds(5, 2)).toEqual(['infantry', 'moto', 'truck', 'apc']);
     expect(kinds(5, 3)).toContain('drone');
     expect(kinds(5, 4)).toContain('tank');
-    expect(kinds(14, 5)).not.toContain('fortress');
-    expect(kinds(15, 5)).toContain('fortress');
-    expect(kinds(10, 8)).toContain('fortress');
+    expect(kinds(9, 5)).not.toContain('fortress');
+    expect(kinds(10, 5)).toContain('fortress');
+  });
+
+  it('starts each map level a little stronger, up to a cap', () => {
+    expect(waveStrength(1, 1)).toBe(4);
+    expect(waveStrength(3, 1)).toBe(6);
+    expect(waveStrength(1, 3)).toBe(5);
+    expect(waveStrength(1, 1000)).toBe(10);
+    expect(waveStrength(40, 1000)).toBe(18);
+    expect(waveSpec(2, 3)).toEqual(waveOfStrength(6, 3));
   });
 });

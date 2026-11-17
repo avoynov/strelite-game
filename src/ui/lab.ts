@@ -14,7 +14,7 @@ export interface LabCallbacks {
   close(): void;
 }
 
-const BRANCHES: Branch[] = ['guns', 'boosts', 'effects'];
+const BRANCHES: Branch[] = ['guns', 'levels', 'boosts', 'effects'];
 const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done' };
 
 const pct = (v: number) => Math.round(v * 100);
@@ -38,7 +38,10 @@ export function formatDuration(seconds: number): string {
 }
 
 export function itemName(item: ResearchItem): string {
-  return item.effect.kind === 'gun' ? t(`tower.${item.effect.gun}` as MessageKey) : t(`research.${item.id}` as MessageKey);
+  const e = item.effect;
+  if (e.kind === 'gun') return t(`tower.${e.gun}` as MessageKey);
+  if (e.kind === 'maxLevel') return t('lab.levelName', { gun: t(`tower.${e.gun}` as MessageKey), n: e.level });
+  return t(`research.${item.id}` as MessageKey);
 }
 
 /** What the item does, in words, built from its numbers. */
@@ -47,6 +50,8 @@ export function itemEffect(item: ResearchItem): string {
   switch (e.kind) {
     case 'gun':
       return t('lab.fx.gun');
+    case 'maxLevel':
+      return t('lab.fx.level', { n: e.level });
     case 'damage':
       return t('lab.fx.damage', { n: pct(e.add) });
     case 'reload':

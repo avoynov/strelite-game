@@ -137,6 +137,20 @@ export const bg = {
   'toast.researchDone': "Проучено: {name}",
   'end.banked': "+{n} злато в хазната",
   'action.lab': "Лаборатория",
+  'lab.levelName': "{gun} · ниво {n}",
+  'lab.fx.level': "Позволява надграждане до ниво {n} в битка",
+  'lab.branch.levels': "Нива на оръдията",
+  'reason.levelLocked': "Следващото ниво се проучва в Лабораторията.",
+  'tower.levelLocked': "Ниво {n}: Лаборатория",
+  'levels.waves': "{n} вълни",
+  'levels.won': "Спечелено",
+  'levels.next': "Напред",
+  'levels.kicker': "Кампания",
+  'levels.title': "Нива",
+  'levels.replay': "Спечелените нива може да играеш пак за злато.",
+  'action.levels': "Нива",
+  'action.back': "Назад",
+  'action.retry': "Опитай пак",
 } as const;
 
 export type MessageKey = keyof typeof bg;

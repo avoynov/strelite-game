@@ -4,7 +4,8 @@ import { ECONOMY, ENEMIES, TOWERS, type EnemyId, type TowerDef, type TowerId, ty
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
-import { TOTAL_WAVES, waveSpec, type WaveSpec } from './waves';
+import { levelWaves } from './levels';
+import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
 
@@ -107,11 +108,13 @@ export type GameEvent =
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' };
 
 export interface GameOptions {
   /** Map level, 1-based: decides which guns can be built and which enemies attack. */
   level?: number;
+  /** Waves to clear to win; the level's own number when absent. */
+  totalWaves?: number;
   /** Wave plan to use instead of the standard one (for tests and scenarios). */
   waves?: (n: number, level: number) => WaveSpec;
   /** Finished research: which guns can be built, and the boosts. Without it every gun is open and nothing is boosted. */
@@ -156,7 +159,8 @@ interface SpawnState {
 
 /** Gold at the start of a map level. */
 export function startMoney(level: number): number {
-  return ECONOMY.startMoney + ECONOMY.startMoneyPerLevel * (Math.min(level, 8) - 1);
+  const perLevel = ECONOMY.startMoneyPerLevel * (Math.min(level, ECONOMY.startMoneyLevelCap) - 1);
+  return ECONOMY.startMoney + perLevel + Math.round((ECONOMY.headStart * goldBefore(level)) / 5) * 5;
 }
 
 export class Game {
@@ -165,7 +169,7 @@ export class Game {
   lives = ECONOMY.startLives;
   /** Number of the current or last started wave, 0 before the first. */
   wave = 0;
-  readonly totalWaves = TOTAL_WAVES;
+  readonly totalWaves: number;
   readonly level: number;
   /** Gold taken in this battle (kills and wave bonuses), whatever was spent. */
   goldEarned = 0;
@@ -196,6 +200,7 @@ export class Game {
     opts: GameOptions = {},
   ) {
     this.level = Math.max(1, Math.floor(opts.level ?? 1));
+    this.totalWaves = opts.totalWaves ?? levelWaves(this.level);
     this.upgrades = opts.upgrades ?? null;
     this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
@@ -264,6 +269,11 @@ export class Game {
   /** Cost of the next level, or null at max level. */
   upgradeCost(tower: Tower): number | null {
     return TOWERS[tower.def].levels[tower.level + 1]?.cost ?? null;
+  }
+
+  /** Whether research allows raising the gun to its next level. */
+  canRaise(tower: Tower): boolean {
+    return !this.upgrades || tower.level + 2 <= (this.upgrades.maxLevel[tower.def] ?? Infinity);
   }
 
   sellValue(tower: Tower): number {
@@ -342,6 +352,7 @@ export class Game {
     if (!t) return { ok: false, reason: 'notFound' };
     const cost = this.upgradeCost(t);
     if (cost === null) return { ok: false, reason: 'maxLevel' };
+    if (!this.canRaise(t)) return { ok: false, reason: 'levelLocked' };
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
     this.money -= cost;
     t.level++;

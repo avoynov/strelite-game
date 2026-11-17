@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
 import { Game } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { bank, newResearch, RESEARCH, sanitize, settle, start, startError, status, upgrades } from '../src/sim/research';
+import { bank, battleTakings, newResearch, RESEARCH, sanitize, settle, start, startError, status, upgrades, victoryBonus } from '../src/sim/research';
 
 describe('research', () => {
   it('every item needs only items that exist, and deeper items cost more and take longer', () => {
@@ -20,23 +20,43 @@ describe('research', () => {
   });
 
   it('costs gold, runs one at a time and finishes on the clock', () => {
-    let s = bank(newResearch(), 1000);
+    let s = bank(newResearch(), 300);
     expect(startError(s, 'gun.scorpion')).toBe('locked');
     expect(startError(s, 'gun.howitzer')).toBe('noGold');
-    s = start(s, 'boost.damage1', 0);
-    expect(s.gold).toBe(400);
-    expect(status(s, 'boost.damage1')).toBe('active');
-    expect(startError(bank(s, 5000), 'gun.howitzer')).toBe('busy');
-    expect(settle(s, 3 * 60 * 1000 - 1)).toBe(s);
-    s = settle(s, 3 * 60 * 1000);
-    expect(s.done).toEqual(['boost.damage1']);
+    s = start(s, 'boost.gold1', 0);
+    expect(s.gold).toBe(100);
+    expect(status(s, 'boost.gold1')).toBe('active');
+    expect(startError(bank(s, 5000), 'fx.crossbow')).toBe('busy');
+    expect(settle(s, 2 * 60 * 1000 - 1)).toBe(s);
+    s = settle(s, 2 * 60 * 1000);
+    expect(s.done).toEqual(['boost.gold1']);
     expect(s.active).toBeNull();
-    expect(startError(s, 'boost.damage1')).toBe('done');
+    expect(startError(s, 'boost.gold1')).toBe('done');
   });
 
   it('a faster clock shortens the timer', () => {
-    const s = start(bank(newResearch(), 1000), 'boost.damage1', 0, 600);
-    expect(s.active?.endsAt).toBe(300);
+    const s = start(bank(newResearch(), 1000), 'boost.gold1', 0, 600);
+    expect(s.active?.endsAt).toBe(200);
+  });
+
+  it('banks only the gold a battle earned and did not spend, plus a bonus for a win', () => {
+    expect(battleTakings(500, 120, false, 1)).toBe(120); // the starting gold stays behind
+    expect(battleTakings(30, 400, false, 1)).toBe(30); // spent is spent
+    expect(battleTakings(30, 400, true, 3)).toBe(30 + victoryBonus(3));
+  });
+
+  it('opens gun levels 4 and 5 only through research', () => {
+    const none = upgrades([], TOWER_IDS);
+    expect(none.maxLevel.crossbow).toBe(3);
+    expect(upgrades(['lvl4.crossbow', 'lvl5.crossbow'], TOWER_IDS).maxLevel.crossbow).toBe(5);
+    const g = new Game(buildPathMap(MEADOW), { upgrades: none });
+    g.money = 10000;
+    g.build('crossbow', 2, 2);
+    const t = g.towers[0]!;
+    g.upgrade(t.id);
+    g.upgrade(t.id);
+    expect(t.level + 1).toBe(3);
+    expect(g.upgrade(t.id)).toEqual({ ok: false, reason: 'levelLocked' });
   });
 
   it('repairs a broken save', () => {

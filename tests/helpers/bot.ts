@@ -53,7 +53,7 @@ export function spend(g: Game, only?: readonly TowerId[]): void {
     const cost = TOWERS[want].levels[0].cost;
     const upgradable = g.towers
       .map((t) => ({ t, cost: g.upgradeCost(t) }))
-      .filter((u): u is { t: (typeof g.towers)[number]; cost: number } => u.cost !== null)
+      .filter((u): u is { t: (typeof g.towers)[number]; cost: number } => u.cost !== null && g.canRaise(u.t))
       .sort((a, b) => a.cost - b.cost)[0];
     // Alternate: every other purchase is an upgrade when one is affordable.
     if (upgradable && g.money >= upgradable.cost && g.towers.length >= 4 && guard % 2 === 1) {

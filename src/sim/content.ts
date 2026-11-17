@@ -219,8 +219,11 @@ export const ENEMY_IDS = Object.keys(ENEMIES) as EnemyId[];
 
 export const ECONOMY = {
   startMoney: 200,
-  /** Extra starting gold per map level above the first: more guns to choose from. */
-  startMoneyPerLevel: 75,
+  /** Extra starting gold per map level above the first, up to `startMoneyLevelCap`. */
+  startMoneyPerLevel: 60,
+  startMoneyLevelCap: 20,
+  /** Share of the gold of the weaker waves before a level's first one given as extra starting gold. */
+  headStart: 1,
   startLives: 20,
   /** Fraction of total invested money returned on sell. */
   sellRefund: 0.7,
