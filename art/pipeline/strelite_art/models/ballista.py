@@ -12,7 +12,10 @@ Levels change the machine and its bolt, in the same language as the trebuchet:
   4  blackened steel, bronze skein caps and fittings, arm guards, a tall double hopper
      of eight bolts; barbed heads
   5  silver with gold fittings, finials and a crest, silver-wire skeins; gold-headed bolts
-No level carries a shield: the machine stays light and open.
+No level carries a shield: the machine stays light and open. The draw grows stronger with
+each level, and every level adds a new kind of mechanism to show why: plain cranks (1), a
+ratchet and pawl that hold more tension (2), a reduction gear on the winch (3), a crossbeam
+in front whose extra ropes pull the arms forward (4), steel leaf springs along the arms (5).
 
 Returns (root, turret). The tripod is static; the turret (yoke and machine) turns.
 
@@ -50,16 +53,18 @@ STYLE = {
             drum="timber_raw", chain="iron_forged", mag=5),
     2: dict(wood="timber_red", arm="timber_red", fit="iron_forged", rope="hemp", skein="hemp",
             bolt="iron_forged", band_w=0.07, head="iron_forged", shaft="timber_raw", fletch="paint_red",
-            drum="timber_red", chain="iron_forged", mag=5),
+            drum="timber_red", chain="iron_forged", mag=5, gears=1),
     3: dict(wood="timber_honey", arm="timber_honey", fit="iron_black", rope="hemp", skein="hemp",
             bolt="iron_black", band_w=0.1, head="iron_black", shaft="timber_honey", fletch="leather",
-            drum="iron_black", chain="iron_black", mag=5),
+            drum="iron_black", chain="iron_black", mag=5, gears=2),
     4: dict(wood="iron_black", arm="iron_black", fit="bronze_old", rope="steel_cable", skein="hemp",
             bolt="bronze_old", band_w=0.09, head="iron_black", shaft="timber_oak", fletch="bronze_old",
-            drum="bronze_old", chain="iron_black", mag=8, caps="bronze_old"),
+            drum="bronze_old", chain="iron_black", mag=8, caps="bronze_old", gears=2,
+            crossbeam=True),
     5: dict(wood="silver_satin", arm="silver_satin", fit="gold_trim", rope="steel_cable",
             skein="steel_cable", bolt="gold_trim", band_w=0.08, head="gold_trim", shaft="silver_satin",
-            fletch="gold_trim", drum="gold_trim", chain="gold_trim", mag=8, caps="gold_trim", ornament=True),
+            fletch="gold_trim", drum="gold_trim", chain="gold_trim", mag=8, caps="gold_trim", ornament=True,
+            gears=2, crossbeam=True, springs=True),
 }
 
 # Firing animation, one row per frame: arm sweep (deg back; 40 = cocked), slider shift
@@ -316,6 +321,17 @@ def _rig(k, t, level, s):
         if level > 1:
             _keep_world(k.beam("arm_band", a0 + d * 0.45, a0 + d * 0.52, (0.12, 0.16), s["fit"], parent=t,
                                bevel=0.003), piv)
+        if s.get("springs"):                             # leaf springs on the front face of the arm
+            fwd = Vector((0, 0, 1)).cross(d) * sx * -1
+            if fwd.y < 0:
+                fwd = -fwd
+            for i, (f0, f1) in enumerate(((0.12, 0.98), (0.12, 0.78), (0.12, 0.58))):
+                off = fwd * (0.075 + i * 0.022)
+                _keep_world(k.beam("spring_leaf", a0 + d * f0 + off, a0 + d * f1 + off, (0.022, 0.12), "steel_worn",
+                                   parent=t, bevel=0.003, section_end=(0.018, 0.09)), piv)
+            for f in (0.3, 0.7):
+                _keep_world(k.beam("spring_clamp", a0 + d * f + fwd * 0.03, a0 + d * (f + 0.05) + fwd * 0.03,
+                                   (0.2, 0.15), "gold_trim", parent=t, bevel=0.004), piv)
         arms[sx] = piv
     slider = k.empty("slider", (0, 0, 0), parent=t)
     zs = _z(CLAW_Y0) + 0.06
@@ -330,18 +346,47 @@ def _rig(k, t, level, s):
     drum = next(o for o in t.children if o.get("rig_name") == "drum")
     y, z = drum.location.y, drum.location.z
     parts = [k.tube("drum", (-0.17, y, z), (0.17, y, z), 0.09, s["drum"], parent=t, segs=14)]
-    for sx in (-1, 1):                                   # a crank each side, and the drive sprocket
+    gears = []
+    g = s.get("gears", 0)
+    fitm = s["fit"] if level > 1 else W
+    for sx in (-1, 1):                                   # the drive sprocket and the winch train
+        parts.append(k.cylinder("sprocket", 0.13, 0.04, (sx * 0.24 - 0.02, y, z), fitm,
+                                segs=5, rot=(0, math.pi / 2, 0), parent=t, bevel=0.004))
+        crank_at, crank_x0 = Vector((sx * 0.27, y, z)), sx * 0.17
+        crank_parent = None                              # None: on the drum itself
+        if g == 1:                                       # ratchet and pawl: holds a harder draw
+            parts += _gear(k, t, (sx * 0.3, y, z), 0.16, 14, 0.05, s["fit"], saw=True)
+            p0 = Vector((sx * 0.3, y - 0.36, z + 0.2))
+            k.beam("pawl", p0, Vector((sx * 0.3, y - 0.12, z + 0.13)), (0.04, 0.035), s["fit"], parent=t, bevel=0.004)
+            k.cylinder("pawl_pin", 0.035, 0.08, p0, s["fit"], segs=8, rot=(0, math.pi / 2, 0), parent=t)
+            crank_at, crank_x0 = Vector((sx * 0.38, y, z)), sx * 0.3
+        elif g >= 2:                                     # gear stages: a big gear on the drum
+            ra = 0.3
+            parts += _gear(k, t, (sx * 0.3, y, z), ra, 24, 0.05, s["fit"])
+            d1 = Vector((0, -0.32, 0.95)).normalized()
+            c1 = Vector((sx * 0.3, y, z)) + d1 * (ra + 0.11)
+            p1 = k.empty("pinion", c1, parent=t)
+            gears.append((p1, -ra / 0.1))
+            objs = _gear(k, t, c1, 0.1, 9, 0.06, s["fit"])
+            objs.append(k.tube("pinion_axle", (sx * 0.2, c1.y, c1.z), (sx * 0.4, c1.y, c1.z), 0.03, s["fit"],
+                               parent=t, segs=8, bevel=False))
+            k.beam("bearing", Vector((sx * 0.2, c1.y, z - 0.25)), Vector((sx * 0.2, c1.y, c1.z + 0.05)),
+                   (0.06, 0.08), W, parent=t, bevel=0.005)
+            crank_at, crank_x0, crank_parent = Vector((sx * 0.4, c1.y, c1.z)), sx * 0.3, p1
+            for o in objs:
+                _keep_world(o, p1)
         a0 = 0.6 if sx > 0 else 0.6 + math.pi
         r = Vector((0, math.cos(a0), math.sin(a0)))
-        hub = Vector((sx * 0.27, y, z))
-        parts.append(k.tube("crank_axle", (sx * 0.17, y, z), hub, 0.03, s["fit"] if level > 1 else W, parent=t,
-                            segs=8, bevel=False))
-        parts.append(k.beam("crank", hub, hub + r * 0.36, (0.05, 0.05), s["fit"] if level > 1 else W, parent=t,
-                            bevel=0.004))
-        parts.append(k.tube("crank_handle", hub + r * 0.36, hub + r * 0.36 + Vector((sx * 0.22, 0, 0)), 0.028, W,
-                            parent=t, segs=8, bevel=False))
-        parts.append(k.cylinder("sprocket", 0.13, 0.04, (sx * 0.24 - 0.02, y, z), s["fit"] if level > 1 else W,
-                                segs=5, rot=(0, math.pi / 2, 0), parent=t, bevel=0.004))
+        hub = crank_at
+        cp = [k.tube("crank_axle", (crank_x0, hub.y, hub.z), hub, 0.03, fitm, parent=t, segs=8, bevel=False),
+              k.beam("crank", hub, hub + r * 0.3, (0.05, 0.05), fitm, parent=t, bevel=0.004),
+              k.tube("crank_handle", hub + r * 0.3, hub + r * 0.3 + Vector((sx * 0.22, 0, 0)), 0.028, W,
+                     parent=t, segs=8, bevel=False)]
+        if crank_parent is None:
+            parts += cp
+        else:
+            for o in cp:
+                _keep_world(o, crank_parent)
     for o in parts:
         _keep_world(o, drum)
     for sx in (-1, 1):                                   # front sprocket and the chain along the case
@@ -363,7 +408,24 @@ def _rig(k, t, level, s):
     for sx in (-1, 1):
         o = k.cylinder("string", 0.021, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
         strings.append((sx, o))
-    _RIG.update(t=t, arms=arms, slider=slider, drum=drum, carrier=carrier, strings=strings, zs=zs)
+    aux = []
+    if s.get("crossbeam"):                               # a crossbeam whose ropes pull the arms forward
+        ya, za = FRAME_Y + 0.55, zc + 0.62
+        zt = zc + 0.42
+        _beam(k, t, "crossbeam", (-1.15, ya, za), (1.15, ya, za), (0.12, 0.14), s["wood"])
+        for sx in (-1, 1):
+            _beam(k, t, "cross_strut", (sx * 0.72, FRAME_Y, zt + 0.06), (sx * 0.72, ya, za - 0.05), (0.08, 0.08),
+                  s["wood"])
+            _beam(k, t, "cross_brace", (sx * 0.72, FRAME_Y + 0.05, zc - 0.36), (sx * 0.72, ya, za - 0.05),
+                  (0.06, 0.06), s["wood"])
+            end = Vector((sx * 1.12, ya, za))
+            k.cylinder("cross_cap", 0.09, 0.14, end - Vector((0, 0, 0.07)), s["fit"], segs=14, parent=t)
+            k.box("turnbuckle", (0.06, 0.06, 0.18), end + Vector((0, -0.08, -0.12)), s["fit"], parent=t, bevel=0.005)
+            for dz in (-0.03, 0.03):
+                o = k.cylinder("aux_rope", 0.016, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
+                aux.append((sx, o, end + Vector((0, -0.08, -0.2 + dz))))
+    _RIG.update(t=t, arms=arms, slider=slider, drum=drum, carrier=carrier, strings=strings, zs=zs, gears=gears,
+                aux=aux)
     set_fire_frame(0)
 
 
@@ -393,6 +455,31 @@ def _hopper(k, t, level, s, zs):
         _bolt(k, t, tail, (0, 1, math.tan(TILT)), level, s)
 
 
+def _gear(k, t, c, r, n, w, mat, saw=False):
+    """A spur gear (or a ratchet wheel with saw teeth) turning about the X axis at c."""
+    c = Vector(c)
+    h = 0.05 if r > 0.12 else 0.04
+    objs = [k.cylinder("gear", r, w, c - Vector((w / 2, 0, 0)), mat, segs=max(16, n * 2),
+                       rot=(0, math.pi / 2, 0), parent=t, bevel=0.003),
+            k.cylinder("gear_hub", min(0.05, r * 0.45), w + 0.04, c - Vector((w / 2 + 0.02, 0, 0)), mat, segs=12,
+                       rot=(0, math.pi / 2, 0), parent=t, bevel=False)]
+    tw = 2 * math.pi * r / n * 0.5
+    for i in range(n):
+        a = 2 * math.pi * i / n
+        d = Vector((0, math.cos(a), math.sin(a)))
+        objs.append(k.box("tooth", (w, tw, h), c + d * (r + h / 2 - 0.004), mat,
+                          rot=(a - math.pi / 2 + (0.5 if saw else 0), 0, 0), parent=t, bevel=False))
+    if r > 0.2:                                          # lightening holes read as spokes
+        for i in range(5):
+            a = 2 * math.pi * i / 5
+            d = Vector((0, math.cos(a), math.sin(a)))
+            for sxo in (-1, 1):
+                objs.append(k.cylinder("gear_hole", r * 0.22, 0.01, c + d * r * 0.55 + Vector((sxo * w / 2, 0, 0))
+                                       - Vector((0.005, 0, 0)), "iron_black" if mat != "iron_black" else "gunmetal",
+                                       segs=12, rot=(0, math.pi / 2, 0), parent=t, bevel=False))
+    return objs
+
+
 def _keep_world(o, parent):
     bpy.context.view_layer.update()
     mw = o.matrix_world.copy()
@@ -411,6 +498,8 @@ def _apply(sweep, slide, hooked, bolt, drum_deg):
         piv.rotation_euler = (0, 0, sx * math.radians(sweep - COCK_DEG) * -1)
     _RIG["slider"].location = (0, slide, slide * math.tan(TILT))
     _RIG["drum"].rotation_euler = (math.radians(-drum_deg), 0, 0)
+    for p, ratio in _RIG["gears"]:
+        p.rotation_euler = (math.radians(-drum_deg * ratio), 0, 0)
     _RIG["carrier"].location = (0, bolt or 0.0, (bolt or 0.0) * math.tan(TILT))
     claw = Vector((0, CLAW_Y0 + slide, _RIG["zs"] + 0.1 + slide * math.tan(TILT)))
     for sx, o in _RIG["strings"]:
@@ -418,6 +507,12 @@ def _apply(sweep, slide, hooked, bolt, drum_deg):
         end = claw if hooked else Vector((0, tip.y, tip.z))
         d = end - tip
         o.location = tip
+        o.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
+        o.scale = (1, 1, max(d.length, 0.01))
+    for sx, o, anchor in _RIG["aux"]:
+        tip = _tip(sx, sweep)
+        d = tip - anchor
+        o.location = anchor
         o.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
         o.scale = (1, 1, max(d.length, 0.01))
 
@@ -431,10 +526,11 @@ def key_fire_animation(scene):
         for piv in _RIG["arms"].values():
             piv.keyframe_insert("rotation_euler", frame=f)
         for o, paths in ((_RIG["slider"], ("location",)), (_RIG["drum"], ("rotation_euler",)),
-                         (_RIG["carrier"], ("location",))):
+                         (_RIG["carrier"], ("location",))) + tuple((p, ("rotation_euler",))
+                                                                      for p, _ in _RIG["gears"]):
             for p in paths:
                 o.keyframe_insert(p, frame=f)
-        for _, o in _RIG["strings"]:
+        for o in [o for _, o in _RIG["strings"]] + [a[1] for a in _RIG["aux"]]:
             for p in ("location", "rotation_euler", "scale"):
                 o.keyframe_insert(p, frame=f)
     prefs.keyframe_new_interpolation_type = old
