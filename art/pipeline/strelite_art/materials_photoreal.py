@@ -79,6 +79,10 @@ SPEC = {
     # --- enemy vehicles and troops: dark grey, so they read on the pale road and the meadow
     "paint_enemy":      ("painted", dict(color=ENEMY_GREY, rough=0.55, wear=0.9, dust=0.5)),
     "paint_faction_red": ("painted", dict(color=(0.40, 0.05, 0.04), rough=0.5, wear=1.0, dust=0.5)),
+    "paint_camo":    ("painted", dict(color=GREEN_4BO, rough=0.62, wear=1.0, dust=0.8,
+                                      camo=((0.52, 0.42, 0.24), (0.06, 0.07, 0.05)))),
+    "paint_steel":   ("painted", dict(color=(0.30, 0.33, 0.35), rough=0.42, wear=0.8, dust=0.5)),
+    "paint_blue":    ("painted", dict(color=(0.08, 0.16, 0.42), rough=0.45, wear=0.6, dust=0.3)),
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
     "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
@@ -328,7 +332,7 @@ def _dust_mask(g, P, amount):
 
 
 def _painted(name, color, rough, wear=1.0, dust=1.0, primer=PRIMER, bare=BARE_STEEL,
-             soot=0.0):
+             soot=0.0, camo=None):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     P = g.coords()
@@ -337,7 +341,11 @@ def _painted(name, color, rough, wear=1.0, dust=1.0, primer=PRIMER, bare=BARE_ST
     # --- paint: tone differs a little per panel and in large soft patches
     tone = g.math("ADD", 0.84, g.math("MULTIPLY", g.rnd(), 0.32))
     patch = g.math("ADD", 0.82, g.math("MULTIPLY", g.noise(P, 1.3, detail=5, rough=0.6), 0.36))
-    paint = g.mix(1.0, rgb(color), g.math("MULTIPLY", tone, patch), "MULTIPLY")
+    base = rgb(color)
+    for i, cc in enumerate(camo or ()):                  # hard-edged blotches of extra colours
+        m = g.ramp(g.noise(P, 3.2 + 1.1 * i, detail=2, rough=0.5, distortion=0.3), 0.47 + 0.06 * i, 0.49 + 0.06 * i)
+        base = g.mix(m, base, rgb(cc))
+    paint = g.mix(1.0, base, g.math("MULTIPLY", tone, patch), "MULTIPLY")
 
     # --- exposed edges (convex and concave) via the Bevel node
     bev = g.node("ShaderNodeBevel", samples=4)
