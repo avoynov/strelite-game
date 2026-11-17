@@ -79,12 +79,15 @@ export function run(g: Game, seconds: number): void {
 }
 
 /** Play a whole game with the bot; returns per-wave lives for tuning. */
-export function playOut(g: Game, only?: readonly TowerId[]): number[] {
+export function playOut(g: Game, only?: readonly TowerId[], onStep?: () => void): number[] {
   const lives: number[] = [];
   while (g.phase === 'build') {
     spend(g, only);
     g.startWave();
-    for (let i = 0; i < 20000 && g.phase === 'wave'; i++) g.step(TICK);
+    for (let i = 0; i < 20000 && g.phase === 'wave'; i++) {
+      g.step(TICK);
+      onStep?.();
+    }
     lives.push(g.lives);
   }
   return lives;

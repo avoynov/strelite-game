@@ -1,4 +1,5 @@
 import { afterArmor, applyDamage } from './damage';
+import type { Upgrades } from './research';
 import { ECONOMY, ENEMIES, TOWERS, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
@@ -113,6 +114,8 @@ export interface GameOptions {
   level?: number;
   /** Wave plan to use instead of the standard one (for tests and scenarios). */
   waves?: (n: number, level: number) => WaveSpec;
+  /** Finished research: which guns can be built, and the boosts. Without it every gun is open and nothing is boosted. */
+  upgrades?: Upgrades;
 }
 
 const ARRIVE_EPS = 1e-6;
@@ -164,6 +167,8 @@ export class Game {
   wave = 0;
   readonly totalWaves = TOTAL_WAVES;
   readonly level: number;
+  /** Gold taken in this battle (kills and wave bonuses), whatever was spent. */
+  goldEarned = 0;
   phase: Phase = 'build';
   time = 0;
 
@@ -179,6 +184,10 @@ export class Game {
   /** Units dropped during this step (by destroyed APCs); join after it. */
   private dropped: Enemy[] = [];
   private readonly waves: (n: number, level: number) => WaveSpec;
+  private readonly upgrades: Upgrades | null;
+  /** Gun stats with research applied, per gun and level. */
+  private readonly levelCache = new Map<string, TowerLevel>();
+  private readonly defCache = new Map<TowerId, TowerDef>();
   /** Tower id per cell, 0 where free. */
   private readonly occupied: Int32Array;
 
@@ -187,7 +196,9 @@ export class Game {
     opts: GameOptions = {},
   ) {
     this.level = Math.max(1, Math.floor(opts.level ?? 1));
-    this.money = startMoney(this.level);
+    this.upgrades = opts.upgrades ?? null;
+    this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
+    this.lives += this.upgrades?.lives ?? 0;
     this.waves = opts.waves ?? waveSpec;
     this.flow = new FlowField(map.grid, map.goals, (x, y) => map.grid.get(x, y) === 'path');
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
@@ -207,7 +218,47 @@ export class Game {
   }
 
   levelOf(tower: Tower): TowerLevel {
-    return TOWERS[tower.def].levels[tower.level]!;
+    return this.levelStats(tower.def, tower.level);
+  }
+
+  /** A gun level's numbers with research applied (level is 0-based). */
+  levelStats(def: TowerId, level: number): TowerLevel {
+    const key = `${def}:${level}`;
+    let l = this.levelCache.get(key);
+    if (!l) {
+      const base: TowerLevel = TOWERS[def].levels[level]!;
+      const m = this.upgrades?.gun[def];
+      l = m
+        ? {
+            ...base,
+            damage: Math.round(base.damage * m.damage * 10) / 10,
+            fireInterval: Math.round(base.fireInterval * m.reload * 1000) / 1000,
+            range: base.range + m.range,
+            ...(base.splash ? { splash: Math.round((base.splash + m.splash) * 100) / 100 } : {}),
+          }
+        : base;
+      this.levelCache.set(key, l);
+    }
+    return l;
+  }
+
+  /** A gun's definition with research applied (armour pierce, pass-through, flame heat-up). */
+  defOf(id: TowerId): TowerDef {
+    let d = this.defCache.get(id);
+    if (!d) {
+      const base: TowerDef = TOWERS[id];
+      const m = this.upgrades?.gun[id];
+      d = m
+        ? {
+            ...base,
+            pierce: Math.min(1, base.pierce + m.pierce),
+            ...(base.passThrough !== undefined || m.passThrough ? { passThrough: (base.passThrough ?? 0) + m.passThrough } : {}),
+            ...(base.rampTime !== undefined ? { rampTime: base.rampTime * m.rampTime } : {}),
+          }
+        : base;
+      this.defCache.set(id, d);
+    }
+    return d;
   }
 
   /** Cost of the next level, or null at max level. */
@@ -233,9 +284,9 @@ export class Game {
     return occupied ? 'occupied' : null;
   }
 
-  /** Whether this map level allows the gun. */
+  /** Whether research has opened the gun (every gun is open when the game has no research). */
   isUnlocked(def: TowerId): boolean {
-    return this.level >= TOWERS[def].unlockLevel;
+    return this.upgrades ? this.upgrades.guns.includes(def) : true;
   }
 
   canBuildAt(def: TowerId, cx: number, cy: number): boolean {
@@ -518,7 +569,7 @@ export class Game {
     for (const t of this.towers) {
       t.cooldown = Math.max(0, t.cooldown - dt);
       t.firing = false;
-      const def: TowerDef = TOWERS[t.def];
+      const def: TowerDef = this.defOf(t.def);
       const lvl = this.levelOf(t);
       const target = this.pickTarget(t);
       if (!target) {
@@ -627,7 +678,7 @@ export class Game {
 
   /** Enemies this gun could shoot at now. */
   private candidates(t: Tower): Enemy[] {
-    const def: TowerDef = TOWERS[t.def];
+    const def: TowerDef = this.defOf(t.def);
     const range = this.levelOf(t).range;
     const min = def.minRange ?? 0;
     return this.enemies.filter((e) => {
@@ -647,7 +698,7 @@ export class Game {
     if (!list.length) return undefined;
     const kept = t.targetId ? list.find((e) => e.id === t.targetId) : undefined;
     if (kept) return kept;
-    const def: TowerDef = TOWERS[t.def];
+    const def: TowerDef = this.defOf(t.def);
     const first = (es: Enemy[]) => es.reduce<Enemy | undefined>((b, e) => (!b || e.remaining < b.remaining ? e : b), undefined);
     /** Highest score wins; ties go to the one closest to the goal. */
     const best = (score: (e: Enemy) => number) => {
@@ -764,6 +815,7 @@ export class Game {
     if (target.hp <= 0) {
       target.alive = false;
       this.money += target.reward;
+      this.goldEarned += target.reward;
       if (tower) tower.stats.kills++;
       this.events.push({ type: 'kill', enemyId: target.id, reward: target.reward, x: target.x, y: target.y });
       this.dropUnits(target);
@@ -794,6 +846,7 @@ export class Game {
     if (this.enemies.length > 0 || this.projectiles.length > 0) return;
     const bonus = this.currentWave?.clearBonus ?? 0;
     this.money += bonus;
+    this.goldEarned += bonus;
     this.currentWave = null;
     this.spawnState = [];
     this.events.push({ type: 'waveClear', wave: this.wave, bonus });

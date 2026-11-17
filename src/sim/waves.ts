@@ -23,6 +23,11 @@ export const HP_GROWTH = 1.16;
 /** Infantry, riders and drones grow slower: they come in larger numbers instead. */
 export const SWARM_HP_GROWTH = 1.07;
 const SWARM = new Set<EnemyId>(['infantry', 'moto', 'drone']);
+/**
+ * Every enemy's health is this many times its base. Tuned so the two starting
+ * guns lose map level 1 a little past half-way: research is what wins it.
+ */
+export const HP_SCALE = 1.8;
 /** …and by this fraction of the base for each map level above the first. */
 export const LEVEL_HP_GROWTH = 0.04;
 /** Gold per kill grows by this fraction of the base each wave. */
@@ -42,7 +47,7 @@ export function enemyUnlocked(enemy: EnemyId, level: number): boolean {
  * matter, and a little with each map level.
  */
 export function waveSpec(n: number, level = 1): WaveSpec {
-  const levelScale = 1 + LEVEL_HP_GROWTH * (level - 1);
+  const levelScale = HP_SCALE * (1 + LEVEL_HP_GROWTH * (level - 1));
   // Light units grow mostly in numbers, so overkill keeps biting late in the game.
   const grow = (enemy: EnemyId) => Math.pow(SWARM.has(enemy) ? SWARM_HP_GROWTH : HP_GROWTH, n - 1) * levelScale;
   const group = (enemy: EnemyId, count: number, interval: number, delay: number, hpScale = grow(enemy)): WaveGroup => ({

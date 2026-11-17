@@ -12,6 +12,9 @@ import { buildPathMap, MEADOW } from './sim/maps';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
+import { Lab, itemName } from './ui/lab';
+import { ResearchStore } from './researchStore';
+import { researchItem, victoryBonus } from './sim/research';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
 const LEVEL_KEY = 'strelite.level';
@@ -55,7 +58,14 @@ async function start(): Promise<void> {
   portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
 
-  let game = new Game(buildPathMap(MEADOW), { level: startLevel() });
+  const params = new URLSearchParams(location.search);
+  // `?fastresearch` runs research timers 600× faster, for trying the tree out.
+  const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
+  const newGame = (level: number) => new Game(buildPathMap(MEADOW), { level, upgrades: research.upgrades() });
+  let game = newGame(startLevel());
+  /** Gold of this battle already put in the treasury. */
+  let banked = 0;
+  let wonBanked = false;
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
@@ -77,7 +87,9 @@ async function start(): Promise<void> {
       const speed = loop.speed;
       saveLevel(level);
       board.destroy();
-      game = new Game(buildPathMap(MEADOW), { level });
+      game = newGame(level);
+      banked = 0;
+      wonBanked = false;
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -89,7 +101,26 @@ async function start(): Promise<void> {
       arsenal.open(); // a new level starts with the arsenal again
     },
     openArsenal: () => arsenal.open(armed ?? undefined),
+    openLab: () => lab.open(),
+    banked: () => banked,
   });
+
+  const lab = new Lab({
+    state: () => research.state,
+    start: (id) => research.start(id),
+    speed: research.speed,
+    close: () => hud.update(),
+  });
+  document.body.appendChild(lab.el);
+  // A finished item is announced wherever the player is; it counts from the next battle.
+  window.setInterval(() => {
+    const was = research.state.active?.id;
+    if (was && research.tick()) {
+      const item = researchItem(was);
+      if (item) hud.showToast(t('toast.researchDone', { name: itemName(item) }));
+      lab.invalidate();
+    }
+  }, 1000);
 
   // Before the level: browse the guns; the one on screen when leaving is armed for placing.
   const arsenal = new Arsenal({
@@ -103,8 +134,8 @@ async function start(): Promise<void> {
       selection = null;
       hud.update();
     },
-    // Guns locked on this map level (new roster); every gun is open until Game knows levels.
-    isUnlocked: (def) => (game as { isUnlocked?: (d: TowerId) => boolean }).isUnlocked?.(def) ?? true,
+    // Guns not researched yet show as locked.
+    isUnlocked: (def) => game.isUnlocked(def),
   });
   document.body.appendChild(arsenal.el);
 
@@ -138,11 +169,12 @@ async function start(): Promise<void> {
     document.title = t('game.title');
     hud.invalidate();
     arsenal.invalidate();
+    lab.invalidate();
     relayout();
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
-  if (!new URLSearchParams(location.search).has('noarsenal')) arsenal.open();
+  if (!params.has('noarsenal')) arsenal.open();
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
@@ -152,6 +184,7 @@ async function start(): Promise<void> {
         game: () => game,
         camera: () => board.camera,
         arm: (def: TowerId | null) => (armed = def),
+        research: () => research,
       },
     });
   }
@@ -169,6 +202,16 @@ async function start(): Promise<void> {
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
       }
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
+    }
+    // Gold taken in battle goes to the research treasury as it comes in; a win adds a bonus.
+    if (game.goldEarned > banked) {
+      research.bank(game.goldEarned - banked);
+      banked = game.goldEarned;
+    }
+    if (game.phase === 'won' && !wonBanked) {
+      wonBanked = true;
+      research.bank(victoryBonus(game.level));
+      banked += victoryBonus(game.level);
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);
