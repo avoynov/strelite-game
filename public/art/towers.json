@@ -1230,7 +1230,19 @@
        -0.758,
        1.504
       ]
-     ]
+     ],
+     "fire": {
+      "sheet": "towers/zis3_L1_fire_<DD>",
+      "animation": "zis3_L1_fire_<DD>",
+      "dirs": 32,
+      "frames": 6,
+      "fps": 16,
+      "releaseFrame": 1,
+      "reloadFrom": 2,
+      "loop": false,
+      "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
+      "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     }
     },
     {
      "level": 2,
@@ -2267,6 +2279,21 @@
    "directions": 16,
    "lengthM": 17.5,
    "radiusM": 7.5
+  },
+  "airship": {
+   "name": {
+    "bg": "Дирижабъл",
+    "en": "Armoured airship"
+   },
+   "placeholder": true,
+   "sheet": "enemies/airship",
+   "frames": "airship",
+   "directions": 16,
+   "lengthM": 14.0,
+   "radiusM": 4.0,
+   "flying": true,
+   "flightHeightM": 10.0,
+   "shadow": "no shadow in the sprite: draw a dark ellipse on the ground below it"
   }
  },
  "enemiesNote": "enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen lower-right); anchor = the unit's ground centre; shadow included",
@@ -2368,6 +2395,24 @@
    "blend": "add",
    "lengthM": 14.0,
    "note": "shot line along +x from the muzzle: rotate to the target, scale x to the distance; play once"
+  }
+ },
+ "projectiles": {
+  "ballista": {
+   "sheet": "projectiles/ballista",
+   "levels": [
+    1,
+    2,
+    3,
+    4,
+    5
+   ],
+   "frames": 32,
+   "fps": 16,
+   "radiusM": null,
+   "animation": "ballista_L<level>_round",
+   "headings": true,
+   "note": "one frame per flight heading (frame = round(angle / (2pi / frames)) mod frames), no shadow: draw a dark ellipse on the ground below it"
   }
  }
 }
