@@ -4,25 +4,35 @@ firing length ~9 m, width 3.7 m), in firing position: wheels lifted, two front
 stabilisers, two rear trails with spades, low saddle, four-tube cradle.
 
 Level 1: the gun on bare soil, olive drab paint, a few ammunition crates.
+Level 2: sandbag ring with an entrance on the far side, more ammunition under a
+         camouflage net, unit pennant.
+Level 3: concrete hardstanding, HESCO-type barrier ring, fire-control post with a
+         display and aerial; the gun gets a longer barrel with a new muzzle brake,
+         a muzzle-velocity radar and a gunner's display.
+The silhouette of the position stays the same from level to level.
 
 Returns (root, turret). `turret` (the whole gun) rotates around Z to aim;
 crates and ground stay still. Frame +Y is the direction of fire.
 """
 import math
-import os
-import tempfile
 
-import bpy
 from mathutils import Matrix, Vector
-from PIL import Image, ImageDraw, ImageFont
 
+from .. import fort
 from .. import materials_photoreal as mp
+from ..fort import pol
 from ..geo import Kit
 
-LEVELS = (1,)
+LEVELS = (1, 2, 3)
 STYLES = ("photoreal",)
-FRAME_M = 12.0          # real metres across the preview frame
-TARGET_Z = 0.9          # height the camera is centred on
+FRAME_M = 12.0          # real metres across the photo-style preview frame
+TARGET_Z = 0.9          # height the preview camera is centred on
+SPRITE_FRAME_M = 20.0   # game sprites: metres across the render (room for the barrel's shadow)
+SWEEP_M = 3.9           # nothing static may stand inside this radius: the gun turns through it
+FOOTPRINT_M = 6.0       # all static art stays inside this radius (one 12 m tile)
+WALL_IN = SWEEP_M + 0.15    # inner face of the sandbag / barrier ring
+SLAB_TOP = 0.06             # level 3 concrete stands this proud of the soil
+ENTRANCE = (125, 150)       # gap in the ring, on the far side
 GUN_SHIFT = 0.9         # the gun sits this far forward of the rotation centre, so the
                         # spades and the stabiliser pads sweep the same 3.9 m circle
 HERO_DIR = 12           # of 16: barrel toward screen lower-right, sunlit side to camera
@@ -38,14 +48,24 @@ def build(style, level=1):
     # node (turret yaws, elevating pitches about the trunnions, recoil slides).
     turret = k.empty("turret", parent=root)
     turret["node"] = "turret"
-    gun = k.empty("gun", (0, GUN_SHIFT, 0), parent=turret)
+    gun = k.empty("gun", (0, GUN_SHIFT, SLAB_TOP if level >= 3 else 0.0), parent=turret)
     mp.set_reference(gun)
 
     _carriage(k, gun)
     _saddle(k, gun)
     _elevating_mass(k, gun, level)
-    _props(k, root)
+    _props(k, root, level)
     return root, turret
+
+
+def ground(level):
+    """The soil patch the tower sprite brings with it."""
+    from ..terrain import Patch
+    patch = Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.8,
+                  r_bare={1: SWEEP_M + 0.4, 2: 4.9, 3: 5.4}[level])
+    if level >= 3:
+        patch.pad(SWEEP_M + 0.2)
+    return patch
 
 
 # --------------------------------------------------------------------------
@@ -200,30 +220,48 @@ def _elevating_mass(k, t, level=1):
 
     k.tube("trunnion", (-0.42, 0, 0), (0.42, 0, 0), 0.075, STEEL, parent=piv)
 
-    # --- barrel: chamber, taper, tube
+    # --- barrel: chamber, taper, tube (level 3: 52-calibre tube, 0.85 m longer)
+    ext = 0.85 if level >= 3 else 0.0
+    tip = 4.55 + ext
     barrel = [(-0.5, 0.0), (-0.5, 0.185), (0.4, 0.185), (0.55, 0.165), (1.3, 0.15),
-              (1.62, 0.118), (4.55, 0.098), (4.55, 0.0)]
+              (1.62, 0.118), (tip, 0.098), (tip, 0.0)]
     k.lathe("barrel", barrel, "paint_barrel", segs=40, loc=(0, 0, z0), parent=rec)
     for i in range(level):                                  # crimson rings: one per level
         y0, y1 = 3.72 - i * 0.2, 3.82 - i * 0.2
-        r = 0.118 + (0.098 - 0.118) * ((y0 + y1) / 2 - 1.62) / 2.93 + 0.0025
+        r = 0.118 + (0.098 - 0.118) * ((y0 + y1) / 2 - 1.62) / (tip - 1.62) + 0.0025
         k.lathe("ring", [(y0, 0.0), (y0, r), (y1, r), (y1, 0.0)], "paint_red", segs=40,
                 loc=(0, 0, z0), parent=rec)
 
-    # --- muzzle brake: collar, two baffles, top/bottom bars, towing eye
-    k.lathe("brake_collar", [(4.5, 0.0), (4.5, 0.125), (4.6, 0.14), (4.66, 0.14), (4.66, 0.0)],
+    # --- muzzle brake
+    k.lathe("brake_collar", [(tip - 0.05, 0.0), (tip - 0.05, 0.125), (tip + 0.05, 0.14),
+                             (tip + 0.11, 0.14), (tip + 0.11, 0.0)],
             "paint_barrel", segs=32, loc=(0, 0, z0), parent=rec)
-    k.lathe("brake_core", [(4.6, 0.0), (4.6, 0.108), (5.14, 0.108), (5.14, 0.0)], "paint_soot", segs=32,
-            loc=(0, 0, z0), parent=rec)
-    for y in (4.84, 5.1):
-        k.box("baffle", (0.5, 0.06, 0.3), (0, y, z0), "paint_soot", parent=rec, bevel=0.012)
-    for s in (-1, 1):
-        k.box("brake_bar", (0.2, 0.56, 0.035), (0, 4.86, z0 + s * 0.155), "paint_soot",
-              parent=rec, bevel=0.008)
-    k.cylinder("bore", 0.078, 0.01, (0, 5.141, z0), "bore", segs=24, rot=(-math.pi / 2, 0, 0),
+    if level < 3:       # two baffles, top/bottom bars
+        end = tip + 0.59
+        k.lathe("brake_core", [(tip + 0.05, 0.0), (tip + 0.05, 0.108), (end, 0.108), (end, 0.0)],
+                "paint_soot", segs=32, loc=(0, 0, z0), parent=rec)
+        for y in (tip + 0.29, tip + 0.55):
+            k.box("baffle", (0.5, 0.06, 0.3), (0, y, z0), "paint_soot", parent=rec, bevel=0.012)
+        for s in (-1, 1):
+            k.box("brake_bar", (0.2, 0.56, 0.035), (0, tip + 0.31, z0 + s * 0.155), "paint_soot",
+                  parent=rec, bevel=0.008)
+    else:               # high-efficiency brake: three wide baffles in a boxed frame
+        end = tip + 0.86
+        k.lathe("brake_core", [(tip + 0.05, 0.0), (tip + 0.05, 0.112), (end, 0.112), (end, 0.0)],
+                "paint_soot", segs=32, loc=(0, 0, z0), parent=rec)
+        for y in (tip + 0.3, tip + 0.56, tip + 0.82):
+            k.box("baffle", (0.62, 0.065, 0.34), (0, y, z0), "paint_soot", parent=rec, bevel=0.012)
+        for s in (-1, 1):
+            k.box("brake_bar", (0.26, 0.82, 0.04), (0, tip + 0.45, z0 + s * 0.175), "paint_soot",
+                  parent=rec, bevel=0.008)
+            k.box("brake_cheek", (0.035, 0.82, 0.1), (s * 0.3, tip + 0.45, z0), "paint_soot",
+                  parent=rec, bevel=0.008)
+    k.cylinder("bore", 0.078, 0.01, (0, end + 0.001, z0), "bore", segs=24, rot=(-math.pi / 2, 0, 0),
                parent=rec, bevel=False)
-    k.box("eye_lug", (0.06, 0.16, 0.1), (0, 5.0, z0 - 0.21), "paint_barrel", parent=rec)
-    k.torus("tow_eye", 0.085, 0.024, (0, 5.0, z0 - 0.33), STEEL, rot=(0, math.pi / 2, 0),
+    muzzle = k.empty("muzzle", (0, end + 0.02, z0), parent=rec)
+    muzzle["marker"] = "muzzle"
+    k.box("eye_lug", (0.06, 0.16, 0.1), (0, tip + 0.45, z0 - 0.21), "paint_barrel", parent=rec)
+    k.torus("tow_eye", 0.085, 0.024, (0, tip + 0.45, z0 - 0.33), STEEL, rot=(0, math.pi / 2, 0),
             parent=rec, segs=28, tube_segs=10)
 
     # --- breech ring, screw block, operating lever
@@ -275,6 +313,24 @@ def _elevating_mass(k, t, level=1):
         k.box("tray_wall", (0.025, 0.9, 0.08), (-0.5 + s * 0.125, -1.25, 0.02), WORN, parent=piv)
     k.beam("tray_arm", (-0.38, -0.5, -0.05), (-0.5, -0.9, -0.03), (0.06, 0.08), OLIVE, parent=piv)
 
+    if level >= 3:
+        # muzzle-velocity radar above the front yoke
+        k.box("mvr_bracket", (0.22, 0.08, 0.14), (0, 2.42, 0.5), STEEL, parent=piv)
+        k.box("mvr", (0.36, 0.24, 0.17), (0, 2.5, 0.64), OLIVE, parent=piv, bevel=0.015)
+        k.box("mvr_face", (0.3, 0.012, 0.12), (0, 2.622, 0.64), "rubber", parent=piv, bevel=False)
+        # satellite-navigation aerial and inertial unit on the cradle
+        k.box("inu", (0.3, 0.36, 0.14), (0, 0.6, 0.44), OLIVE, parent=piv, bevel=0.015)
+        k.cylinder("gps", 0.07, 0.04, (0.0, 0.6, 0.51), "paint_white", segs=20, parent=piv)
+        # gunner's display on the left, chief's display on the right
+        for sx, y in ((-1, -0.28), (1, -0.4)):
+            k.beam("display_arm", (sx * 0.4, y, 0.3), (sx * 0.56, y, 0.56), (0.03, 0.03), STEEL,
+                   parent=piv, bevel=False)
+            k.box("display", (0.07, 0.34, 0.25), (sx * 0.58, y, 0.66), OLIVE, parent=piv, bevel=0.012)
+            k.box("display_screen", (0.004, 0.26, 0.17), (sx * 0.617, y, 0.67), "screen", parent=piv,
+                  bevel=False)
+        k.hose("fc_loom", [(0.0, 0.78, 0.44), (0.1, 1.3, 0.48), (0.08, 1.9, 0.5), (0.0, 2.38, 0.52)],
+               0.012, "hose", parent=piv)
+
     # --- hydraulic hoses and a cable
     k.hose("hose1", [to_turret(p) for p in ((0.36, 0.3, -0.3), (0.5, 0.0, -0.3), (0.48, -0.3, 0.0),
                                              (0.36, -0.1, 0.2))], 0.014, "hose", parent=t)
@@ -288,41 +344,17 @@ def _elevating_mass(k, t, level=1):
                u=(0, sx, 0), v=(0, 0, 1), height=0.1)
 
 
-def _props(k, root):
-    """Level 1 kit: a few ammunition crates and ready rounds (static, on the soil)."""
-    def crate(name, loc, yaw, size=(0.42, 0.98, 0.3), lid_open=False):
-        e = k.empty(name, loc, parent=root)
-        e.rotation_euler = (0, 0, yaw)
-        sx, sy, sz = size
-        k.box("crate", size, (0, 0, sz / 2), "paint_crate", parent=e, bevel=0.006)
-        for y in (-sy * 0.33, sy * 0.33):                       # battens
-            k.box("batten", (sx + 0.03, 0.07, sz + 0.02), (0, y, sz / 2), "wood", parent=e)
-        for s in (-1, 1):                                       # rope handles
-            k.hose("handle", [(-0.09, s * (sy / 2 + 0.002), sz * 0.62),
-                              (-0.05, s * (sy / 2 + 0.06), sz * 0.45),
-                              (0.05, s * (sy / 2 + 0.06), sz * 0.45),
-                              (0.09, s * (sy / 2 + 0.002), sz * 0.62)], 0.011, "rope", parent=e)
-        _decal(k, "decal_crate", "155 ОФ  2 БР.", e, centre=(sx / 2 + 0.0015, 0, sz * 0.5),
-               u=(0, 1, 0), v=(0, 0, 1), height=0.075)
-        _decal(k, "decal_crate", "155 ОФ  2 БР.", e, centre=(0, 0, sz + 0.0015),
-               u=(0, 1, 0), v=(-1, 0, 0), height=0.075)
-        return e
-
-    crate("crate_a", (-1.9, -4.3, 0.0), math.radians(52))
-    crate("crate_b", (-1.86, -4.34, 0.3), math.radians(47))
-    crate("crate_c", (-2.75, -3.75, 0.0), math.radians(8))
-    crate("crate_d", (-0.9, -5.0, 0.0), math.radians(74))
-
-    # ready rounds standing on a board
-    k.box("board", (0.5, 1.25, 0.035), (0.25, -4.45, 0.02), "wood", rot=(0, 0, math.radians(60)),
+def _rounds(k, root, centre, yaw, n=5):
+    """Ready rounds standing fuze-up on a board."""
+    k.box("board", (0.5, 0.25 * n, 0.035), (centre.x, centre.y, 0.02), "wood", rot=(0, 0, yaw),
           parent=root)
     body = [(0.0, 0.0), (0.0, 0.068), (0.035, 0.0775), (0.44, 0.0775), (0.58, 0.066),
             (0.69, 0.042), (0.69, 0.0)]
     fuze = [(0.69, 0.0), (0.69, 0.04), (0.73, 0.033), (0.79, 0.012), (0.795, 0.0)]
-    c, s = math.cos(math.radians(60)), math.sin(math.radians(60))
-    for i in range(5):
-        d = (i - 2) * 0.2
-        e = k.empty("round", (0.25 - s * d, -4.45 + c * d, 0.04), parent=root)
+    c, s = math.cos(yaw), math.sin(yaw)
+    for i in range(n):
+        d = (i - (n - 1) / 2) * 0.2
+        e = k.empty("round", (centre.x - s * d, centre.y + c * d, 0.04), parent=root)
         e.rotation_euler = (math.pi / 2 + (0.02 if i % 2 else -0.015), 0, i * 1.3)
         k.lathe("shell", body, "paint_shell", segs=28, parent=e)
         k.lathe("band", [(0.05, 0.0), (0.05, 0.0795), (0.085, 0.0795), (0.085, 0.0)], "copper",
@@ -330,68 +362,73 @@ def _props(k, root):
         k.lathe("stripe", [(0.36, 0.0), (0.36, 0.0782), (0.39, 0.0782), (0.39, 0.0)], "paint_yellow",
                 segs=28, parent=e)
         k.lathe("fuze", fuze, "steel_worn", segs=20, parent=e)
-    # spent propellant canisters, tossed aside
-    for i, (x, y, yaw) in enumerate(((-3.5, -1.9, 0.4), (-3.9, -2.5, 1.9), (-3.1, -2.9, 2.6),
-                                      (-4.3, -1.5, 1.2))):
-        e = k.empty("canister", (x, y, 0.085), parent=root)
-        e.rotation_euler = (0, 0, yaw)
-        k.lathe("can", [(-0.42, 0.0), (-0.42, 0.085), (0.42, 0.085), (0.42, 0.075), (0.4, 0.075),
-                        (0.4, 0.0)], "paint_shell", segs=20, parent=e)
-        k.lathe("can_rim", [(-0.43, 0.0), (-0.43, 0.092), (-0.39, 0.092), (-0.39, 0.0)], "steel_worn",
-                segs=20, parent=e)
+
+
+def _props(k, root, level=1):
+    """Static kit around the gun. Everything stands between SWEEP_M and FOOTPRINT_M.
+    The ammunition point is on the sunny side toward the camera (around -105 deg);
+    each level keeps what the previous one had and adds to it."""
+    tang = lambda deg: math.radians(deg)          # yaw that lays a crate's long side along the ring
+    r0 = {1: 4.75, 2: 5.1, 3: 5.52}[level]        # first row of crates (clear of the wall)
+    # --- ammunition crates (long side tangential)
+    stacks = [(-118, 2), (-104, 1)] if level == 1 else [(-124, 3), (-112, 3), (-100, 2), (-89, 1)]
+    for i, (deg, high) in enumerate(stacks):
+        for j in range(high):
+            p = pol(r0 + 0.02 * (j % 2), deg + (1.2 if j % 2 else 0), 0.3 * j)
+            fort.crate(k, root, f"crate_{i}_{j}", p, tang(deg) + (0.06 if j % 2 else -0.03))
+    if level == 1:
+        fort.crate(k, root, "crate_x", pol(5.45, -111), tang(-111) + 0.5)
+    # ready rounds on a board
+    _rounds(k, root, pol(r0 + 0.1, -77 if level > 1 else -90), tang(-77 if level > 1 else -90))
     # jerrycans
-    for x, y, yaw in ((-2.6, -4.75, 0.5), (-2.95, -4.6, 0.75)):
-        e = k.empty("jerrycan", (x, y, 0.0), parent=root)
+    for r, deg, yaw in ((5.55, -133, 0.5), (5.6, -129.5, 0.75)):
+        p = pol(r, deg)
+        e = k.empty("jerrycan", p, parent=root)
         e.rotation_euler = (0, 0, yaw)
         k.box("can", (0.17, 0.35, 0.42), (0, 0, 0.21), WORN, parent=e, bevel=0.03)
         k.box("can_top", (0.05, 0.2, 0.05), (0, -0.03, 0.445), WORN, parent=e, bevel=0.012)
         k.cylinder("can_cap", 0.03, 0.05, (0, 0.13, 0.42), STEEL, segs=12, parent=e)
-    # shovel and pick against the crates, aiming posts planted in front
-    k.tube("shovel_shaft", (-2.25, -4.1, 0.02), (-1.98, -4.2, 0.95), 0.019, "wood", parent=root, segs=10)
-    k.box("shovel_blade", (0.2, 0.012, 0.28), (-2.29, -4.085, 0.0), "steel_worn",
-          rot=(0.28, 0, -1.2), parent=root, bevel=False)
-    for (x, y) in ((3.2, -5.6),):
-        for i in range(5):
-            k.cylinder("aiming_post", 0.016, 0.3, (x, y, i * 0.3), "paint_red" if i % 2 else "paint_white",
-                       segs=10, parent=root, bevel=False)
-    # rammer staff lying by the trail
-    k.tube("rammer", (1.5, -3.8, 0.05), (-0.15, -6.4, 0.07), 0.022, "wood", parent=root, segs=12)
-    k.cylinder("rammer_head", 0.07, 0.12, (1.5, -3.8, 0.05), "rubber", segs=16,
-               rot=Vector((1.65, 2.6, -0.02)).to_track_quat("Z", "Y").to_euler(), parent=root)
+    # shovel leaning on the first stack
+    a = pol(r0 + 0.45, -119.5, 0.02)
+    b = pol(r0 + 0.2, -118.5, 0.62 if level == 1 else 0.92)
+    k.tube("shovel_shaft", a, b, 0.019, "wood", parent=root, segs=10)
+    k.box("shovel_blade", (0.2, 0.012, 0.28), a + Vector((0, 0, 0.1)), "steel_worn",
+          rot=(0.25, 0, math.radians(-118.5 + 90)), parent=root, bevel=False)
+    # spent propellant canisters, tossed in a heap on the far left
+    rh = {1: 5.05, 2: 5.2, 3: 5.6}[level]
+    heap = [(0.0, 168, 20), (0.3, 173, -15), (0.02, 178, 8), (0.33, 163, 30)]
+    if level >= 2:
+        heap += [(0.05, 185, -20), (0.32, 180.5, 12), (0.16, 172, 3)]
+    for i, (dr, deg, skew) in enumerate(heap):
+        p = pol(rh + dr, deg, 0.085 + (0.16 if i == 6 else 0.0))
+        e = k.empty("canister", p, parent=root)
+        e.rotation_euler = (0, 0, math.radians(deg + skew))
+        k.lathe("can", [(-0.42, 0.0), (-0.42, 0.085), (0.42, 0.085), (0.42, 0.075), (0.4, 0.075),
+                        (0.4, 0.0)], "paint_shell", segs=20, parent=e)
+        k.lathe("can_rim", [(-0.43, 0.0), (-0.43, 0.092), (-0.39, 0.092), (-0.39, 0.0)], "steel_worn",
+                segs=20, parent=e)
+    # aiming post, planted to the right
+    p = pol(5.6, 22)
+    for i in range(5):
+        k.cylinder("aiming_post", 0.016, 0.3, (p.x, p.y, i * 0.3), "paint_red" if i % 2 else "paint_white",
+                   segs=10, parent=root, bevel=False)
+    # rammer staff lying along the edge of the position
+    a, b = pol(5.75, -68, 0.05), pol(5.7, -40, 0.07)
+    k.tube("rammer", a, b, 0.022, "wood", parent=root, segs=12)
+    k.cylinder("rammer_head", 0.07, 0.12, a, "rubber", segs=16,
+               rot=(a - b).to_track_quat("Z", "Y").to_euler(), parent=root)
+
+    ring = [(ENTRANCE[1], ENTRANCE[0] + 360)]
+    if level == 2:
+        r_out, _ = fort.sandbag_wall(k, root, WALL_IN, ring, courses=5)
+        fort.lean_to_net(k, root, r_out + 0.12, 6.1, -128, -93, top_z=1.95)
+        fort.pennant(k, root, pol(r_out + 0.3, 62))
+    elif level == 3:
+        fort.concrete_pad(k, root, SWEEP_M + 0.12, top=SLAB_TOP)
+        r_out, _ = fort.hesco_wall(k, root, WALL_IN, ring)
+        fort.lean_to_net(k, root, r_out + 0.14, 6.2, -128, -93, top_z=2.15)
+        fort.pennant(k, root, pol(r_out + 0.32, 62), height=2.7)
+        fort.fire_control(k, root, pol(5.66, -30), math.radians(-30 + 90))
 
 
-# --------------------------------------------------------------------------
-_decal_dir = tempfile.mkdtemp(prefix="strelite_decals_")
-
-
-def _decal(k, name, text, parent, centre, u, v, height):
-    """White stencilled text on a flat face. u = reading direction, v = up."""
-    key = f"{name}"
-    path = os.path.join(_decal_dir, key + ".png")
-    if not os.path.exists(path):
-        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf", 120)
-        w = int(font.getlength(text)) + 40
-        img = Image.new("L", (w, 170), 0)
-        d = ImageDraw.Draw(img)
-        d.text((20, 10), text, font=font, fill=255)
-        for x in range(20 + 36, w, 72):                     # stencil bridges
-            d.line([(x, 0), (x, 170)], fill=0, width=7)
-        img.convert("RGB").save(path)
-        mp.register_decal(key, path)
-    with Image.open(path) as im:
-        aspect = im.width / im.height
-    u, v, c = Vector(u).normalized(), Vector(v).normalized(), Vector(centre)
-    hw, hh = height * aspect / 2, height / 2
-    verts = [c - u * hw - v * hh, c + u * hw - v * hh, c + u * hw + v * hh, c - u * hw + v * hh]
-    me = bpy.data.meshes.new("decal")
-    me.from_pydata([tuple(p) for p in verts], [], [(0, 1, 2, 3)])
-    uv = me.uv_layers.new(name="UVMap")
-    for i, co in enumerate(((0, 0), (1, 0), (1, 1), (0, 1))):
-        uv.data[i].uv = co
-    obj = bpy.data.objects.new("decal", me)
-    k.collection.objects.link(obj)
-    from .. import materials
-    obj.data.materials.append(materials.get(key, k.style))
-    obj.parent = parent
-    obj.visible_shadow = False
-    return obj
+_decal = fort.decal

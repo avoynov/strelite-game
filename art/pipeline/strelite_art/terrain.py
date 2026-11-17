@@ -29,7 +29,14 @@ def _fbm(n, rng, octaves):
     return h
 
 
+def _smooth(t):
+    t = np.clip(t, 0.0, 1.0)
+    return t * t * (3 - 2 * t)
+
+
 class Terrain:
+    """Large open ground for the photo-style stills (hero shots, blind tests)."""
+
     def __init__(self, size_m, cell=0.04, seed=7, clear_radius=2.2):
         self.size, self.seed = size_m, seed
         self.n = n = int(size_m / cell) + 1
@@ -101,18 +108,27 @@ class Terrain:
         me.polygons.foreach_set("use_smooth", np.ones(nq, dtype=bool))
         me.update(calc_edges=True)
         masks = me.color_attributes.new("masks", "FLOAT_COLOR", "POINT")
-        rgba = np.stack([self.rut, self.tramp, self.cover, np.ones_like(self.rut)], axis=-1)
+        opacity = getattr(self, "alpha", None)
+        rgba = np.stack([self.rut, self.tramp, self.cover,
+                         np.ones_like(self.rut) if opacity is None else opacity], axis=-1)
         masks.data.foreach_set("color", rgba.reshape(-1).astype(np.float32))
         obj = bpy.data.objects.new("terrain", me)
         obj["terrain"] = True
         obj.data.materials.append(materials.get("dirt", STYLE))
         scene.collection.objects.link(obj)
-        self._stones(scene)
-        self._grass(scene)
+        self._stones(scene, self.stone_count)
+        self._grass(scene, self.grass_count)
         return obj
 
     # -- scatter -----------------------------------------------------------
-    def _stones(self, scene, count=2600):
+    stone_count, grass_count = 2600, 14000
+    tuft_scale = 1.0
+
+    def _keep(self, j, i):
+        """Scatter filter: may an object stand on grid cell (j, i)?"""
+        return True
+
+    def _stones(self, scene, count):
         rnd = self.rng
         variants = []
         for i in range(8):
@@ -138,7 +154,7 @@ class Terrain:
             r = rnd.choice([0.008, 0.01, 0.012, 0.012, 0.016, 0.02, 0.026, 0.035, 0.06]) \
                 * rnd.uniform(0.7, 1.4)
             j, ii = self._ij(x, y)
-            if self.tramp[j, ii] > 0.5 and r > 0.022:
+            if (self.tramp[j, ii] > 0.5 and r > 0.022) or not self._keep(j, ii):
                 continue
             o = bpy.data.objects.new("stone", rnd.choice(variants))
             o["terrain"] = True
@@ -147,7 +163,7 @@ class Terrain:
             o.rotation_euler = (rnd.uniform(-0.3, 0.3), rnd.uniform(-0.3, 0.3), rnd.uniform(0, 6.28))
             scene.collection.objects.link(o)
 
-    def _grass(self, scene, count=14000):
+    def _grass(self, scene, count):
         rnd = self.rng
         variants = []
         for i in range(10):
@@ -183,13 +199,114 @@ class Terrain:
             x, y = rnd.uniform(-half, half), rnd.uniform(-half, half)
             j, ii = self._ij(x, y)
             c = float(self.cover[j, ii])
-            if rnd.random() > c * c * 1.2 + 0.006:
+            if rnd.random() > c * c * 1.2 + 0.006 or not self._keep(j, ii):
                 continue
             o = bpy.data.objects.new("tuft", rnd.choice(variants))
             o["terrain"] = True
-            s = rnd.uniform(0.10, 0.22) * (0.6 + 0.8 * c)
+            s = rnd.uniform(0.10, 0.22) * (0.6 + 0.8 * c) * self.tuft_scale
             o.location = (x, y, self.h[j, ii] - 0.005)
             o.scale = (s * rnd.uniform(0.8, 1.3), s * rnd.uniform(0.8, 1.3), s)
             o.rotation_euler = (0, 0, rnd.uniform(0, 6.28))
             scene.collection.objects.link(o)
             placed += 1
+
+
+class Field(Terrain):
+    """Open ground for the game's map: dry soil with patchy grass, no tracks and no
+    trampled spot, so it can be repeated as a tile (see render_ground.py). Grass
+    grows in many small patches rather than a few big ones: big shapes would give
+    the repetition away."""
+    tuft_scale = 1.45
+
+    def __init__(self, size_m, cell=0.07, seed=31, grass=0.6):
+        self.size, self.seed = size_m, seed
+        self.n = n = int(size_m / cell) + 1
+        rng = np.random.default_rng(seed)
+        s = size_m
+        h = _fbm(n, rng, [(int(s / 7), 0.04), (int(s / 1.6), 0.018), (int(s / 0.45), 0.011),
+                          (int(s / 0.15), 0.005)])
+        self.ax = np.linspace(-s / 2, s / 2, n, dtype=np.float32)
+        # bare, slightly paler spots between the turf
+        bare = _fbm(n, rng, [(int(s / 3), 0.5), (int(s / 1.2), 0.4)])
+        tramp = np.clip(0.25 + bare * 0.5, 0.0, 0.7)
+        cover = _fbm(n, rng, [(int(s / 2.6), 0.9), (int(s / 1.2), 0.6), (int(s / 0.4), 0.3)])
+        cover = 0.5 + 0.5 * np.tanh(cover * 1.3 + (grass - 0.5) * 2.0)
+        cover = np.clip(cover * (1.0 - tramp * 0.9), 0.0, 1.0)
+        h += cover * 0.012
+        self.h = h.astype(np.float32)
+        self.rut = np.zeros_like(h)
+        self.tramp, self.cover = tramp.astype(np.float32), cover.astype(np.float32)
+        self.rng = random.Random(seed)
+        self.stone_count = int(s * s * 1.6)
+        self.grass_count = int(s * s * 15)
+
+
+class Patch(Terrain):
+    """The piece of ground a tower sprite brings with it: trampled soil under the
+    gun that fades out (alpha) into whatever ground the game draws around it.
+
+    r_solid   everything inside is opaque soil (the tower's footprint)
+    r_out     fully transparent from here on; the edge in between is ragged
+    r_bare    radius the crew and the gun keep bare; grass starts beyond it
+
+    The height field can be reshaped before build(): `pad()` casts a concrete slab
+    level, `pit()` digs a gun pit with a spoil bank around it.
+    """
+    stone_count, grass_count = 0, 0
+    CATCHER_INSET = 1.0     # the shadow catcher starts this far inside r_solid
+
+    def __init__(self, r_solid=6.0, r_out=6.8, r_bare=4.3, cell=0.04, seed=11):
+        self.r_solid, self.r_out = r_solid, r_out
+        self.size = s = 2 * r_out + 0.4
+        self.seed = seed
+        self.n = n = int(s / cell) + 1
+        rng = np.random.default_rng(seed)
+        ax = np.linspace(-s / 2, s / 2, n, dtype=np.float32)
+        X, Y = np.meshgrid(ax, ax)
+        self.r = r = np.sqrt(X * X + Y * Y)
+        h = _fbm(n, rng, [(int(s / 1.6), 0.012), (int(s / 0.45), 0.009), (int(s / 0.13), 0.005)])
+        edge = _fbm(n, rng, [(int(s / 1.3), 0.5), (int(s / 0.4), 0.25), (int(s / 0.12), 0.1)])
+        edge = np.clip(edge, -0.9, 0.9)         # so the soil is solid inside r_solid - 0.9
+        alpha = 1.0 - _smooth((r + edge - r_solid) / (r_out - r_solid))
+        alpha = np.where(r > r_out, 0.0, alpha)
+        tramp_n = _fbm(n, rng, [(int(s / 2.5), 0.5), (int(s / 0.8), 0.3)])
+        tramp = np.clip((1.0 - 0.75 * _smooth((r - r_bare * 0.6) / (r_out - r_bare * 0.6)))
+                        * (0.8 + tramp_n), 0.0, 1.0)
+        cover = _fbm(n, rng, [(int(s / 3), 1.0), (int(s / 1.0), 0.55), (int(s / 0.4), 0.3)])
+        cover = 0.5 + 0.5 * np.tanh(cover * 1.3 + 0.1)
+        cover = np.clip(cover * _smooth((r + edge * 0.8 - r_bare) / 0.9), 0.0, 1.0)
+        h *= 1.0 - 0.6 * tramp
+        h += cover * 0.012
+        # the ragged edge lies flat on the game's ground plane
+        flat = _smooth((r - (r_solid - 1.9)) / 0.8)
+        h = h * (1 - flat) + np.maximum(h, 0.0) * flat * 0.5
+        self.h, self.ax = h.astype(np.float32), ax
+        self.X, self.Y = X, Y
+        self.rut = np.zeros_like(h)
+        self.tramp, self.cover, self.alpha = tramp, cover, alpha.astype(np.float32)
+        self.rng = random.Random(seed)
+        area = math.pi * r_out ** 2
+        self.stone_count = int(area * 4.5)
+        self.grass_count = int(area * 16)
+
+    def _keep(self, j, i):
+        return self.alpha[j, i] > 0.35
+
+    def pad(self, radius, z=0.0):
+        """Level the ground for a slab of the given radius (the slab itself is a model part)."""
+        m = _smooth((radius + 0.25 - self.r) / 0.25)
+        self.h = (self.h * (1 - m) + z * m).astype(np.float32)
+        self.cover *= 1 - m
+        return self
+
+    def pit(self, radius, depth, bank=0.3, bank_width=1.3):
+        """Dig a round pit; the spoil is thrown up as a bank around it."""
+        inside = _smooth((radius - self.r) / 0.06)
+        ring = np.exp(-(((self.r - radius - bank_width * 0.45) / (bank_width * 0.42)) ** 2))
+        lump = _fbm(self.n, np.random.default_rng(self.seed + 1),
+                    [(int(self.size / 0.9), 0.35), (int(self.size / 0.3), 0.2)])
+        self.h = (self.h * (1 - inside) + (self.h * 0.5 - depth) * inside
+                  + bank * ring * (1 - inside) * (1.0 + lump)).astype(np.float32)
+        self.cover *= 1 - np.clip(ring * 1.6 + inside, 0, 1)
+        self.tramp = np.clip(self.tramp + inside, 0, 1)
+        return self

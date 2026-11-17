@@ -193,6 +193,24 @@ class Kit:
             f.append((i, j, j + n, i + n))
         return self._finish(self.mesh(name, v, f), mat, bevel=bevel, parent=parent, outline=False)
 
+    def prism(self, name, outline_xz, thickness, mat, y=0.0, parent=None, bevel=True):
+        """Flat plate cut from an (x, z) outline (any winding, may be concave),
+        thickness along Y. Used for shields and armour plates."""
+        n = len(outline_xz)
+        v = [(x, y - thickness / 2, z) for x, z in outline_xz]
+        v += [(x, y + thickness / 2, z) for x, z in outline_xz]
+        f = [tuple(range(n)), tuple(reversed(range(n, 2 * n)))]
+        for i in range(n):
+            j = (i + 1) % n
+            f.append((i, j, j + n, i + n))
+        obj = self.mesh(name, v, f)
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        bm.to_mesh(obj.data)
+        bm.free()
+        return self._finish(obj, mat, bevel=bevel, parent=parent, outline=False)
+
     def torus(self, name, radius, tube_radius, loc, mat, rot=(0, 0, 0), parent=None,
               segs=32, tube_segs=10):
         """Ring around the local Z axis."""

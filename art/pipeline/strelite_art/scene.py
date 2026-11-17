@@ -49,11 +49,20 @@ def camera_vectors():
 
 
 def add_camera(scene, style="stylized", frame_m=ORTHO_SCALE, lens_mm=PHOTO_LENS_MM,
-               target_z=None):
+               target_z=None, projection="persp"):
+    """projection: photoreal stills use the telephoto lens ("persp"); photoreal game
+    sprites use "ortho", the game's own 2:1 projection, so every sprite sits on the
+    tile grid exactly and world metres map to pixels linearly."""
     rot, back, _ = camera_vectors()
     cam_data = bpy.data.cameras.new("IsoCam")
     target = Vector((0, 0, CAM_TARGET_Z if target_z is None else target_z))
-    if style == "photoreal":
+    if style == "photoreal" and projection == "ortho":
+        cam_data.type = "ORTHO"
+        cam_data.ortho_scale = frame_m
+        cam_data.clip_start = 0.5
+        cam_data.clip_end = 400
+        distance = 120
+    elif style == "photoreal":
         cam_data.type = "PERSP"
         cam_data.sensor_fit = "HORIZONTAL"
         cam_data.sensor_width = PHOTO_SENSOR_MM
@@ -162,11 +171,24 @@ def add_physical_sky(scene, elevation_deg=PHOTO_SUN_ELEVATION_DEG):
     return sky
 
 
-def add_shadow_catcher(scene):
-    """Invisible ground that keeps cast shadows in the sprite's alpha."""
+def add_shadow_catcher(scene, hole_radius=0.0, half=3.0, z=0.0):
+    """Invisible ground that keeps cast shadows in the sprite's alpha.
+    hole_radius > 0 leaves the middle open (a sprite's own soil patch lies there)."""
     mesh = bpy.data.meshes.new("Ground")
-    s = 3.0
-    mesh.from_pydata([(-s, -s, 0), (s, -s, 0), (s, s, 0), (-s, s, 0)], [], [(0, 1, 2, 3)])
+    s = half
+    if hole_radius > 0:
+        n = 96
+        inner = [(hole_radius * math.cos(2 * math.pi * i / n), hole_radius * math.sin(2 * math.pi * i / n), z)
+                 for i in range(n)]
+        outer = []
+        for i in range(n):
+            a = 2 * math.pi * i / n
+            k = s / max(abs(math.cos(a)), abs(math.sin(a)))
+            outer.append((k * math.cos(a), k * math.sin(a), z))
+        faces = [(i, (i + 1) % n, n + (i + 1) % n, n + i) for i in range(n)]
+        mesh.from_pydata(inner + outer, [], faces)
+    else:
+        mesh.from_pydata([(-s, -s, z), (s, -s, z), (s, s, z), (-s, s, z)], [], [(0, 1, 2, 3)])
     ground = bpy.data.objects.new("Ground", mesh)
     ground.is_shadow_catcher = True
     scene.collection.objects.link(ground)
@@ -201,11 +223,13 @@ def configure_render(scene, style, size=512, samples=48):
 
 
 def build_stage(style, size=512, samples=48, frame_m=ORTHO_SCALE, ground="catcher",
-                lens_mm=PHOTO_LENS_MM, target_z=None):
-    """ground: "catcher" = transparent sprite with shadow, "none" = caller adds terrain."""
+                lens_mm=PHOTO_LENS_MM, target_z=None, projection="persp", catcher_hole=0.0):
+    """ground: "catcher" = transparent sprite with shadow, "patch" = the same plus a
+    hole in the middle for the sprite's own soil patch, "terrain"/"none" = caller
+    adds opaque ground."""
     scene = reset_scene()
     if style == "photoreal":
-        add_camera(scene, style, frame_m, lens_mm, target_z)
+        add_camera(scene, style, frame_m, lens_mm, target_z, projection)
         add_physical_sky(scene)
     else:
         add_camera(scene)
@@ -213,6 +237,8 @@ def build_stage(style, size=512, samples=48, frame_m=ORTHO_SCALE, ground="catche
     if ground == "catcher":
         g = add_shadow_catcher(scene)
         g.scale = (frame_m / ORTHO_SCALE,) * 3
+    elif ground == "patch":
+        add_shadow_catcher(scene, hole_radius=catcher_hole, half=frame_m, z=-0.004)
     configure_render(scene, style, size, samples)
-    scene.render.film_transparent = ground == "catcher"
+    scene.render.film_transparent = ground in ("catcher", "patch")
     return scene
