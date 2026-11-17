@@ -34,12 +34,12 @@ describe('tower art', () => {
     expect(stickyFrameForAim(Math.PI, 32, 3)).toBe(16);
   });
 
-  // The soil patch may spill a little over the edge of the footprint, the fortifications may not.
+  // footprintRadiusM covers everything solid; only the soil patch's faded edge may reach past it.
   it.skipIf(!existsSync(join(ART, 'towers.json')))('fits every gun inside the footprint the game gives it', () => {
     const manifest = JSON.parse(readFileSync(join(ART, 'towers.json'), 'utf8')) as TowerArtManifest;
     for (const [id, tower] of Object.entries(manifest.towers)) {
       const size = TOWERS[id as keyof typeof TOWERS]?.size ?? 0;
-      for (const lv of tower.levels) expect(lv.footprintRadiusM, `${id} L${lv.level}`).toBeLessThanOrEqual((size * METRES_PER_TILE) / 2 + 1);
+      for (const lv of tower.levels) expect(lv.footprintRadiusM, `${id} L${lv.level}`).toBeLessThanOrEqual((size * METRES_PER_TILE) / 2);
     }
   });
 
