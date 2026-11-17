@@ -290,7 +290,26 @@ def _elevating_mass(k, t, level=1):
         k.lathe("ring", [(y0, 0.0), (y0, r), (y1, r), (y1, 0.0)], STYLE[level]["ring"], segs=40,
                 loc=(0, 0, z0), parent=rec)
 
-    # --- muzzle brake
+    # --- muzzle: a plain swell on levels 1-2, a brake from level 3
+    if level <= 2:
+        end = tip
+        k.lathe("muzzle_swell", [(tip - 0.28, 0.0), (tip - 0.28, 0.1), (tip - 0.1, 0.112), (tip, 0.112),
+                                 (tip, 0.0)], BARREL, segs=32, loc=(0, 0, z0), parent=rec)
+    else:
+        _brake(k, rec, tip, z0, level)
+    k.cylinder("bore", 0.078, 0.01, (0, end + 0.001, z0) if level <= 2 else (0, _brake.end + 0.001, z0), "bore",
+               segs=24, rot=(-math.pi / 2, 0, 0), parent=rec, bevel=False)
+    end = end if level <= 2 else _brake.end
+    muzzle = k.empty("muzzle", (0, end + 0.02, z0), parent=rec)
+    muzzle["marker"] = "muzzle"
+    if level >= 3:
+        k.box("eye_lug", (0.06, 0.16, 0.1), (0, tip + 0.45, z0 - 0.21), BARREL, parent=rec)
+        k.torus("tow_eye", 0.085, 0.024, (0, tip + 0.45, z0 - 0.33), STEEL, rot=(0, math.pi / 2, 0),
+                parent=rec, segs=28, tube_segs=10)
+    _breech_and_cradle(k, t, piv, rec, z0, level, to_turret)
+
+
+def _brake(k, rec, tip, z0, level):
     k.lathe("brake_collar", [(tip - 0.05, 0.0), (tip - 0.05, 0.125), (tip + 0.05, 0.14),
                              (tip + 0.11, 0.14), (tip + 0.11, 0.0)],
             BARREL, segs=32, loc=(0, 0, z0), parent=rec)
@@ -314,14 +333,10 @@ def _elevating_mass(k, t, level=1):
                   parent=rec, bevel=0.008)
             k.box("brake_cheek", (0.035, 0.82, 0.1), (s * 0.3, tip + 0.45, z0), SOOT,
                   parent=rec, bevel=0.008)
-    k.cylinder("bore", 0.078, 0.01, (0, end + 0.001, z0), "bore", segs=24, rot=(-math.pi / 2, 0, 0),
-               parent=rec, bevel=False)
-    muzzle = k.empty("muzzle", (0, end + 0.02, z0), parent=rec)
-    muzzle["marker"] = "muzzle"
-    k.box("eye_lug", (0.06, 0.16, 0.1), (0, tip + 0.45, z0 - 0.21), BARREL, parent=rec)
-    k.torus("tow_eye", 0.085, 0.024, (0, tip + 0.45, z0 - 0.33), STEEL, rot=(0, math.pi / 2, 0),
-            parent=rec, segs=28, tube_segs=10)
+    _brake.end = end
 
+
+def _breech_and_cradle(k, t, piv, rec, z0, level, to_turret):
     # --- breech ring, screw block, operating lever
     k.box("breech_ring", (0.5, 0.5, 0.5), (0, -0.62, z0), WORN, parent=rec, bevel=0.02)
     k.cylinder("breech_block", 0.16, 0.14, (0, -1.0, z0), STEEL, segs=28,
@@ -335,6 +350,15 @@ def _elevating_mass(k, t, level=1):
     k.box("cradle", (0.68, 1.05, 0.46), (0, 0.22, 0.08), OLIVE, parent=piv, bevel=0.015)
     k.box("cradle_top", (0.4, 0.8, 0.06), (0, 0.25, 0.34), OLIVE, parent=piv)
     for sx in (-1, 1):
+        if level < 2:   # bare cradle: the recoil gear sits inside it, no tubes along the barrel
+            _bolts(k, [(sx * 0.345, y, z) for y in (-0.2, 0.15, 0.5, 0.68) for z in (-0.08, 0.26)],
+                   (sx, 0, 0), piv)
+            a, b = Vector((sx * 0.5, 0.42, 0.84)), to_turret((sx * 0.36, 0.68, -0.1))
+            k.tube("equil", a, a.lerp(b, 0.62), 0.058, OLIVE, parent=t, segs=20)
+            k.tube("equil_rod", a.lerp(b, 0.62), b, 0.03, "chrome", parent=t, segs=16)
+            k.tube("equil_foot", a - Vector((sx * 0.1, 0, 0)), a + Vector((sx * 0.05, 0, 0)), 0.06, STEEL,
+                   parent=t, segs=16)
+            continue
         k.tube("recup", (sx * 0.255, 0.55, 0.37), (sx * 0.255, 2.75, 0.37), 0.082, OLIVE, parent=piv,
                segs=24)
         k.tube("recup_cap", (sx * 0.255, 2.75, 0.37), (sx * 0.255, 2.83, 0.37), 0.06, STEEL,
@@ -353,7 +377,7 @@ def _elevating_mass(k, t, level=1):
                parent=t, segs=16)
         k.tube("equil_foot", a - Vector((sx * 0.1, 0, 0)), a + Vector((sx * 0.05, 0, 0)), 0.06, STEEL,
                parent=t, segs=16)
-    for y, wdt, hgt in ((1.45, 0.76, 0.66), (2.4, 0.74, 0.64)):
+    for y, wdt, hgt in ((1.45, 0.76, 0.66), (2.4, 0.74, 0.64)) if level >= 2 else ():
         k.box("yoke", (wdt, 0.07, hgt), (0, y, 0.12), OLIVE, parent=piv, bevel=0.012)
         _bolts(k, [(x, y + 0.036, zz) for x in (-0.33, 0.0, 0.33) for zz in (-0.16, 0.4)]
                + [(x, y + 0.036, 0.12) for x in (-0.34, 0.34)], (0, 1, 0), piv)
@@ -396,9 +420,10 @@ def _elevating_mass(k, t, level=1):
                                              (0.36, -0.1, 0.2))], 0.014, "hose", parent=t)
     k.hose("hose2", [(0.3, 0.9, 0.62), (0.38, 0.75, 0.82), (0.5, 0.55, 0.95), (0.52, 0.42, 0.9)],
            0.012, "hose", parent=t)
-    k.hose("hose3", [to_turret(p) for p in ((-0.3, 0.72, 0.3), (-0.33, 1.1, 0.46), (-0.3, 1.44, 0.4),
-                                            (-0.26, 2.0, 0.47), (-0.26, 2.38, 0.46))], 0.011, "hose",
-           parent=t)
+    if level >= 2:
+        k.hose("hose3", [to_turret(p) for p in ((-0.3, 0.72, 0.3), (-0.33, 1.1, 0.46), (-0.3, 1.44, 0.4),
+                                                (-0.26, 2.0, 0.47), (-0.26, 2.38, 0.46))], 0.011, "hose",
+               parent=t)
     for sx in (-1, 1):
         _decal(k, "decal_calibre", "155 ММ", piv, centre=(sx * 0.3415, 0.25, 0.08),
                u=(0, sx, 0), v=(0, 0, 1), height=0.1)
