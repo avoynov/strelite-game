@@ -188,7 +188,8 @@ def render_tower_layers(model, a, level):
         model.set_fire_frame(0, scene)
         scene.render.use_motion_blur = False
         fire = {"dirs": a.fire_dirs, "frames": model.FIRE_FRAMES, "fps": model.FIRE_FPS,
-                "releaseFrame": model.RELEASE_FRAME, "reloadFrom": model.RELOAD_FROM}
+                "releaseFrame": model.RELEASE_FRAME, "reloadFrom": model.RELOAD_FROM,
+                "loop": getattr(model, "LOOP", False)}
     meta = {
         "model": a.model, "level": level, "dirs": a.dirs, "pxPerMetre": a.ppm,
         "frame": [size, size_y], "anchorPx": anchor_px, "fire": fire,

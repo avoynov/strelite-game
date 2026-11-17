@@ -74,6 +74,8 @@ RELOAD_FROM = 3
 FIRE_FPS = 24            # one shot per loop: four shots a second
 LOOP = True
 BOLT_LEN = 1.15
+ROUND_DIRS = 32          # the flying bolt is drawn per heading, not tumbling
+ROUND_FRAME_M = 1.6
 _RIG = {}
 
 

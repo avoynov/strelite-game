@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 OUT="${OUT:-../out}"
-MODELS="${MODELS:-trebuchet}"
+MODELS="${MODELS:-trebuchet ballista}"
 LEVELS="${LEVELS:-1 2 3 4 5}"
 FIRE_DIRS="${FIRE_DIRS:-32}"
 for model in $MODELS; do

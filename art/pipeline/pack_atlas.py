@@ -38,6 +38,7 @@ TAU_LO, TAU_HI = 3.0 / 255, 12.0 / 255   # "changed" thresholds (premultiplied R
 NAMES = {
     "howitzer": {"bg": "Гаубица", "en": "Howitzer"},
     "trebuchet": {"bg": "Требушет", "en": "Trebuchet"},
+    "ballista": {"bg": "Самострел", "en": "Repeating ballista"},
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
 }
 
@@ -241,11 +242,14 @@ def pack_fire(src, dst, model, level, meta):
         "sheet": f"towers/{prefix}_<DD>", "animation": f"{prefix}_<DD>", "dirs": fire["dirs"],
         "frames": fire["frames"], "fps": fire["fps"], "releaseFrame": fire["releaseFrame"],
         "reloadFrom": fire["reloadFrom"],
+        "loop": fire.get("loop", False),
         "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
         "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); "
                "frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), "
                "play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; "
                "after the last frame show the aim layer again",
+        **({"loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / "
+                       "frames shots a second at full speed)"} if fire.get("loop") else {}),
     }
 
 
