@@ -92,6 +92,28 @@ export interface EnemyDef {
   dropsOnDeath?: { enemy: string; count: number };
   /** First map level on which it attacks. */
   unlockLevel: number;
+  /** Siege mode: how it attacks guns and fences; units without one only pass by. */
+  assault?: Assault;
+  /**
+   * Siege mode: the longest way round, in tiles, it takes to a gap rather than
+   * break through a fence. Only units with an assault break through.
+   */
+  detour?: number;
+}
+
+/**
+ * Siege mode. `shoot`: fires at a gun within `range` as it passes.
+ * `ram`: drives into a gun or fence it touches. Either way it attacks
+ * whatever fence or gun stands in its way. Damage grows with the unit's health
+ * (the square root of how far its wave raised it).
+ */
+export interface Assault {
+  kind: 'shoot' | 'ram';
+  damage: number;
+  /** Seconds between blows. */
+  interval: number;
+  /** Tiles from the unit to the nearest edge of the gun. */
+  range: number;
 }
 
 const deg = (d: number) => (d * Math.PI) / 180;
@@ -205,17 +227,37 @@ export const TOWER_IDS = Object.keys(TOWERS) as TowerId[];
 
 /** The doc's enemy roster: health and armour spread wide so both overkill and armour bite. */
 export const ENEMIES = {
-  infantry: { id: 'infantry', baseHp: 20, armor: 0, speed: 1.0, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 1 },
+  infantry: { id: 'infantry', baseHp: 20, armor: 0, speed: 1.0, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 1, assault: { kind: 'shoot', damage: 2, interval: 1, range: 2 }, detour: 8 },
   moto: { id: 'moto', baseHp: 40, armor: 0, speed: 2.2, leakDamage: 1, radius: 0.35, baseReward: 2, swerve: 0.8, unlockLevel: 2 },
   drone: { id: 'drone', baseHp: 45, armor: 0, speed: 1.8, leakDamage: 1, radius: 0.3, baseReward: 3, air: true, unlockLevel: 3 },
   truck: { id: 'truck', baseHp: 130, armor: 3, speed: 1.6, leakDamage: 2, radius: 0.7, baseReward: 4, unlockLevel: 1 },
-  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.75, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2 },
-  tank: { id: 'tank', baseHp: 800, armor: 14, speed: 0.6, leakDamage: 5, radius: 0.8, baseReward: 14, unlockLevel: 4 },
-  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.2, baseReward: 80, unlockLevel: 5 },
+  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.75, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
+  tank: { id: 'tank', baseHp: 800, armor: 14, speed: 0.6, leakDamage: 5, radius: 0.8, baseReward: 14, unlockLevel: 4, assault: { kind: 'shoot', damage: 25, interval: 2.5, range: 3.5 }, detour: 3 },
+  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.2, baseReward: 80, unlockLevel: 5, assault: { kind: 'shoot', damage: 60, interval: 3, range: 4 }, detour: 1 },
 } as const satisfies Record<string, EnemyDef>;
 
 export type EnemyId = keyof typeof ENEMIES;
 export const ENEMY_IDS = Object.keys(ENEMIES) as EnemyId[];
+
+/**
+ * Siege mode: a gun's health. It grows with the gun's size and level; an
+ * upgrade adds the difference, it does not repair.
+ */
+export const GUN_HP = { perTile: 70, levelGrowth: 0.5 };
+
+export function gunHp(size: number, level: number): number {
+  return Math.round(GUN_HP.perTile * size * (1 + GUN_HP.levelGrowth * level));
+}
+
+/** Siege mode: fence levels, one tile each: wood, stone, steel. `cost` builds or upgrades into it. */
+export const FENCE_LEVELS = [
+  { cost: 10, hp: 150 },
+  { cost: 20, hp: 400 },
+  { cost: 40, hp: 1000 },
+] as const;
+
+/** Siege mode: a unit with no assault stuck at a wall leans on it this hard (per second), so no wave can stall. */
+export const PUSH_DPS = 2;
 
 export const ECONOMY = {
   startMoney: 200,

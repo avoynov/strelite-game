@@ -1,10 +1,10 @@
 import { afterArmor, applyDamage } from './damage';
 import type { Upgrades } from './research';
-import { ECONOMY, ENEMIES, TOWERS, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
-import { arcHalfWidth, arcHpFactor, levelWaves } from './levels';
+import { arcHalfWidth, arcHpFactor, levelWaves, siegeHpFactor } from './levels';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
@@ -31,6 +31,10 @@ export interface Enemy {
   air: boolean;
   /** Phase of the speed surges of a swerving unit. */
   phase: number;
+  /** Siege mode: index of the cell of the fence or gun it stands stopped at, -1 when walking. */
+  wall: number;
+  /** Siege mode: seconds until it can strike again. */
+  attackCooldown: number;
 }
 
 export interface TowerStats {
@@ -62,8 +66,30 @@ export interface Tower {
   heat: number;
   /** Flame: true while it is burning a target this step. */
   firing: boolean;
+  /** Siege mode: health; the gun is wrecked at 0. Unused elsewhere. */
+  hp: number;
+  maxHp: number;
   stats: TowerStats;
 }
+
+/** Siege mode: one tile of fence. Level 0 wood, 1 stone, 2 steel. */
+export interface Fence {
+  id: number;
+  kind: 'fence';
+  cx: number;
+  cy: number;
+  /** Centre in grid cells. */
+  x: number;
+  y: number;
+  level: number;
+  hp: number;
+  maxHp: number;
+  invested: number;
+}
+
+/** Something siege enemies can stop at and break: a gun or a fence. */
+export type Structure = Tower | Fence;
+const isFence = (s: Structure): s is Fence => 'kind' in s && s.kind === 'fence';
 
 export interface Projectile {
   id: number;
@@ -103,6 +129,10 @@ export type GameEvent =
   | { type: 'rail'; towerId: number; x1: number; y1: number; x2: number; y2: number }
   | { type: 'kill'; enemyId: number; reward: number; x: number; y: number }
   | { type: 'leak'; enemyId: number }
+  /** Siege mode: a unit shot at or rammed a gun or fence. */
+  | { type: 'strike'; kind: Assault['kind']; enemyId: number; x1: number; y1: number; x2: number; y2: number }
+  /** Siege mode: a gun or fence was destroyed. */
+  | { type: 'wrecked'; fence: boolean; x: number; y: number; size: number }
   | { type: 'waveStart'; wave: number }
   | { type: 'waveClear'; wave: number; bonus: number }
   | { type: 'won' }
@@ -131,6 +161,9 @@ const BEAM_HITS_PER_SECOND = 2;
 const RAIL_HALF_WIDTH = 0.35;
 /** A round passing through looks for its next victim this far from the impact. */
 const PASS_THROUGH_REACH = 1.2;
+
+/** Siege mode: what stepping into a wall costs a unit that never breaks one (it goes round any way there is). */
+const NO_BREAK = 1000;
 
 /** Seconds a swerving unit holds one speed before it jerks to another. */
 const SWERVE_SECONDS = 1.4;
@@ -179,6 +212,8 @@ export class Game {
 
   enemies: Enemy[] = [];
   towers: Tower[] = [];
+  /** Siege mode only. */
+  fences: Fence[] = [];
   projectiles: Projectile[] = [];
 
   private nextId = 1;
@@ -195,6 +230,14 @@ export class Game {
   private readonly defCache = new Map<TowerId, TowerDef>();
   /** Tower id per cell, 0 where free. */
   private readonly occupied: Int32Array;
+  /** Siege mode: fence id per cell, 0 where none. */
+  private readonly fenceGrid: Int32Array;
+  /** Siege mode: one field per detour length, built when first needed after the walls change. */
+  private readonly fields = new Map<number, FlowField>();
+  /** Siege mode: the open-ground distance, walls ignored; orders the enemies along the way. */
+  private readonly ground: FlowField | null;
+  /** Siege mode: cells enemies come in from; nothing can be built there. */
+  private readonly entry: Set<number>;
 
   constructor(
     readonly map: BuiltMap,
@@ -207,13 +250,22 @@ export class Game {
     this.lives += this.upgrades?.lives ?? 0;
     this.waves = opts.waves ?? waveSpec;
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
+    this.fenceGrid = new Int32Array(map.grid.cols * map.grid.rows);
+    const { grid } = map;
+    this.ground = map.mode === 'siege' ? new FlowField(grid, map.goals, (x, y) => grid.get(x, y) !== 'blocked') : null;
+    this.entry = new Set(map.mode === 'siege' ? (map.arcSpawns ?? []).map((c) => grid.index(c.x, c.y)) : []);
     this.flow = this.makeFlow(this.occupied);
   }
 
   // ---- queries -------------------------------------------------------------
 
-  get mode(): 'path' | 'arc' {
+  get mode(): 'path' | 'arc' | 'siege' {
     return this.map.mode;
+  }
+
+  /** Arc and siege modes: enemies cross open ground from a widening arc. */
+  get openField(): boolean {
+    return this.map.mode !== 'path';
   }
 
   /** Arc mode: half-width (radians) of the sector the running or next wave comes from. */
@@ -237,6 +289,33 @@ export class Game {
 
   towerById(id: number): Tower | undefined {
     return this.towers.find((t) => t.id === id);
+  }
+
+  fenceAt(cx: number, cy: number): Fence | undefined {
+    if (!this.map.grid.inBounds(cx, cy)) return undefined;
+    const id = this.fenceGrid[this.map.grid.index(cx, cy)];
+    return id ? this.fenceById(id) : undefined;
+  }
+
+  fenceById(id: number): Fence | undefined {
+    return this.fences.find((f) => f.id === id);
+  }
+
+  /** Cost to raise a fence to its next level, or null at steel. */
+  fenceUpgradeCost(f: Fence): number | null {
+    return FENCE_LEVELS[f.level + 1]?.cost ?? null;
+  }
+
+  fenceSellValue(f: Fence): number {
+    return Math.floor(f.invested * ECONOMY.sellRefund);
+  }
+
+  /** Why a fence cannot go on this cell, or null when it can. */
+  fenceError(cx: number, cy: number): 'notBuildable' | 'occupied' | null {
+    const { grid } = this.map;
+    if (this.mode !== 'siege' || grid.get(cx, cy) !== 'build' || this.entry.has(grid.index(cx, cy))) return 'notBuildable';
+    if (this.occupied[grid.index(cx, cy)] || this.fenceGrid[grid.index(cx, cy)] || this.walkerOn(cx, cy, 1)) return 'occupied';
+    return null;
   }
 
   levelOf(tower: Tower): TowerLevel {
@@ -304,8 +383,8 @@ export class Game {
     let occupied = false;
     for (let y = cy; y < cy + size; y++) {
       for (let x = cx; x < cx + size; x++) {
-        if (grid.get(x, y) !== 'build') return 'notBuildable';
-        if (this.occupied[grid.index(x, y)]) occupied = true;
+        if (grid.get(x, y) !== 'build' || this.entry.has(grid.index(x, y))) return 'notBuildable';
+        if (this.occupied[grid.index(x, y)] || this.fenceGrid[grid.index(x, y)]) occupied = true;
       }
     }
     return occupied ? 'occupied' : null;
@@ -318,6 +397,7 @@ export class Game {
 
   canBuildAt(def: TowerId, cx: number, cy: number): boolean {
     if (this.placementError(def, cx, cy) !== null) return false;
+    if (this.mode === 'siege') return !this.walkerOn(cx, cy, TOWERS[def].size);
     return this.mode !== 'arc' || this.blockError(cx, cy, TOWERS[def].size) === null;
   }
 
@@ -347,6 +427,7 @@ export class Game {
       const block = this.blockError(cx, cy, d.size);
       if (block) return { ok: false, reason: block };
     }
+    if (this.mode === 'siege' && this.walkerOn(cx, cy, d.size)) return { ok: false, reason: 'occupied' };
     this.money -= cost;
     const tower: Tower = {
       id: this.nextId++,
@@ -362,6 +443,8 @@ export class Game {
       targetId: 0,
       heat: 0,
       firing: false,
+      hp: gunHp(d.size, 0),
+      maxHp: gunHp(d.size, 0),
       stats: { dealt: 0, wasted: 0, kills: 0, invested: cost },
     };
     this.towers.push(tower);
@@ -380,6 +463,10 @@ export class Game {
     this.money -= cost;
     t.level++;
     t.stats.invested += cost;
+    // A bigger gun is sturdier by the difference; damage taken stays.
+    const maxHp = gunHp(t.size, t.level);
+    t.hp += maxHp - t.maxHp;
+    t.maxHp = maxHp;
     return { ok: true };
   }
 
@@ -390,6 +477,45 @@ export class Game {
     this.markFootprint(t, 0);
     this.towers = this.towers.filter((o) => o !== t);
     this.rebuildFlow();
+    return { ok: true };
+  }
+
+  /** Siege mode: put a wooden fence on one tile. */
+  buildFence(cx: number, cy: number): ActionResult {
+    if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    const err = this.fenceError(cx, cy);
+    if (err) return { ok: false, reason: err };
+    const { cost, hp } = FENCE_LEVELS[0];
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    const f: Fence = { id: this.nextId++, kind: 'fence', cx, cy, x: cx + 0.5, y: cy + 0.5, level: 0, hp, maxHp: hp, invested: cost };
+    this.fences.push(f);
+    this.fenceGrid[this.map.grid.index(cx, cy)] = f.id;
+    this.rebuildFlow();
+    return { ok: true };
+  }
+
+  /** Wood to stone, stone to steel; adds the difference in health. */
+  upgradeFence(id: number): ActionResult {
+    const f = this.fenceById(id);
+    if (!f) return { ok: false, reason: 'notFound' };
+    const cost = this.fenceUpgradeCost(f);
+    if (cost === null) return { ok: false, reason: 'maxLevel' };
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    f.level++;
+    f.invested += cost;
+    const maxHp = FENCE_LEVELS[f.level]!.hp;
+    f.hp += maxHp - f.maxHp;
+    f.maxHp = maxHp;
+    return { ok: true };
+  }
+
+  sellFence(id: number): ActionResult {
+    const f = this.fenceById(id);
+    if (!f) return { ok: false, reason: 'notFound' };
+    this.money += this.fenceSellValue(f);
+    this.removeFence(f);
     return { ok: true };
   }
 
@@ -420,6 +546,7 @@ export class Game {
     }
     this.spawn(dt);
     this.moveEnemies(dt);
+    if (this.mode === 'siege') this.assault(dt);
     this.fireTowers(dt);
     this.moveProjectiles(dt);
     this.enemies = this.enemies.filter((e) => e.alive);
@@ -436,15 +563,67 @@ export class Game {
     }
   }
 
-  /** Ground the walkers may use: the road in path mode; open, unbuilt ground in arc mode. */
+  /**
+   * Ground the walkers may use: the road in path mode; open, unbuilt ground in
+   * arc mode. In siege mode the field of the units that never break through.
+   */
   private makeFlow(occupied: Int32Array): FlowField {
     const { grid } = this.map;
     if (this.map.mode === 'path') return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) === 'path');
+    if (this.map.mode === 'siege') return this.field(NO_BREAK);
     return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked' && !occupied[grid.index(x, y)]);
+  }
+
+  /**
+   * Siege mode: the way to the goal for a unit that would rather walk `detour`
+   * tiles round to a gap than break through a wall. Walls are walkable at that
+   * cost, so with no gap near it heads into the wall and breaks it.
+   */
+  private field(detour: number): FlowField {
+    let f = this.fields.get(detour);
+    if (!f) {
+      const { grid } = this.map;
+      const wall = (x: number, y: number) => this.occupied[grid.index(x, y)] !== 0 || this.fenceGrid[grid.index(x, y)] !== 0;
+      f = new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked', (x, y) => (wall(x, y) ? 1 + detour : 1));
+      this.fields.set(detour, f);
+    }
+    return f;
+  }
+
+  /** The field a unit walks by: its own detour in siege mode, the shared one elsewhere. */
+  private fieldOf(def: EnemyId): FlowField {
+    if (this.mode !== 'siege') return this.flow;
+    const d = ENEMIES[def];
+    return this.field('assault' in d && 'detour' in d ? d.detour : NO_BREAK);
+  }
+
+  /** Siege mode: whether a fence or gun stands on the cell. */
+  private isWall(x: number, y: number): boolean {
+    const i = this.map.grid.index(x, y);
+    return this.occupied[i] !== 0 || this.fenceGrid[i] !== 0;
+  }
+
+  /** Siege mode: the gun or fence on a cell, by index. */
+  private structureAt(i: number): Structure | undefined {
+    const tid = this.occupied[i];
+    if (tid) return this.towerById(tid);
+    const fid = this.fenceGrid[i];
+    return fid ? this.fenceById(fid) : undefined;
+  }
+
+  /** A walker stands on the square, or is about to step into it. */
+  private walkerOn(cx: number, cy: number, size: number): boolean {
+    const onIt = (x: number, y: number) => x >= cx && x < cx + size && y >= cy && y < cy + size;
+    return this.enemies.some((e) => !e.air && (onIt(Math.floor(e.x), Math.floor(e.y)) || onIt(e.target.x, e.target.y)));
   }
 
   /** Arc mode: after the guns changed, walk around them; a walker whose next cell is now built on steps back to its own. */
   private rebuildFlow(): void {
+    if (this.mode === 'siege') {
+      this.fields.clear();
+      this.flow = this.makeFlow(this.occupied);
+      return;
+    }
     if (this.mode !== 'arc') return;
     this.flow = this.makeFlow(this.occupied);
     for (const e of this.enemies) {
@@ -458,13 +637,7 @@ export class Game {
    * edge enemies can come from or from any walker already on the field.
    */
   private blockError(cx: number, cy: number, size: number): 'occupied' | 'blocks' | null {
-    for (const e of this.enemies) {
-      if (e.air) continue;
-      const ex = Math.floor(e.x);
-      const ey = Math.floor(e.y);
-      const onIt = (x: number, y: number) => x >= cx && x < cx + size && y >= cy && y < cy + size;
-      if (onIt(ex, ey) || onIt(e.target.x, e.target.y)) return 'occupied';
-    }
+    if (this.walkerOn(cx, cy, size)) return 'occupied';
     const trial = this.occupied.slice();
     for (let y = cy; y < cy + size; y++) for (let x = cx; x < cx + size; x++) trial[this.map.grid.index(x, y)] = -1;
     const flow = this.makeFlow(trial);
@@ -476,7 +649,7 @@ export class Game {
 
   /** A new gun starts pointing at the nearest stretch of road (in arc mode: out towards the arc). */
   private initialAim(x: number, y: number): number {
-    if (this.mode === 'arc') {
+    if (this.openField) {
       const g = this.map.goals[0]!;
       return Math.atan2(y - g.y - 1, x - g.x - 1);
     }
@@ -505,7 +678,7 @@ export class Game {
       st.timer -= dt;
       while (st.left > 0 && st.timer <= 0) {
         const s = this.spawnCell();
-        const hp = this.mode === 'arc' ? Math.round(g.hp * arcHpFactor(this.level)) : g.hp;
+        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * (this.mode === 'siege' ? siegeHpFactor(this.level) : 1));
         this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
@@ -516,7 +689,7 @@ export class Game {
   /** Where the next enemy enters: the road's start, or (arc mode) a cell of the current arc, spread evenly over it. */
   private spawnCell(): Cell {
     const n = this.spawned++;
-    if (this.mode !== 'arc') return this.map.spawns[n % this.map.spawns.length]!;
+    if (!this.openField) return this.map.spawns[n % this.map.spawns.length]!;
     const cells = this.activeSpawns();
     return cells[Math.floor(hash01(n * 2654435761 + this.wave) * cells.length)] ?? this.map.arcSpawns![0]!;
   }
@@ -541,6 +714,8 @@ export class Game {
       air,
       // Spread the surges of swerving riders so they do not move in step.
       phase: (id * 2.399963) % TWO_PI,
+      wall: -1,
+      attackCooldown: 0,
     };
     if (air) {
       // Flyers ignore the road and head straight for the goal.
@@ -548,9 +723,9 @@ export class Game {
       e.heading = Math.atan2(e.target.y + 0.5 - y, e.target.x + 0.5 - x);
       e.remaining = Math.hypot(e.target.x + 0.5 - x, e.target.y + 0.5 - y);
     } else {
-      const next = this.flow.next(target.x, target.y);
+      const next = this.fieldOf(def).next(target.x, target.y);
       e.heading = next ? Math.atan2(next.y - target.y, next.x - target.x) : 0;
-      e.remaining = this.flow.distanceAt(target.x, target.y) + Math.hypot(target.x + 0.5 - x, target.y + 0.5 - y);
+      e.remaining = (this.ground ?? this.flow).distanceAt(target.x, target.y) + Math.hypot(target.x + 0.5 - x, target.y + 0.5 - y);
     }
     return e;
   }
@@ -582,10 +757,13 @@ export class Game {
   }
 
   /**
-   * Walk a point along the flow field for `budget` cells of distance.
+   * Walk a point along a flow field for `budget` cells of distance.
    * Returns false when it runs off the end of the road (reached the goal).
+   * In siege mode it stops at the middle of its cell when the next one is a
+   * fence or gun, and `wall` says which.
    */
-  private walk(pos: { x: number; y: number; target: Cell; heading?: number }, budget: number): boolean {
+  private walk(pos: { x: number; y: number; target: Cell; heading?: number; wall?: number }, budget: number, flow = this.flow): boolean {
+    if (pos.wall !== undefined) pos.wall = -1;
     while (budget > 0) {
       const tx = pos.target.x + 0.5;
       const ty = pos.target.y + 0.5;
@@ -600,8 +778,12 @@ export class Game {
         budget -= m;
         if (m < d) break;
       }
-      const next = this.flow.next(pos.target.x, pos.target.y);
+      const next = flow.next(pos.target.x, pos.target.y);
       if (!next) return false;
+      if (this.mode === 'siege' && this.isWall(next.x, next.y)) {
+        if (pos.wall !== undefined) pos.wall = this.map.grid.index(next.x, next.y);
+        break;
+      }
       pos.target = next;
     }
     return true;
@@ -614,12 +796,12 @@ export class Game {
         if (!this.fly(e, this.speedOf(e) * dt)) this.leak(e);
         continue;
       }
-      if (!this.walk(e, this.speedOf(e) * dt)) {
+      if (!this.walk(e, this.speedOf(e) * dt, this.fieldOf(e.def))) {
         this.leak(e);
         continue;
       }
       const tdist = Math.hypot(e.target.x + 0.5 - e.x, e.target.y + 0.5 - e.y);
-      e.remaining = this.flow.distanceAt(e.target.x, e.target.y) + tdist;
+      e.remaining = (this.ground ?? this.flow).distanceAt(e.target.x, e.target.y) + tdist;
     }
   }
 
@@ -637,8 +819,68 @@ export class Game {
       return { x: e.x + (tx - e.x) * k, y: e.y + (ty - e.y) * k };
     }
     const p = { x: e.x, y: e.y, target: e.target };
-    this.walk(p, budget);
+    this.walk(p, budget, this.fieldOf(e.def));
     return p;
+  }
+
+  /**
+   * Siege mode: every unit with an assault strikes the wall it stands at, or
+   * else a gun within its reach; one that only passes by leans on the wall it
+   * is stuck at.
+   */
+  private assault(dt: number): void {
+    for (const e of this.enemies) {
+      if (!e.alive || e.air) continue;
+      const d = ENEMIES[e.def];
+      // Blows grow with the unit: the square root of how much its wave raised its health.
+      const power = Math.sqrt(e.maxHp / d.baseHp);
+      const wall = e.wall >= 0 ? this.structureAt(e.wall) : undefined;
+      if (!('assault' in d)) {
+        if (wall) this.hitStructure(wall, PUSH_DPS * power * dt);
+        continue;
+      }
+      e.attackCooldown = Math.max(0, e.attackCooldown - dt);
+      if (e.attackCooldown > 0) continue;
+      const a: Assault = d.assault;
+      const reach = a.kind === 'ram' ? a.range + d.radius : a.range;
+      let target: Structure | undefined = wall;
+      if (!target) {
+        let best = Infinity;
+        for (const t of this.towers) {
+          const dist = Math.hypot(Math.max(t.cx - e.x, 0, e.x - t.cx - t.size), Math.max(t.cy - e.y, 0, e.y - t.cy - t.size));
+          if (dist <= reach && dist < best) {
+            best = dist;
+            target = t;
+          }
+        }
+      }
+      if (!target) continue;
+      e.attackCooldown = a.interval;
+      this.events.push({ type: 'strike', kind: a.kind, enemyId: e.id, x1: e.x, y1: e.y, x2: target.x, y2: target.y });
+      this.hitStructure(target, a.damage * power);
+    }
+  }
+
+  private hitStructure(s: Structure, damage: number): void {
+    s.hp -= damage;
+    if (s.hp > 0) return;
+    if (isFence(s)) {
+      this.removeFence(s);
+      this.events.push({ type: 'wrecked', fence: true, x: s.x, y: s.y, size: 1 });
+      return;
+    }
+    if (!this.towerById(s.id)) return;
+    this.markFootprint(s, 0);
+    this.towers = this.towers.filter((o) => o !== s);
+    this.events.push({ type: 'wrecked', fence: false, x: s.x, y: s.y, size: s.size });
+    this.rebuildFlow();
+  }
+
+  private removeFence(f: Fence): void {
+    if (!this.fenceById(f.id)) return;
+    this.fenceGrid[this.map.grid.index(f.cx, f.cy)] = 0;
+    this.fences = this.fences.filter((o) => o !== f);
+    this.rebuildFlow();
   }
 
   private leak(e: Enemy): void {

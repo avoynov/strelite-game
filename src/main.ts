@@ -1,11 +1,11 @@
 import { Application } from 'pixi.js';
 import './style.css';
 import { getLang, onLangChange, t } from './i18n';
-import { BoardRenderer, type Selection } from './render/boardRenderer';
+import { BoardRenderer, type Armed, type Selection } from './render/boardRenderer';
 import { PALETTE } from './render/palette';
 import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
-import { TICK, TOWERS, type TowerId } from './sim/content';
+import { TICK, TOWERS } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
 import { buildArcMap, buildPathMap, type Mode } from './sim/maps';
@@ -21,11 +21,14 @@ import { battleTakings, researchItem } from './sim/research';
 const ART_URL = `${import.meta.env.BASE_URL}art`;
 const MODE_KEY = 'strelite.mode';
 
+const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
+const asMode = (v: string | null): Mode | null => MODES.find((m) => m === v) ?? null;
+
 function readMode(): Mode {
-  const fromUrl = new URLSearchParams(location.search).get('mode');
-  if (fromUrl === 'arc' || fromUrl === 'path') return fromUrl;
+  const fromUrl = asMode(new URLSearchParams(location.search).get('mode'));
+  if (fromUrl) return fromUrl;
   try {
-    return localStorage.getItem(MODE_KEY) === 'arc' ? 'arc' : 'path';
+    return asMode(localStorage.getItem(MODE_KEY)) ?? 'path';
   } catch {
     return 'path';
   }
@@ -33,8 +36,8 @@ function readMode(): Mode {
 
 let mode: Mode = readMode();
 /** Each mode keeps its own progress through the levels. */
-const levelKey = () => (mode === 'arc' ? 'strelite.level.arc' : 'strelite.level');
-const wonKey = () => (mode === 'arc' ? 'strelite.won.arc' : 'strelite.won');
+const levelKey = () => (mode === 'path' ? 'strelite.level' : `strelite.level.${mode}`);
+const wonKey = () => (mode === 'path' ? 'strelite.won' : `strelite.won.${mode}`);
 
 function readNumber(key: string): number {
   try {
@@ -88,14 +91,14 @@ async function start(): Promise<void> {
   // `?fastresearch` runs research timers 600× faster, for trying the tree out.
   const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
   const newGame = (level: number) =>
-    new Game(mode === 'arc' ? buildArcMap(levelArcMap(level)) : buildPathMap(levelMap(level)), { level, upgrades: research.upgrades() });
+    new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
   let game = newGame(startLevel());
   /** Gold this battle put in the treasury when it ended; null while it runs. */
   let banked: number | null = null;
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
-  let armed: TowerId | null = null;
+  let armed: Armed | null = null;
   let loop = new FixedStep(TICK, (dt) => game.step(dt));
 
   const hud = new Hud(document.getElementById('hud')!, game, {
@@ -125,7 +128,7 @@ async function start(): Promise<void> {
       relayout();
       arsenal.open(); // a new level starts with the arsenal again
     },
-    openArsenal: () => arsenal.open(armed ?? undefined),
+    openArsenal: () => arsenal.open(armed && armed !== 'fence' ? armed : undefined),
     openLab: () => lab.open(),
     openLevels: () => levels.open(),
     banked: () => banked ?? 0,
@@ -186,12 +189,19 @@ async function start(): Promise<void> {
     board.layout(view, app.screen.width, app.screen.height, app.renderer.resolution);
   };
 
-  // A tap places the picked gun's outline, or selects the gun standing there.
+  // A tap places the picked gun's outline, puts down a fence, or selects the gun or fence standing there.
   attachGestures(app.canvas, () => board.camera, (sx, sy) => {
     const cell = board.cellAt(sx, sy);
     const tower = cell ? game.towerAt(cell.x, cell.y) : undefined;
+    const fence = cell ? game.fenceAt(cell.x, cell.y) : undefined;
     if (tower) {
       selection = selection?.kind === 'tower' && selection.id === tower.id ? null : { kind: 'tower', id: tower.id };
+    } else if (fence) {
+      selection = selection?.kind === 'fence' && selection.id === fence.id ? null : { kind: 'fence', id: fence.id };
+    } else if (armed === 'fence') {
+      // Fences are cheap and many: a tap builds one straight away.
+      selection = null;
+      if (cell) hud.showResult(game.buildFence(cell.x, cell.y));
     } else if (armed) {
       // Centre the footprint on the finger.
       const g = board.gridAt(sx, sy);
@@ -226,7 +236,7 @@ async function start(): Promise<void> {
         gridToScreen: (x: number, y: number) => board.gridToScreen(x, y),
         game: () => game,
         camera: () => board.camera,
-        arm: (def: TowerId | null) => (armed = def),
+        arm: (def: Armed | null) => (armed = def),
         research: () => research,
       },
     });
@@ -244,6 +254,11 @@ async function start(): Promise<void> {
         board.onKill(ev.enemyId);
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
       }
+      else if (ev.type === 'strike') board.onStrike(ev.kind, ev.x1, ev.y1, ev.x2, ev.y2);
+      else if (ev.type === 'wrecked') {
+        board.onWrecked(ev.x, ev.y, ev.size);
+        if (!ev.fence) hud.showToast(t('toast.gunWrecked'));
+      }
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
     }
     // When the battle ends, the gold it earned and did not spend goes to the treasury (plus a win bonus).
@@ -253,6 +268,7 @@ async function start(): Promise<void> {
       if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
+    if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);
     hud.update();
   });

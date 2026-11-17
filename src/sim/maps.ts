@@ -14,7 +14,8 @@ export interface PathMapSpec {
   band?: number;
 }
 
-export type Mode = 'path' | 'arc';
+/** `path`: a fixed road. `arc`: open field, enemies from a widening arc. `siege`: the same field, with fences, and enemies that wreck guns. */
+export type Mode = 'path' | 'arc' | 'siege';
 
 /** A cell enemies may enter the field from, in arc mode. */
 export interface ArcSpawn extends Cell {
@@ -109,7 +110,8 @@ export function buildPathMap(spec: PathMapSpec): BuiltMap {
 /** The arc's middle direction: from the goal towards the far (top) end of the band. */
 export const ARC_FACING = Math.atan2(-1, -1);
 
-export function buildArcMap(spec: ArcMapSpec): BuiltMap {
+/** The open field of the arc and siege modes. */
+export function buildArcMap(spec: ArcMapSpec, mode: 'arc' | 'siege' = 'arc'): BuiltMap {
   const grid = new Grid(spec.cols, spec.rows, 'build');
   for (let y = 0; y < spec.rows; y++) {
     for (let x = 0; x < spec.cols; x++) if (Math.abs(x - y) > spec.band) grid.set(x, y, 'blocked');
@@ -145,5 +147,5 @@ export function buildArcMap(spec: ArcMapSpec): BuiltMap {
     }
   }
   arcSpawns.sort((a, b) => a.off - b.off);
-  return { id: spec.id, mode: 'arc', grid, spawns: [], goals, arcSpawns };
+  return { id: spec.id, mode, grid, spawns: [], goals, arcSpawns };
 }
