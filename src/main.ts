@@ -82,6 +82,8 @@ async function start(): Promise<void> {
       selection = null;
       hud.update();
     },
+    // Guns locked on this map level (new roster); every gun is open until Game knows levels.
+    isUnlocked: (def) => (game as { isUnlocked?: (d: TowerId) => boolean }).isUnlocked?.(def) ?? true,
   });
   document.body.appendChild(arsenal.el);
 

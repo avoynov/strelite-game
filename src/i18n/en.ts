@@ -78,4 +78,5 @@ export const en: Record<MessageKey, string> = {
   'target.strongest': "the one with the most HP",
   'target.line': "the line with the most total HP",
   'target.fallback': "Otherwise the first on the path; holds it to the end.",
+  'arsenal.locked': 'Unlocks at level {n}',
 };
