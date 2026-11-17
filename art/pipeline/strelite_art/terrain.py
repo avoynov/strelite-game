@@ -231,7 +231,7 @@ class Field(Terrain):
         self.ax = np.linspace(-s / 2, s / 2, n, dtype=np.float32)
         # bare, slightly paler spots between the turf
         bare = _fbm(n, rng, [(int(s / 3), 0.5), (int(s / 1.2), 0.4)])
-        tramp = np.clip(0.25 + bare * 0.5, 0.0, 0.7)
+        tramp = np.clip((0.25 + bare * 0.5) * min(1.0, patchiness / 1.3), 0.0, 0.7)
         cover = _fbm(n, rng, [(int(s / 2.6), 0.9), (int(s / 1.2), 0.6), (int(s / 0.4), 0.3)])
         cover = 0.5 + 0.5 * np.tanh(cover * patchiness + (grass - 0.5) * 2.0)
         cover = np.clip(cover * (1.0 - tramp * 0.9), 0.0, 1.0)
