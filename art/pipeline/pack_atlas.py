@@ -45,6 +45,17 @@ NAMES = {
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
 }
 
+# What the game shows at the muzzle when the gun fires: only powder guns flash and smoke.
+# Torsion and counterweight engines release silently (the fire animation carries the shot),
+# the siphon shows its fire stream, the rail cannon its charge then beam.
+SHOT_FX = {
+    "howitzer": ["muzzle_flash", "muzzle_smoke"],
+    "zis3": ["muzzle_flash", "muzzle_smoke"],
+    "ballista": [], "scorpion": [], "trebuchet": [],
+    "greekfire": ["fire_stream"],
+    "railgun": ["rail_charge", "rail_beam"],
+}
+
 
 def load_premultiplied(path, scale=1.0):
     im = Image.open(path).convert("RGBA")
@@ -324,6 +335,7 @@ def main():
             levels.append(info)
         if levels:
             towers[model] = {"name": NAMES.get(model, {"bg": model, "en": model}),
+                             "shotEffects": SHOT_FX.get(model, ["muzzle_flash", "muzzle_smoke"]),
                              "placeholder": True, "levels": levels}
     if not towers:
         raise SystemExit("nothing to pack: no meta.json under " + a.src)
