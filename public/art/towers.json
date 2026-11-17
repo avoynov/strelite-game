@@ -2306,6 +2306,59 @@
     0.72
    ],
    "blend": "normal"
+  },
+  "fire_stream": {
+   "sheet": "effects/fire_stream",
+   "frames": "fire_stream",
+   "count": 8,
+   "fps": 24,
+   "anchor": [
+    0.0,
+    0.5
+   ],
+   "blend": "normal",
+   "loop": true,
+   "lengthM": 7.5,
+   "note": "jet along +x from the nozzle: rotate to the nozzle's screen angle, scale x to the range; loop while firing"
+  },
+  "fire_burn": {
+   "sheet": "effects/fire_burn",
+   "frames": "fire_burn",
+   "count": 8,
+   "fps": 24,
+   "anchor": [
+    0.5,
+    0.88
+   ],
+   "blend": "normal",
+   "loop": true,
+   "note": "flames on a burning target or ground patch; loop"
+  },
+  "rail_charge": {
+   "sheet": "effects/rail_charge",
+   "frames": "rail_charge",
+   "count": 8,
+   "fps": 24,
+   "anchor": [
+    0.5,
+    0.5
+   ],
+   "blend": "add",
+   "loop": true,
+   "note": "charging glow at the muzzle; loop while charging"
+  },
+  "rail_beam": {
+   "sheet": "effects/rail_beam",
+   "frames": "rail_beam",
+   "count": 7,
+   "fps": 24,
+   "anchor": [
+    0.0,
+    0.5
+   ],
+   "blend": "add",
+   "lengthM": 14.0,
+   "note": "shot line along +x from the muzzle: rotate to the target, scale x to the distance; play once"
   }
  }
 }

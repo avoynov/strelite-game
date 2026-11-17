@@ -197,6 +197,140 @@ def impact_frames(rng, n=14, size=352):
     return frames
 
 
+def tile_noise(h, w, rng, falloff=1.6, lo=2):
+    """Noise that wraps in both directions (for seamless loops), in about [-1, 1]."""
+    fy = np.fft.fftfreq(h)[:, None] * h
+    fx = np.fft.rfftfreq(w)[None, :] * w
+    f = np.hypot(fy, fx)
+    amp = np.where(f >= lo, 1.0 / np.maximum(f, 1) ** falloff, 0.0)
+    spec = amp * (rng.standard_normal(f.shape) + 1j * rng.standard_normal(f.shape))
+    n = np.fft.irfft2(spec, s=(h, w)).astype(np.float32)
+    return n / (np.abs(n).max() + 1e-6)
+
+
+def stream_frames(rng, n=8, length=7.5, height=3.4):
+    """Greek fire: a looping jet of burning oil along +x from the nozzle (anchor at the left
+    middle). It widens and breaks up with distance, white-yellow at the core, red and sooty
+    at the edges and the far end. Rotate to the nozzle's screen angle; scale x to the range."""
+    W, H = int(length * PPM), int(height * PPM)
+    y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+    X, Y = x / PPM, (y - H / 2) / PPM
+    u = X / length
+    big = tile_noise(H, W, rng, 1.5, 2)
+    fine = tile_noise(H, W, rng, 1.2, 6)
+    frames = []
+    for i in range(n):
+        sh = int(round(W * i / n))
+        nb, nf = np.roll(big, sh, axis=1), np.roll(fine, sh * 2 % W, axis=1)
+        r = 0.1 + 1.25 * u ** 1.05
+        wob = 0.18 * u * np.roll(big[H // 2], sh)[None, :]
+        d = np.abs(Y - wob) / r + nb * 0.35 * u + nf * 0.2
+        dens = np.clip((1 - d) * 1.6, 0, 1) * np.clip((1.04 - u) * 4.0, 0, 1) * np.clip(X * 6, 0, 1)
+        dens *= np.clip(0.75 + 0.5 * nb + 0.25 * nf, 0, 1) ** (0.3 + 1.2 * u)
+        heat = np.clip((1 - d) * 1.4 - u * 0.75 + nf * 0.15, 0, 1)
+        soot = np.clip(u * 1.3 - 0.55 + nb * 0.3, 0, 1) * np.clip(d, 0, 1)
+        rgb = np.stack([0.75 + 0.25 * heat, 0.18 + 0.72 * heat ** 1.3, 0.04 + 0.6 * heat ** 3], -1)
+        rgb = rgb * (1 - soot[..., None] * 0.8) + 0.08 * soot[..., None]
+        frames.append(premul(rgb, dens * (0.85 + 0.15 * heat)))
+    return frames
+
+
+def burn_frames(rng, n=8, size=2.2):
+    """Flames licking up from a burning target or patch of ground (loop; anchor at the base)."""
+    S = int(size * PPM)
+    y, x = np.mgrid[0:S, 0:S].astype(np.float32)
+    X, Y = (x - S / 2) / PPM, (S * 0.88 - y) / PPM       # Y up from the base
+    noise = tile_noise(S, S, rng, 1.4, 2)
+    frames = []
+    for i in range(n):
+        nz = np.roll(noise, int(round(S * i / n)), axis=0)  # flows upward
+        h = 1.1 + 0.25 * nz
+        w = 0.6 * np.clip(1 - Y / 1.4, 0, 1) ** 0.6
+        tongues = 0.5 + 0.5 * np.cos(X * 9 + nz * 3)              # separate licks of flame
+        d = np.abs(X + 0.15 * nz * Y) / (w + 1e-3) + nz * 0.35 + (1 - tongues) * np.clip(Y / 0.5, 0, 1) * 0.6
+        dens = np.clip((1 - d) * 1.8, 0, 1) * np.clip(1 - Y / h, 0, 1) * (Y > -0.05)
+        heat = np.clip(1 - d - Y * 0.5, 0, 1)
+        rgb = np.stack([0.9 + 0.1 * heat, 0.3 + 0.6 * heat, 0.05 + 0.5 * heat ** 2], -1)
+        frames.append(premul(rgb, dens))
+    return frames
+
+
+def _bolt_path(rng, x0, y0, x1, y1, depth=5, rough=0.35):
+    pts = [(x0, y0), (x1, y1)]
+    for _ in range(depth):
+        new = [pts[0]]
+        for (a, b), (c, d) in zip(pts, pts[1:]):
+            L = math.hypot(c - a, d - b)
+            mx, my = (a + c) / 2, (b + d) / 2
+            nx, ny = -(d - b) / (L + 1e-6), (c - a) / (L + 1e-6)
+            o = rng.normal() * rough * L
+            new += [(mx + nx * o, my + ny * o), (c, d)]
+        pts = new
+    return pts
+
+
+def _draw_path(img, pts, width, inten):
+    """Add a soft line through pts (pixel coords) into the float image img."""
+    H, W = img.shape
+    y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+    for (a, b), (c, d) in zip(pts, pts[1:]):
+        vx, vy = c - a, d - b
+        L2 = vx * vx + vy * vy + 1e-6
+        t = np.clip(((x - a) * vx + (y - b) * vy) / L2, 0, 1)
+        dist2 = (x - a - t * vx) ** 2 + (y - b - t * vy) ** 2
+        img += inten * np.exp(-dist2 / (width * width))
+
+
+def charge_frames(rng, n=8, size=2.4):
+    """Rail cannon charging: a blue-white glow with crawling arcs (loop; additive; anchor
+    at the centre). Place at the muzzle or the breech while the gun charges."""
+    S = int(size * PPM)
+    y, x = np.mgrid[0:S, 0:S].astype(np.float32)
+    X, Y = (x - S / 2) / PPM, (y - S / 2) / PPM
+    R = np.hypot(X, Y)
+    frames = []
+    for i in range(n):
+        pulse = 0.8 + 0.2 * math.sin(2 * math.pi * i / n)
+        glow = np.exp(-(R / (0.28 * pulse)) ** 2) + 0.35 * np.exp(-(R / 0.7) ** 2)
+        arcs = np.zeros((S, S), np.float32)
+        for _ in range(4):
+            a = rng.uniform(0, 2 * math.pi)
+            L = rng.uniform(0.5, 1.0) * S / 2
+            pts = _bolt_path(rng, S / 2, S / 2, S / 2 + math.cos(a) * L, S / 2 + math.sin(a) * L, 4, 0.3)
+            _draw_path(arcs, pts, 0.9, 0.55)
+        inten = np.clip(glow * pulse + arcs, 0, 1.4)
+        hot = np.clip(inten, 0, 1)
+        rgb = np.stack([0.25 + 0.75 * hot ** 3, 0.5 + 0.5 * hot ** 2, np.ones_like(hot)], -1)
+        frames.append(premul(rgb, hot))
+    return frames
+
+
+def beam_frames(rng, n=7, length=14.0, height=1.4):
+    """Rail cannon shot: a straight white-blue line along +x that flashes and then breaks
+    into a fading ionised trail (additive; anchor at the left middle = the muzzle). Rotate
+    to the shot's screen angle and scale x to the distance."""
+    W, H = int(length * PPM), int(height * PPM)
+    y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+    Y = (y - H / 2) / PPM
+    u = x / W
+    noise = tile_noise(H, W, rng, 1.3, 4)
+    frames = []
+    for i in range(n):
+        t = i / (n - 1)
+        w = 0.05 + 0.25 * t
+        core = np.exp(-(Y / w) ** 2)
+        halo = 0.5 * np.exp(-(Y / (w * 3.5)) ** 2)
+        brk = np.clip(1 - t * 1.3 + noise * t * 1.2, 0, 1)
+        inten = (core + halo) * brk * (1 - t) ** 0.7 * np.clip(u * 40, 0, 1)
+        if i == 0:
+            inten += 0.8 * np.exp(-((x / PPM) ** 2 + Y ** 2) / 0.12)   # muzzle flare
+        hot = np.clip(inten, 0, 1)
+        white = np.clip(core * brk * 1.2, 0, 1)
+        rgb = np.stack([0.3 + 0.7 * white, 0.55 + 0.45 * white, np.ones_like(hot)], -1)
+        frames.append(premul(rgb, hot))
+    return frames
+
+
 def write(dst, name, frames, anchor, blend):
     os.makedirs(os.path.join(dst, "effects"), exist_ok=True)
     for tag, scale in (("@2x", 1.0), ("@1x", 0.5)):
@@ -247,7 +381,17 @@ def main():
         "muzzle_smoke": write(a.dst, "muzzle_smoke", smoke_frames(rng), (0.5, 0.62), "normal"),
         "shell_burst": write(a.dst, "shell_burst", burst_frames(rng), (0.5, 0.76), "normal"),
         "stone_impact": write(a.dst, "stone_impact", impact_frames(rng), (0.5, 0.72), "normal"),
+        "fire_stream": write(a.dst, "fire_stream", stream_frames(rng), (0.0, 0.5), "normal"),
+        "fire_burn": write(a.dst, "fire_burn", burn_frames(rng), (0.5, 0.88), "normal"),
+        "rail_charge": write(a.dst, "rail_charge", charge_frames(rng), (0.5, 0.5), "add"),
+        "rail_beam": write(a.dst, "rail_beam", beam_frames(rng), (0.0, 0.5), "add"),
     }
+    fx["fire_stream"].update(loop=True, lengthM=7.5, note="jet along +x from the nozzle: rotate to the nozzle's "
+                             "screen angle, scale x to the range; loop while firing")
+    fx["fire_burn"].update(loop=True, note="flames on a burning target or ground patch; loop")
+    fx["rail_charge"].update(loop=True, note="charging glow at the muzzle; loop while charging")
+    fx["rail_beam"].update(lengthM=14.0, note="shot line along +x from the muzzle: rotate to the target, scale x "
+                           "to the distance; play once")
     fx["muzzle_flash"]["note"] = "flame points along +x: rotate the sprite to the barrel's screen angle"
     path = os.path.join(a.dst, "towers.json")
     with open(path) as f:
