@@ -3,6 +3,7 @@ import './style.css';
 import { getLang, onLangChange, t } from './i18n';
 import { BoardRenderer, type Selection } from './render/boardRenderer';
 import { PALETTE } from './render/palette';
+import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
 import { TICK, TOWERS, type TowerId } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
@@ -19,8 +20,9 @@ async function start(): Promise<void> {
   document.title = t('game.title');
 
   const app = new Application();
-  const [art] = await Promise.all([
+  const [art, portraits] = await Promise.all([
     TowerArt.load(ART_URL),
+    PortraitArt.load(ART_URL),
     app.init({
       resizeTo: window,
       background: PALETTE.background,
@@ -30,6 +32,7 @@ async function start(): Promise<void> {
     }),
   ]);
   await art?.preload();
+  portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
 
   let game = new Game(buildPathMap(MEADOW));
@@ -69,7 +72,9 @@ async function start(): Promise<void> {
 
   // Before the level: browse the guns; the one on screen when leaving is armed for placing.
   const arsenal = new Arsenal({
-    portrait: (def, level, frame) => art?.portrait(def, level, frame),
+    // Clean render of the gun alone; the board atlas (with its soil patch) until one exists.
+    portrait: (def, level, frame) =>
+      portraits?.has(def) ? portraits.portrait(def, level, frame, art?.manifest.directions ?? 32) : art?.portrait(def, level, frame),
     onArt: (fn) => art?.onChange(fn) ?? (() => {}),
     directions: art?.manifest.directions ?? 32,
     close: (def) => {

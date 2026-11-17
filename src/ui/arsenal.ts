@@ -229,8 +229,8 @@ export class Arsenal {
       el.innerHTML = '';
       return;
     }
-    const box = el.clientWidth || 260;
-    const k = box / (2 * p.reach);
+    const [hx, hy] = p.half ?? [p.reach, p.reach];
+    const k = Math.min((el.clientWidth || 300) / (2 * hx), (el.clientHeight || 220) / (2 * hy));
     let img = el.firstElementChild as HTMLElement | null;
     if (!img) {
       img = document.createElement('span');

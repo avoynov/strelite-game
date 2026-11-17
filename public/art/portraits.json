@@ -1,0 +1,118 @@
+{
+ "version": 1,
+ "about": "Clean gun portraits for menus: gun only, transparent, own shadow. Cell i aims at game angle i * 2*pi/directions (same convention as towers.json). Made by art/pipeline/render_portraits.sh.",
+ "directions": 32,
+ "pxPerMetre": 44.0,
+ "guns": {
+  "howitzer": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/howitzer_L1.webp",
+     "cell": [
+      556,
+      324
+     ],
+     "cols": 4,
+     "size": [
+      2224,
+      2592
+     ],
+     "anchor": [
+      226.0,
+      230.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/howitzer_L2.webp",
+     "cell": [
+      556,
+      324
+     ],
+     "cols": 4,
+     "size": [
+      2224,
+      2592
+     ],
+     "anchor": [
+      226.0,
+      230.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/howitzer_L3.webp",
+     "cell": [
+      602,
+      431
+     ],
+     "cols": 4,
+     "size": [
+      2408,
+      3448
+     ],
+     "anchor": [
+      272.0,
+      330.0
+     ]
+    }
+   ]
+  },
+  "zis3": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/zis3_L1.webp",
+     "cell": [
+      406,
+      219
+     ],
+     "cols": 4,
+     "size": [
+      1624,
+      1752
+     ],
+     "anchor": [
+      174.0,
+      147.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/zis3_L2.webp",
+     "cell": [
+      406,
+      219
+     ],
+     "cols": 4,
+     "size": [
+      1624,
+      1752
+     ],
+     "anchor": [
+      174.0,
+      147.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/zis3_L3.webp",
+     "cell": [
+      383,
+      204
+     ],
+     "cols": 4,
+     "size": [
+      1532,
+      1632
+     ],
+     "anchor": [
+      173.0,
+      126.0
+     ]
+    }
+   ]
+  }
+ }
+}

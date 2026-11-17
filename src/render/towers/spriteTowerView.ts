@@ -15,6 +15,8 @@ export interface GunPortrait {
   offset: [number, number];
   /** Radius around the ground point that every heading of this gun fits in. */
   reach: number;
+  /** Half width and half height of the area to fit on screen, if not a square of `reach`. */
+  half?: [number, number];
 }
 
 /**
