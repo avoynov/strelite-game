@@ -36,7 +36,7 @@ BARE_STEEL = (0.56, 0.57, 0.58)
 # name: (builder, kwargs)
 OLIVE = (0.34, 0.35, 0.24)      # FS 34087 olive drab
 GREEN_4BO = (0.30, 0.37, 0.21)  # Soviet 4BO protective green
-ENEMY_GREY = (0.15, 0.16, 0.16)  # the attackers' dark grey
+ENEMY_GREY = (0.14, 0.16, 0.18)  # the attackers' slate (parallel-world faction, see models/faction.py)
 SPEC = {
     "paint_olive":   ("painted", dict(color=OLIVE, rough=0.62)),
     "paint_olive_worn": ("painted", dict(color=OLIVE, rough=0.6, wear=1.8, dust=1.3)),
@@ -78,6 +78,7 @@ SPEC = {
     "brass":         ("metal", dict(color=(0.80, 0.66, 0.34), rough=0.28, dust=0.3)),
     # --- enemy vehicles and troops: dark grey, so they read on the pale road and the meadow
     "paint_enemy":      ("painted", dict(color=ENEMY_GREY, rough=0.55, wear=0.9, dust=0.5)),
+    "paint_faction_red": ("painted", dict(color=(0.40, 0.05, 0.04), rough=0.5, wear=1.0, dust=0.5)),
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
     "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),

@@ -10,6 +10,7 @@ from mathutils import Vector
 
 from .. import materials_photoreal as mp
 from ..geo import Kit
+from . import faction as fx
 from . import vehicle
 
 SPRITE_FRAME_M = 10.0
@@ -61,4 +62,13 @@ def build(style, level=1):
     k.tube("hmg_coax", (0.14, 0.6, 0.28), (0.14, 1.4, 0.28), 0.018, "gunmetal", parent=t, segs=8)
     k.tube("antenna", (-0.8, -2.8, 2.1), (-0.85, -2.95, 3.9), 0.007, "gunmetal", parent=root, segs=6, bevel=False)
     k.box("spare_wheel_mount", (0.12, 0.6, 0.6), (0, -3.85, 1.45), "gunmetal", parent=root, bevel=False)
+    # parallel-world faction marks
+    fx.emblem(k, root, (0, -0.45, 2.105), (0, 0, 1), r=0.5)
+    fx.band(k, t, (0, 1.6, 0.33), (0, 1.72, 0.33), (0.12, 0.12))
+    k.cylinder("turret_band", 0.6, 0.06, (0, 0, 0.05), "paint_faction_red", segs=28, parent=t, bevel=False)
+    for sx in (-1, 1):
+        fx.emblem(k, root, (sx * 1.47, -1.5, 1.68), (sx, 0, 0.38), r=0.26)
+        fx.rivets(k, root, (sx * 1.18, -3.5, 2.02), (sx * 1.18, 3.0, 2.02), 18, (sx, 0, 0.4))
+        fx.stack(k, root, (sx * 0.95, -3.4, 2.1), 0.7, r=0.07)
+        fx.lamp(k, root, (sx * 0.95, 3.5, 1.47), (0, 1, 0.3), r=0.09)
     return root, root

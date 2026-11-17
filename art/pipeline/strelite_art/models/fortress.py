@@ -10,6 +10,7 @@ from mathutils import Vector
 
 from .. import materials_photoreal as mp
 from ..geo import Kit
+from . import faction as fx
 from . import vehicle
 
 SPRITE_FRAME_M = 21.0
@@ -70,4 +71,19 @@ def build(style, level=1):
     k.tube("barrel2", (0, 1.0, 0.45), (0, 3.6, 0.5), 0.1, G, parent=t2, segs=18)
     k.tube("antenna", (2.4, -6.0, 4.3), (2.5, -6.3, 7.8), 0.012, "gunmetal", parent=root, segs=6, bevel=False)
     k.box("deck_crates", (1.6, 1.0, 0.6), (-2.3, -6.6, 3.2), "canvas", parent=root, bevel=0.06)
+    # parallel-world faction marks: emblems, oxblood bands, brass gauges, pennants
+    fx.emblem(k, root, (0, 3.0, 5.205), (0, 0, 1), r=0.8)
+    fx.emblem(k, root, (0, -6.0, 4.305), (0, 0, 1), r=0.7)
+    for sx in (-1, 1):
+        fx.emblem(k, root, (sx * 4.17, -1.5, 1.3), (sx, 0, 0), r=0.45)
+        k.cylinder("stack_band", 0.34, 0.25, (sx * 1.6, -5.3, 5.6), "paint_faction_red", segs=20, parent=root,
+                   bevel=False)
+        k.cylinder("stack_ring", 0.34, 0.06, (sx * 1.6, -5.3, 5.0), "brass", segs=20, parent=root, bevel=False)
+        fx.band(k, t, (sx * 0.6, 7.2, 0.83), (sx * 0.6, 7.45, 0.84), (0.36, 0.36))
+        for i in range(3):
+            fx.gauge(k, root, (sx * 1.0 + i * 0.25 * sx, 4.01, 4.35), (0, 1, 0), r=0.08)
+    k.cylinder("turret_band", 2.27, 0.2, (0, 0, 0.35), "paint_faction_red", segs=48, parent=t,
+               bevel=False).scale = (1.0, 1.15, 1.0)
+    fx.pennant(k, root, (2.5, -6.3, 7.8), h=0.4, w=1.2)
+    fx.pennant(k, t, (-0.9, -0.8, 1.8), h=1.4, w=0.9)
     return root, root

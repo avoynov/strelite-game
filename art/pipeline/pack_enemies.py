@@ -21,6 +21,7 @@ NAMES = {
     "tank": {"bg": "Танк", "en": "Tank"},
     "bikers": {"bg": "Мотоциклисти", "en": "Motorcycle raiders"},
     "drone": {"bg": "Дрон", "en": "Drone"},
+    "airship": {"bg": "Дирижабъл", "en": "Armoured airship"},
     "apc": {"bg": "БТР", "en": "Armoured personnel carrier"},
     "fortress": {"bg": "Крепост", "en": "Land fortress"},
 }

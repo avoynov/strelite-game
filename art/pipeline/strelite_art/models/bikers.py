@@ -10,6 +10,7 @@ from mathutils import Vector
 
 from .. import materials_photoreal as mp
 from ..geo import Kit
+from . import faction as fx
 from . import vehicle
 from .infantry import _ellipsoid, _limb
 
@@ -48,7 +49,11 @@ def _bike(k, b, i):
     k.box("rear_fender", (0.16, 0.5, 0.03), (0, -0.62, 0.72), G, rot=(-0.2, 0, 0), parent=b, bevel=0.01)
     k.box("front_fender", (0.15, 0.36, 0.03), (0, 0.74, 0.7), G, rot=(0.15, 0, 0), parent=b, bevel=0.01)
     k.tube("handlebar", (-0.36, yf - 0.25, 1.06), (0.36, yf - 0.25, 1.06), 0.016, "steel_worn", parent=b, segs=8)
-    k.cylinder("headlight", 0.08, 0.1, (0, yf - 0.13, 0.98), G, segs=14, rot=(-math.pi / 2, 0, 0), parent=b)
+    k.cylinder("headlight", 0.09, 0.12, (0, yf - 0.13, 0.98), "brass", segs=14, rot=(-math.pi / 2, 0, 0), parent=b)
+    k.cylinder("headlight_lens", 0.075, 0.01, (0, yf - 0.01, 0.98), "glass", segs=14, rot=(-math.pi / 2, 0, 0),
+               parent=b, bevel=False)
+    fx.band(k, b, (0, 0.0, 0.97), (0, 0.4, 0.99), (0.27, 0.06))
+    fx.emblem(k, b, (-0.245, -0.48, 0.72), (-1, 0, 0), r=0.11)
     k.tube("exhaust", (0.13, 0.15, 0.36), (0.16, -0.75, 0.55), 0.035, "steel_worn", parent=b, segs=10)
     k.box("pannier", (0.14, 0.34, 0.26), (-0.17, -0.48, 0.7), "canvas", parent=b, bevel=0.03)
     # rider, crouched over the bars
@@ -61,6 +66,12 @@ def _bike(k, b, i):
     helm = [(0.0, 0.16), (0.012, 0.165), (0.03, 0.14), (0.07, 0.13), (0.12, 0.1), (0.16, 0.05), (0.175, 0.0)]
     k.lathe("helmet", helm, "paint_enemy", segs=24, loc=neck + Vector((0, 0.07, 0.14)), rot=(math.pi / 2, 0, 0),
             parent=b)
+    k.cylinder("helm_spike", 0.022, 0.09, neck + Vector((0, 0.07, 0.29)), "brass", segs=10, radius_top=0.004,
+               parent=b, bevel=False)
+    k.torus("helm_band", 0.168, 0.014, neck + Vector((0, 0.07, 0.17)), "paint_faction_red", parent=b, segs=24,
+            tube_segs=5)
+    k.torus("goggles", 0.05, 0.012, neck + Vector((0, 0.17, 0.2)), "brass", rot=(math.pi / 2, 0, 0), parent=b,
+            segs=12, tube_segs=4)
     for sx in (-1, 1):
         sh = Vector((sx * 0.2, 0.02, 1.42))
         el = Vector((sx * 0.3, 0.22, 1.2))

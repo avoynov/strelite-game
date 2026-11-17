@@ -11,6 +11,7 @@ from mathutils import Vector
 
 from .. import materials_photoreal as mp
 from ..geo import Kit
+from . import faction as fx
 from . import vehicle
 
 SPRITE_FRAME_M = 11.0     # metres across the render: the gun overhangs the hull by 2.2 m
@@ -26,7 +27,16 @@ def build(style, level=1):
     _running_gear(k, root)
     _hull(k, root)
     _turret(k, root)
+    _faction(k, root)
     return root, root
+
+
+def _faction(k, root):
+    """Parallel-world faction marks: emblem on the deck, brass, stacks, rivets."""
+    fx.emblem(k, root, (0, -1.0, 1.475), (0, 0, 1), r=0.45)
+    for sx in (-1, 1):
+        fx.stack(k, root, (sx * 1.15, -2.75, 1.44), 0.75, r=0.08)
+        fx.rivets(k, root, (sx * 1.7, -2.8, 1.36), (sx * 1.7, 2.7, 1.36), 16, (sx, 0, 0))
 
 
 def _running_gear(k, root):
@@ -55,7 +65,7 @@ def _hull(k, root):
         for i, y in enumerate((-1.9, -0.6, 0.7)):          # stowage boxes on the fenders
             k.box("stowage", (0.5, 0.95 if i else 0.8, 0.32), (sx * 1.38, y, 1.6), G, parent=root,
                   bevel=0.01)
-        k.cylinder("headlight", 0.08, 0.1, (sx * 1.0, 2.84, 1.32), G, segs=14, rot=(-1.3, 0, 0),
+        k.cylinder("headlight", 0.08, 0.1, (sx * 1.0, 2.84, 1.32), "brass", segs=14, rot=(-1.3, 0, 0),
                    parent=root)
         k.cylinder("lens", 0.065, 0.012, (sx * 1.0, 2.94, 1.35), "glass", segs=14,
                    rot=(-1.3, 0, 0), parent=root, bevel=False)
@@ -110,3 +120,8 @@ def _turret(k, root):
     k.box("bustle_bin", (1.5, 0.5, 0.36), (0, -1.33, 0.32), G, parent=t, bevel=0.012)
     k.tube("antenna", (0.62, -0.75, 0.75), (0.66, -0.85, 2.5), 0.006, "gunmetal", parent=t, segs=6,
            bevel=False)
+    fx.pennant(k, t, (0.66, -0.85, 2.4), h=0.3, w=0.5)
+    for sx in (-1, 1):
+        fx.emblem(k, t, (sx * 0.8, 0.05, 0.42), (sx, 0, 0.3), r=0.28)
+    fx.band(k, t, (0, 4.15, 0.44), (0, 4.3, 0.44), (0.2, 0.2))
+    k.cylinder("cupola_ring", 0.35, 0.05, (-0.48, -0.25, 0.9), "brass", segs=24, parent=t, bevel=False)

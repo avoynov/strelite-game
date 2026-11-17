@@ -81,6 +81,11 @@ def _soldier(k, m, stride, rpg, rnd):
     _ellipsoid(k, "head", (0, 0.09, 1.63), 0.085, 0.1, 0.11, SK, m)
     helm = [(0.0, 0.16), (0.012, 0.165), (0.03, 0.14), (0.07, 0.13), (0.12, 0.1), (0.16, 0.05), (0.175, 0.0)]
     k.lathe("helmet", helm, "paint_enemy", segs=24, loc=(0, 0.08, 1.63), rot=(math.pi / 2, 0, 0), parent=m)
+    # parallel-world faction: brass spike and an oxblood band on the helmet, a brass gorget
+    k.cylinder("helm_spike", 0.022, 0.09, (0, 0.08, 1.785), "brass", segs=10, radius_top=0.004, parent=m,
+               bevel=False)
+    k.torus("helm_band", 0.168, 0.014, (0, 0.08, 1.665), "paint_faction_red", parent=m, segs=24, tube_segs=5)
+    k.box("gorget", (0.16, 0.02, 0.08), (0, 0.2, 1.38), "brass", rot=(-0.25, 0, 0), parent=m, bevel=0.005)
     # arms carrying the rifle at the ready
     sh_r, sh_l = Vector((0.22, 0.06, 1.42)), Vector((-0.22, 0.06, 1.42))
     hand_r, hand_l = Vector((0.1, 0.32, 1.13)), Vector((-0.06, 0.55, 1.22))
