@@ -37,6 +37,7 @@ TAU_LO, TAU_HI = 3.0 / 255, 12.0 / 255   # "changed" thresholds (premultiplied R
 
 NAMES = {
     "howitzer": {"bg": "Гаубица", "en": "Howitzer"},
+    "trebuchet": {"bg": "Требушет", "en": "Trebuchet"},
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
 }
 
@@ -183,6 +184,71 @@ def pack(sizes, max_side=2048):
     return best
 
 
+def write_sheet(dst, stem, tag, frames, anchor_px, animations):
+    """Pack [(name, premultiplied frame)] into <dst>/towers/<stem><tag>.webp + .json. Frames
+    are trimmed; their sourceSize is padded virtually so that the tower's ground point
+    (anchor_px, in this frame's pixels) is the middle of the source frame: anchor 0.5, 0.5."""
+    H, W = frames[0][1].shape[:2]
+    cx, cy = anchor_px
+    vw = int(math.ceil(2 * max(cx, W - cx)))
+    vh = int(math.ceil(2 * max(cy, H - cy)))
+    ox, oy = int(round(vw / 2 - cx)), int(round(vh / 2 - cy))
+    boxes = [bbox(pm) for _, pm in frames]
+    pos, AW, AH = pack([(b[2] - b[0], b[3] - b[1]) for b in boxes])
+    atlas = Image.new("RGBA", (AW, AH), (0, 0, 0, 0))
+    sheet = {"frames": {}, "animations": animations}
+    for (name, pm), b, (x, y) in zip(frames, boxes, pos):
+        w, h = b[2] - b[0], b[3] - b[1]
+        atlas.paste(to_image(pm[b[1]:b[3], b[0]:b[2]]), (x, y))
+        sheet["frames"][name] = {
+            "frame": {"x": x, "y": y, "w": w, "h": h},
+            "rotated": False, "trimmed": True,
+            "spriteSourceSize": {"x": b[0] + ox, "y": b[1] + oy, "w": w, "h": h},
+            "sourceSize": {"w": vw, "h": vh},
+            "anchor": {"x": 0.5, "y": 0.5},
+        }
+    os.makedirs(os.path.join(dst, "towers"), exist_ok=True)
+    image_name = f"{stem}{tag}.webp"
+    atlas.save(os.path.join(dst, "towers", image_name), quality=92, method=6, alpha_quality=100,
+               exact=False)
+    sheet["meta"] = {"app": "strelite art pipeline", "image": image_name, "format": "RGBA8888",
+                     "size": {"w": AW, "h": AH}, "scale": "2" if tag == "@2x" else "1"}
+    with open(os.path.join(dst, "towers", f"{stem}{tag}.json"), "w") as f:
+        json.dump(sheet, f, separators=(",", ":"))
+    kb = os.path.getsize(os.path.join(dst, "towers", image_name)) / 1024
+    return AW, AH, kb
+
+
+def pack_fire(src, dst, model, level, meta):
+    """Firing animation: one sheet per fire direction, <model>_L<n>_fire_DD@1x|@2x, frames
+    <model>_L<n>_fire_DD_FF (FF from 1). Each frame is the complete machine (draw it
+    instead of the aim layer, over the base)."""
+    d = os.path.join(src, model, "photoreal", f"L{level}")
+    fire = meta["fire"]
+    prefix = f"{model}_L{level}_fire"
+    for i in range(fire["dirs"]):
+        for tag, scale in (("@2x", 1.0), ("@1x", 0.5)):
+            base = load_premultiplied(os.path.join(d, "base.png"), scale)
+            frames = []
+            for f in range(1, fire["frames"] + 1):
+                full = load_premultiplied(os.path.join(d, f"fire_{i:02d}_{f:02d}.png"), scale)
+                frames.append((f"{prefix}_{i:02d}_{f:02d}", aim_layer(base, full)))
+            anchor = [c * scale for c in meta["anchorPx"]]
+            anims = {f"{prefix}_{i:02d}": [n for n, _ in frames]}
+            AW, AH, kb = write_sheet(dst, f"{prefix}_{i:02d}", tag, frames, anchor, anims)
+            print(f"[pack] {prefix}_{i:02d}{tag}: atlas {AW}x{AH}, {kb:.0f} kB", flush=True)
+    return {
+        "sheet": f"towers/{prefix}_<DD>", "animation": f"{prefix}_<DD>", "dirs": fire["dirs"],
+        "frames": fire["frames"], "fps": fire["fps"], "releaseFrame": fire["releaseFrame"],
+        "reloadFrom": fire["reloadFrom"],
+        "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
+        "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); "
+               "frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), "
+               "play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; "
+               "after the last frame show the aim layer again",
+    }
+
+
 def pack_level(src, dst, model, level, check=True):
     d = os.path.join(src, model, "photoreal", f"L{level}")
     with open(os.path.join(d, "meta.json")) as f:
@@ -206,29 +272,8 @@ def pack_level(src, dst, model, level, check=True):
                     err = np.abs(over(q, base) - full).max(axis=2)[inside]
                     worst = max(worst, float(np.percentile(err, 99.9)) * 255)
             frames.append((f"{prefix}_aim_{i:02d}", layer))
-        boxes = [bbox(pm) for _, pm in frames]
-        pos, AW, AH = pack([(b[2] - b[0], b[3] - b[1]) for b in boxes])
-        atlas = Image.new("RGBA", (AW, AH), (0, 0, 0, 0))
-        sheet = {"frames": {}, "animations": {f"{prefix}_aim": [f"{prefix}_aim_{i:02d}" for i in range(n)]}}
-        for (name, pm), b, (x, y) in zip(frames, boxes, pos):
-            w, h = b[2] - b[0], b[3] - b[1]
-            atlas.paste(to_image(pm[b[1]:b[3], b[0]:b[2]]), (x, y))
-            sheet["frames"][name] = {
-                "frame": {"x": x, "y": y, "w": w, "h": h},
-                "rotated": False, "trimmed": True,
-                "spriteSourceSize": {"x": b[0], "y": b[1], "w": w, "h": h},
-                "sourceSize": {"w": W, "h": H},
-                "anchor": {"x": 0.5, "y": 0.5},
-            }
-        os.makedirs(os.path.join(dst, "towers"), exist_ok=True)
-        image_name = f"{prefix}{tag}.webp"
-        atlas.save(os.path.join(dst, "towers", image_name), quality=92, method=6, alpha_quality=100,
-                   exact=False)
-        sheet["meta"] = {"app": "strelite art pipeline", "image": image_name, "format": "RGBA8888",
-                         "size": {"w": AW, "h": AH}, "scale": "2" if tag == "@2x" else "1"}
-        with open(os.path.join(dst, "towers", f"{prefix}{tag}.json"), "w") as f:
-            json.dump(sheet, f, separators=(",", ":"))
-        kb = os.path.getsize(os.path.join(dst, "towers", image_name)) / 1024
+        anims = {f"{prefix}_aim": [f"{prefix}_aim_{i:02d}" for i in range(n)]}
+        AW, AH, kb = write_sheet(dst, prefix, tag, frames, [c * scale for c in meta["anchorPx"]], anims)
         report[tag] = (AW, AH, kb, worst)
         print(f"[pack] {prefix}{tag}: atlas {AW}x{AH}, {kb:.0f} kB, "
               f"{AW * AH * 4 / 2**20:.1f} MB in GPU memory, layer error p99.9 {worst:.1f}/255", flush=True)
@@ -247,6 +292,7 @@ def pack_level(src, dst, model, level, check=True):
                      for a in meta["aims"]],
         "muzzleM": [a["muzzleM"] for a in meta["aims"]],
         "pxPerMetre1x": ppm1,
+        "fire": pack_fire(src, dst, model, level, meta) if meta.get("fire") else None,
     }
 
 
