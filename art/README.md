@@ -86,7 +86,10 @@ What is already prepared for 3D:
 - `art/pipeline/export_gltf.py` bakes base colour, roughness/metallic/AO and
   normal maps and exports a GLB with those nodes (verified on howitzer level 1:
   30 k triangles, 2.6 MB with 1024² textures).
-- `art/pipeline/tools/save_blend.py` writes the models as `.blend` files.
+- `art/pipeline/tools/save_blend.py --ground` writes each model and level as a
+  `.blend` file (camera, sky, materials, soil patch; 4 to 6 MB each). They are not
+  kept in git because the script rebuilds them in a minute; a saved set lives in the
+  project files under `art-sources/style-v/`.
 - All numbers in the manifest are in metres, so a 3D view can use them unchanged.
 
 A 3D view would be one new class implementing `TowerView` with three.js (or

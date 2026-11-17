@@ -218,7 +218,10 @@ class Field(Terrain):
     the repetition away."""
     tuft_scale = 1.45
 
-    def __init__(self, size_m, cell=0.07, seed=31, grass=0.6):
+    def __init__(self, size_m, cell=0.07, seed=31, grass=0.6, patchiness=1.3):
+        """grass: 0 bare soil .. 1 meadow. patchiness: how hard the edge between turf
+        and bare soil is; low values give an even, calm field that reads better when
+        the camera is far away."""
         self.size, self.seed = size_m, seed
         self.n = n = int(size_m / cell) + 1
         rng = np.random.default_rng(seed)
@@ -230,7 +233,7 @@ class Field(Terrain):
         bare = _fbm(n, rng, [(int(s / 3), 0.5), (int(s / 1.2), 0.4)])
         tramp = np.clip(0.25 + bare * 0.5, 0.0, 0.7)
         cover = _fbm(n, rng, [(int(s / 2.6), 0.9), (int(s / 1.2), 0.6), (int(s / 0.4), 0.3)])
-        cover = 0.5 + 0.5 * np.tanh(cover * 1.3 + (grass - 0.5) * 2.0)
+        cover = 0.5 + 0.5 * np.tanh(cover * patchiness + (grass - 0.5) * 2.0)
         cover = np.clip(cover * (1.0 - tramp * 0.9), 0.0, 1.0)
         h += cover * 0.012
         self.h = h.astype(np.float32)

@@ -321,5 +321,16 @@
     }
    ]
   }
+ },
+ "ground": {
+  "field": {
+   "image": "ground/field",
+   "sizePx1x": [
+    1024,
+    512
+   ],
+   "metres": 64.0,
+   "note": "seamless in both screen directions; draw as a tiling sprite at the same pxPerMetre as the towers"
+  }
  }
 }

@@ -35,7 +35,8 @@ def render(a, path):
     scene.render.resolution_x, scene.render.resolution_y = w, w // 2
     scene.render.film_transparent = False
     t = time.time()
-    Field(width_m * math.sqrt(2) + 4.0, seed=a.seed, grass=a.grass).build(scene)
+    Field(width_m * math.sqrt(2) + 4.0, seed=a.seed, grass=a.grass,
+          patchiness=a.patchiness).build(scene)
     print(f"[ground] terrain built in {time.time() - t:.0f}s", flush=True)
     scene.render.filepath = path
     t = time.time()
@@ -78,6 +79,8 @@ def main():
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--seed", type=int, default=31)
     ap.add_argument("--grass", type=float, default=0.6, help="0 bare soil .. 1 meadow")
+    ap.add_argument("--patchiness", type=float, default=1.3,
+                    help="edge hardness between turf and bare soil; lower is calmer")
     ap.add_argument("--name", default="field")
     ap.add_argument("--raw", default=os.path.join(here, "..", "out", "ground_raw.png"))
     ap.add_argument("--dst", default=os.path.join(here, "..", "..", "public", "art"))
