@@ -3,7 +3,7 @@ import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import type { Game, Tower } from '../sim/game';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
-import { PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
+import { FLY_HEIGHT, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
 import { depth, diamond, isoX, isoY, project, RISE, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
@@ -46,6 +46,9 @@ interface ShotOrigin {
 }
 
 const FLOAT_LIFE = 0.9;
+const RAIL_LIFE = 0.35;
+/** Size of the burst a destroyed vehicle goes up in; units not listed just fall. */
+const VEHICLE_BURST: Record<string, number> = { truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
 const BURST_LIFE = 0.45;
 /** Height in tiles at which rounds arrive (roughly the middle of a vehicle). */
 const HIT_HEIGHT = 0.2;
@@ -72,6 +75,8 @@ export class BoardRenderer {
   private readonly floats = new Container();
   private floatTexts: FloatText[] = [];
   private bursts: Burst[] = [];
+  /** Railgun traces fading out: ends in grid cells. */
+  private rails: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
@@ -306,7 +311,13 @@ export class BoardRenderer {
   /** A unit was destroyed: vehicles go up in a burst of their own. */
   onKill(enemyId: number): void {
     const e = this.enemyViews.get(enemyId);
-    if (e && e.kind !== 'infantry') this.effects?.play('shell_burst', e.gx, e.gy, { size: e.kind === 'tank' ? 0.85 : 0.65, zBias: 0.2 });
+    if (!e || !VEHICLE_BURST[e.kind]) return;
+    this.effects?.play('shell_burst', e.gx, e.gy, { size: VEHICLE_BURST[e.kind], zBias: 0.2 });
+  }
+
+  /** A railgun slug: a bright line out to the end of its range. */
+  onRail(x1: number, y1: number, x2: number, y2: number): void {
+    this.rails.push({ x1, y1, x2, y2, age: 0 });
   }
 
   // ---- per frame -----------------------------------------------------------
@@ -431,17 +442,48 @@ export class BoardRenderer {
         g.ellipse(isoX(gx, gy), isoY(gx, gy), 3.5, 1.75).fill({ color: 0x000000, alpha: 0.22 });
         g.circle(isoX(gx, gy), isoY(gx, gy, h), 2.6).fill(PALETTE.shell);
       } else {
-        const h = o.h + (HIT_HEIGHT - o.h) * t;
+        // Rounds at a drone climb to it.
+        const hit = this.game.enemies.find((e) => e.id === p.targetId)?.air ? FLY_HEIGHT : HIT_HEIGHT;
+        const h = o.h + (hit - o.h) * t;
         const x = isoX(gx, gy);
         const y = isoY(gx, gy, h);
         const dx = isoX(p.tx, p.ty) - x;
-        const dy = isoY(p.tx, p.ty, HIT_HEIGHT) - y;
+        const dy = isoY(p.tx, p.ty, hit) - y;
         const d = Math.hypot(dx, dy) || 1;
         const len = Math.min(d, 16);
         g.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
       }
     }
     for (const id of this.shotOrigins.keys()) if (!live.has(id)) this.shotOrigins.delete(id);
+
+    // Greek fire: a flickering tongue of flame from the siphon to its target.
+    for (const t of this.game.towers) {
+      if (!t.firing) continue;
+      const target = this.game.enemies.find((e) => e.id === t.targetId);
+      if (!target) continue;
+      const m = this.towerViews.get(t.id)?.view.muzzle();
+      const x0 = isoX(m?.gx ?? t.x, m?.gy ?? t.y);
+      const y0 = isoY(m?.gx ?? t.x, m?.gy ?? t.y, (m?.heightM ?? 1) / METRES_PER_TILE);
+      const x1 = isoX(target.x, target.y);
+      const y1 = isoY(target.x, target.y, HIT_HEIGHT);
+      const flicker = 0.75 + 0.25 * Math.sin(this.game.time * 40 + t.id);
+      const heat = Math.min(1, t.heat / 3);
+      g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 9 * flicker, color: 0xd9531e, alpha: 0.35 + 0.25 * heat, cap: 'round' });
+      g.moveTo(x0, y0).lineTo(x1, y1).stroke({ width: 4 * flicker, color: 0xffc04a, alpha: 0.8, cap: 'round' });
+      g.circle(x1, y1, 6 + 6 * heat * flicker).fill({ color: 0xff8a2a, alpha: 0.5 });
+    }
+
+    // Railgun traces.
+    this.rails = this.rails.filter((r) => {
+      r.age += dt;
+      const k = r.age / RAIL_LIFE;
+      if (k >= 1) return false;
+      const a = [isoX(r.x1, r.y1), isoY(r.x1, r.y1, 0.35)] as const;
+      const b = [isoX(r.x2, r.y2), isoY(r.x2, r.y2, 0.35)] as const;
+      g.moveTo(a[0], a[1]).lineTo(b[0], b[1]).stroke({ width: 8 * (1 - k), color: 0x7fd4ff, alpha: 0.5 * (1 - k), cap: 'round' });
+      g.moveTo(a[0], a[1]).lineTo(b[0], b[1]).stroke({ width: 2.5, color: 0xffffff, alpha: 1 - k, cap: 'round' });
+      return true;
+    });
 
     // Shell bursts: a quick flash, then dust spreading over the blast circle.
     this.bursts = this.bursts.filter((b) => {

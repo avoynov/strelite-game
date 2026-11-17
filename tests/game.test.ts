@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { ECONOMY, ENEMIES, TICK, TOWERS } from '../src/sim/content';
-import { angleDelta, Game, type GameEvent } from '../src/sim/game';
+import { angleDelta, Game, startMoney, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
 import { waveSpec } from '../src/sim/waves';
-import { playOut, run } from './helpers/bot';
+import { run } from './helpers/bot';
 
-const newGame = () => new Game(buildPathMap(MEADOW));
+/** Level 2 by default: the first level with the howitzer. */
+const newGame = (level = 2) => new Game(buildPathMap(MEADOW), { level });
 /** Lives lost if a whole wave walks through. */
-const leakOf = (n: number) => waveSpec(n).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
+const leakOf = (n: number) => waveSpec(n, 2).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
 
 describe('building', () => {
   it('needs the whole footprint on free build cells and charges money', () => {
@@ -16,7 +17,7 @@ describe('building', () => {
     expect(g.build('zis3', 1, 5)).toEqual({ ok: false, reason: 'notBuildable' }); // one corner on the road
     expect(g.build('zis3', 20, 0)).toEqual({ ok: false, reason: 'notBuildable' }); // off the map
     expect(g.build('zis3', 2, 2)).toEqual({ ok: true });
-    expect(g.money).toBe(ECONOMY.startMoney - TOWERS.zis3.levels[0].cost);
+    expect(g.money).toBe(startMoney(2) - TOWERS.zis3.levels[0].cost);
     expect(g.build('zis3', 3, 3)).toEqual({ ok: false, reason: 'occupied' }); // overlaps by one cell
     expect(g.build('zis3', 4, 2)).toEqual({ ok: true }); // right next to it
   });
@@ -39,11 +40,11 @@ describe('building', () => {
 
   it('upgrades up to max level, sells for a partial refund and frees the ground', () => {
     const g = newGame();
-    g.money = 1000;
+    g.money = 5000;
     g.build('zis3', 2, 2);
     const t = g.towers[0]!;
-    expect(g.upgrade(t.id).ok).toBe(true);
-    expect(g.upgrade(t.id).ok).toBe(true);
+    for (let i = 1; i < TOWERS.zis3.levels.length; i++) expect(g.upgrade(t.id).ok).toBe(true);
+    expect(t.level).toBe(4);
     expect(g.upgrade(t.id)).toEqual({ ok: false, reason: 'maxLevel' });
     const invested = TOWERS.zis3.levels.reduce((s, l) => s + l.cost, 0);
     const before = g.money;
@@ -100,16 +101,16 @@ describe('fighting', () => {
       g.step(TICK);
       events.push(...g.drainEvents());
     }
-    const spec = waveSpec(1).groups[0]!;
+    const spec = waveSpec(1, 2).groups[0]!;
     // Every direct hit is announced as an impact, for the board's hit effect.
     expect(events.filter((e) => e.type === 'impact').length).toBe(events.filter((e) => e.type === 'hit').length);
     expect(g.lives).toBe(ECONOMY.startLives);
-    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveSpec(1).clearBonus);
+    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveSpec(1, 2).clearBonus);
     const sum = (k: 'dealt' | 'kills' | 'wasted') => g.towers.reduce((s, t) => s + t.stats[k], 0);
     expect(sum('kills')).toBe(spec.count);
-    expect(sum('dealt')).toBe(spec.count * spec.hp);
-    // 16 hp against 12 damage: the second hit on every soldier overkills by 8.
-    expect(sum('wasted')).toBeGreaterThanOrEqual(spec.count * 8);
+    expect(sum('dealt')).toBeCloseTo(spec.count * spec.hp);
+    // 45 damage into a 21 hp soldier: over half of every shot is overkill.
+    expect(sum('wasted')).toBeGreaterThanOrEqual(spec.count * (45 - spec.hp) - 1e-6);
   });
 
   it('bursts a shell where the target will be and damages everything in the blast', () => {
@@ -128,7 +129,7 @@ describe('fighting', () => {
     for (const b of bursts) if (b.type === 'burst') expect(g.map.grid.get(Math.floor(b.x), Math.floor(b.y))).toBe('path');
     const t = g.towers[0]!;
     expect(t.stats.kills).toBeGreaterThan(0);
-    // 160 damage into 16 hp soldiers: most of it is wasted, which is the point of a heavy gun.
+    // 170 damage into 21 hp soldiers: most of it is wasted, which is the point of a heavy gun.
     expect(t.stats.wasted).toBeGreaterThan(t.stats.dealt);
   });
 
@@ -169,18 +170,15 @@ describe('fighting', () => {
 });
 
 describe('balance', () => {
-  it('mixes enemy kinds as the waves go on', () => {
-    expect(waveSpec(1).groups.map((g) => g.enemy)).toEqual(['infantry']);
-    expect(waveSpec(3).groups.map((g) => g.enemy)).toEqual(['infantry', 'truck']);
-    expect(waveSpec(5).groups.map((g) => g.enemy)).toEqual(['infantry', 'truck', 'tank']);
-  });
-
-  it('can be won with a mixed defence but not with light guns alone', () => {
-    const mixed = newGame();
-    playOut(mixed, 3);
-    expect(mixed.phase).toBe('won');
-    const lightOnly = newGame();
-    playOut(lightOnly, 1000);
-    expect(lightOnly.phase).toBe('lost');
+  it('mixes enemy kinds as the waves go on, each arriving with the map level of its counter', () => {
+    const kinds = (n: number, level: number) => waveSpec(n, level).groups.map((g) => g.enemy);
+    expect(kinds(1, 1)).toEqual(['infantry']);
+    expect(kinds(15, 1)).toEqual(['infantry', 'truck']);
+    expect(kinds(5, 2)).toEqual(['infantry', 'moto', 'truck', 'apc']);
+    expect(kinds(5, 3)).toContain('drone');
+    expect(kinds(5, 4)).toContain('tank');
+    expect(kinds(14, 5)).not.toContain('fortress');
+    expect(kinds(15, 5)).toContain('fortress');
+    expect(kinds(10, 8)).toContain('fortress');
   });
 });

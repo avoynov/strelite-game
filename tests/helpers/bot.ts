@@ -1,4 +1,4 @@
-import { TICK, TOWERS, type TowerId } from '../../src/sim/content';
+import { TICK, TOWER_IDS, TOWERS, type TowerId } from '../../src/sim/content';
 import type { Game } from '../../src/sim/game';
 
 /** Number of road cells a gun at this anchor could reach. */
@@ -35,15 +35,21 @@ function bestSpot(g: Game, def: TowerId): { cx: number; cy: number } | null {
   return best;
 }
 
+/** How much of its money a sensible player puts into each gun, relative to the others. */
+const MIX: Record<TowerId, number> = { crossbow: 2, scorpion: 1.5, zis3: 2, howitzer: 2, greekfire: 1.5, trebuchet: 1.5, railgun: 1 };
+
 /**
- * A plain, sensible player: light guns first, a heavy gun for every `heavyEvery`
- * light ones once tanks are near, upgrades when nothing new is affordable.
+ * A plain, sensible player: keeps its spending on each allowed gun close to
+ * MIX, building the gun it is shortest of at the spot that sees most road, and
+ * upgrading every other purchase once it has a few guns. `only` limits it to
+ * some guns (to show that one gun alone does not win).
  */
-export function spend(g: Game, heavyEvery = 3): void {
-  for (let guard = 0; guard < 50; guard++) {
-    const light = g.towers.filter((t) => t.def === 'zis3').length;
-    const heavy = g.towers.filter((t) => t.def === 'howitzer').length;
-    const want: TowerId = g.wave >= 3 && heavy < Math.floor(light / heavyEvery) + (g.wave >= 4 ? 1 : 0) ? 'howitzer' : 'zis3';
+export function spend(g: Game, only?: readonly TowerId[]): void {
+  const allowed = (only ?? TOWER_IDS).filter((id) => g.isUnlocked(id));
+  if (!allowed.length) return;
+  for (let guard = 0; guard < 60; guard++) {
+    const invested = (id: TowerId) => g.towers.filter((t) => t.def === id).reduce((s, t) => s + t.stats.invested, 0);
+    const want = [...allowed].sort((a, b) => invested(a) / MIX[a] - invested(b) / MIX[b] || TOWERS[a].levels[0].cost - TOWERS[b].levels[0].cost)[0]!;
     const cost = TOWERS[want].levels[0].cost;
     const upgradable = g.towers
       .map((t) => ({ t, cost: g.upgradeCost(t) }))
@@ -58,6 +64,8 @@ export function spend(g: Game, heavyEvery = 3): void {
       const spot = bestSpot(g, want);
       if (spot && g.build(want, spot.cx, spot.cy).ok) continue;
     }
+    // Can't afford the gun it wants yet: save up for it rather than upgrade.
+    if (g.money < cost) break;
     if (upgradable && g.money >= upgradable.cost) {
       g.upgrade(upgradable.t.id);
       continue;
@@ -71,10 +79,10 @@ export function run(g: Game, seconds: number): void {
 }
 
 /** Play a whole game with the bot; returns per-wave lives for tuning. */
-export function playOut(g: Game, heavyEvery = 3): number[] {
+export function playOut(g: Game, only?: readonly TowerId[]): number[] {
   const lives: number[] = [];
   while (g.phase === 'build') {
-    spend(g, heavyEvery);
+    spend(g, only);
     g.startWave();
     for (let i = 0; i < 20000 && g.phase === 'wave'; i++) g.step(TICK);
     lives.push(g.lives);

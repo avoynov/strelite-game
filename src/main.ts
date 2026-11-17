@@ -14,6 +14,26 @@ import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
+const LEVEL_KEY = 'strelite.level';
+
+/** Map level to play: `?level=N` wins, else the last one reached, else 1. */
+function startLevel(): number {
+  const fromUrl = Number(new URLSearchParams(location.search).get('level'));
+  if (fromUrl >= 1) return Math.floor(fromUrl);
+  try {
+    return Math.max(1, Math.floor(Number(localStorage.getItem(LEVEL_KEY)) || 1));
+  } catch {
+    return 1;
+  }
+}
+
+function saveLevel(level: number): void {
+  try {
+    localStorage.setItem(LEVEL_KEY, String(level));
+  } catch {
+    // Private mode or blocked storage: the level just is not remembered.
+  }
+}
 
 async function start(): Promise<void> {
   document.documentElement.lang = getLang();
@@ -35,7 +55,7 @@ async function start(): Promise<void> {
   portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
 
-  let game = new Game(buildPathMap(MEADOW));
+  let game = new Game(buildPathMap(MEADOW), { level: startLevel() });
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
@@ -53,10 +73,11 @@ async function start(): Promise<void> {
     towerIcon: (def) => art?.iconCss(def, 52) ?? '',
     getSpeed: () => loop.speed,
     setSpeed: (s) => (loop.speed = s),
-    restart: () => {
+    restart: (level = game.level) => {
       const speed = loop.speed;
+      saveLevel(level);
       board.destroy();
-      game = new Game(buildPathMap(MEADOW));
+      game = new Game(buildPathMap(MEADOW), { level });
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -142,6 +163,7 @@ async function start(): Promise<void> {
       if (ev.type === 'shot') board.onShot(ev.towerId, ev.projectileId);
       else if (ev.type === 'burst') board.onBurst(ev.x, ev.y, ev.radius);
       else if (ev.type === 'impact') board.onImpact(ev.x, ev.y);
+      else if (ev.type === 'rail') board.onRail(ev.x1, ev.y1, ev.x2, ev.y2);
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
