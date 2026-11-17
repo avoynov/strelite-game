@@ -1,5 +1,5 @@
 import { getLang, setLang, t, type MessageKey } from '../i18n';
-import { TOWER_IDS, TOWERS, type TowerId, type TowerLevel } from '../sim/content';
+import { TOWER_IDS, TOWERS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import type { ActionResult, Game } from '../sim/game';
 import type { Selection } from '../render/boardRenderer';
 
@@ -13,7 +13,8 @@ export interface HudCallbacks {
   towerIcon(def: TowerId): string;
   getSpeed(): number;
   setSpeed(speed: number): void;
-  restart(): void;
+  /** Start over, on the given map level (default: the current one). */
+  restart(level?: number): void;
 }
 
 const SPEEDS = [1, 2, 3];
@@ -79,6 +80,12 @@ export class Hud {
   showResult(r: ActionResult): void {
     if (r.ok) return;
     const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied' };
+    if (r.reason === 'locked') {
+      const sel = this.cb.getSelection();
+      const def = sel?.kind === 'place' ? sel.def : this.cb.getArmed();
+      if (def) this.showToast(t('reason.locked', { n: TOWERS[def].unlockLevel }));
+      return;
+    }
     const k = key[r.reason];
     if (k) this.showToast(t(k));
   }
@@ -89,7 +96,7 @@ export class Hud {
     const top = `
       <div class="stat" title="${t('hud.money')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${g.money}</b></div>
       <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
-      <div class="stat wave">${t('hud.wave', { n: g.wave, total: g.totalWaves })}</div>
+      <div class="stat wave">${t('hud.level', { n: g.level })} · ${t('hud.wave', { n: g.wave, total: g.totalWaves })}</div>
       <div class="spacer"></div>
       <button class="chip" data-action="speed" aria-label="${t('action.speed')}">${speed}×</button>
       <button class="chip" data-action="lang">${t('lang.switch')}</button>`;
@@ -108,7 +115,8 @@ export class Hud {
       ? `<div class="end-card">
            <h2>${t(g.phase === 'won' ? 'end.won' : 'end.lost')}</h2>
            <p>${t('end.summary', { n: g.phase === 'won' ? g.wave : Math.max(0, g.wave - 1) })}</p>
-           <button class="btn primary" data-action="restart">${t('action.restart')}</button>
+           ${g.phase === 'won' ? `<button class="btn primary" data-action="next">${t('action.nextLevel', { n: g.level + 1 })}</button>` : ''}
+           <button class="btn${g.phase === 'won' ? '' : ' primary'}" data-action="restart">${t('action.restart')}</button>
          </div>`
       : '';
     if (end !== this.lastEnd) {
@@ -132,7 +140,7 @@ export class Hud {
           ${this.iconHtml(sel.def)}
           <div class="info">
             <div class="title">${escapeHtml(t(`tower.${sel.def}`))}</div>
-            ${this.statsHtml(lvl)}
+            ${this.statsHtml(TOWERS[sel.def], lvl)}
           </div>
           <div class="actions">
             <button class="btn primary" data-action="build" ${ok && g.money >= lvl.cost ? '' : 'disabled'}>
@@ -152,7 +160,7 @@ export class Hud {
         <div class="row">
           <div class="info">
             <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
-            ${this.statsHtml(lvl)}
+            ${this.statsHtml(TOWERS[tower.def], lvl)}
             <div class="stats muted">
               <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
               <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
@@ -168,7 +176,8 @@ export class Hud {
         </div>`;
     } else {
       // Build menu: one card per gun; the picked one stays armed for placing.
-      const cards = TOWER_IDS.map((id) => {
+      // Only the guns this map level allows.
+      const cards = TOWER_IDS.filter((id) => g.isUnlocked(id)).map((id) => {
         const cost = TOWERS[id].levels[0].cost;
         return `
           <button class="card${armed === id ? ' armed' : ''}${g.money < cost ? ' poor' : ''}" data-action="pick" data-def="${id}" aria-pressed="${armed === id}">
@@ -192,12 +201,16 @@ export class Hud {
     return css ? `<span class="gun-ico"><span style="${css}"></span></span>` : `<span class="gun-ico gun-ico-none"></span>`;
   }
 
-  private statsHtml(lvl: TowerLevel): string {
+  private statsHtml(def: TowerDef, lvl: TowerLevel): string {
     const rate = 1 / lvl.fireInterval;
-    return `<div class="stats">
-      <span>${t('stat.damage')} <b>${lvl.damage}</b></span>
+    // A flame has no shots: show how hot it starts and how hot it gets.
+    const fire = def.projectile === 'beam'
+      ? `<span>${t('stat.flame')} <b>${Math.round((def.rampFrom ?? lvl.damage) * (lvl.damage / def.levels[0].damage))}–${lvl.damage}</b></span>`
+      : `<span>${t('stat.damage')} <b>${lvl.damage}</b></span>
       <span>${t('stat.rate')} <b>${rate.toFixed(rate < 1 ? 2 : 1)}</b></span>
-      <span>${t('stat.dps')} <b>${(lvl.damage * rate).toFixed(1)}</b></span>
+      <span>${t('stat.dps')} <b>${(lvl.damage * rate).toFixed(1)}</b></span>`;
+    return `<div class="stats">
+      ${fire}
       <span>${t('stat.range')} <b>${lvl.range}</b></span>
       ${lvl.splash ? `<span>${t('stat.splash')} <b>${lvl.splash}</b></span>` : ''}
     </div>`;
@@ -250,6 +263,9 @@ export class Hud {
         break;
       case 'restart':
         this.cb.restart();
+        break;
+      case 'next':
+        this.cb.restart(g.level + 1);
         break;
     }
     this.update();

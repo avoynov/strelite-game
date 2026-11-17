@@ -20,9 +20,15 @@ export interface EnemyView {
 const DIRS = 16;
 const KIT = {
   infantry: { body: 0x6a6f4c, dark: 0x3c402b },
+  moto: { body: 0x5c5a48, dark: 0x2a2a24 },
+  drone: { body: 0x8a8f94, dark: 0x3a3f44 },
   truck: { body: 0x4d5a3a, dark: 0x2c3422 },
+  apc: { body: 0x5a6346, dark: 0x30372a },
   tank: { body: 0x55603d, dark: 0x2e3523 },
+  fortress: { body: 0x4a4f3c, dark: 0x262a1f },
 } as const;
+/** Height a flyer is drawn above its ground point, in tiles. */
+export const FLY_HEIGHT = 1.2;
 
 /** Stand-in enemies until style В sprites exist: a squad, a truck, a tank, drawn flat. */
 export class PlaceholderEnemyView implements EnemyView {
@@ -60,7 +66,7 @@ export class PlaceholderEnemyView implements EnemyView {
     if (Math.abs(f - this.health) < 0.01) return;
     this.health = f;
     const w = Math.max(20, isoX(this.radius * 0.8, -this.radius * 0.8));
-    const y = -RISE * (this.kind === 'infantry' ? 0.55 : 0.75) - 6;
+    const y = -RISE * (this.kind === 'infantry' || this.kind === 'moto' ? 0.55 : this.kind === 'drone' ? FLY_HEIGHT + 0.4 : this.kind === 'fortress' ? 1 : 0.75) - 6;
     this.bar.clear();
     this.bar.visible = f < 1;
     this.bar.rect(-w / 2 - 1, y - 1, w + 2, 6).fill({ color: 0x000000, alpha: 0.6 });
@@ -92,16 +98,58 @@ export class PlaceholderEnemyView implements EnemyView {
       }
       return;
     }
+    if (this.kind === 'moto') {
+      // Three riders in a staggered line.
+      for (const [f, side] of [[0.8, -0.4], [0, 0.45], [-0.8, -0.2]] as const) {
+        const [x0, y0] = pt(f * r - 0.12, side * r);
+        const [x1, y1] = pt(f * r + 0.12, side * r);
+        g.ellipse((x0 + x1) / 2 + 3, (y0 + y1) / 2 - 1, 6, 2.4).fill({ color: 0x000000, alpha: 0.3 });
+        g.moveTo(x0, y0 - 3).lineTo(x1, y1 - 3).stroke({ width: 3.5, color: kit.dark, cap: 'round' });
+        g.roundRect((x0 + x1) / 2 - 2, (y0 + y1) / 2 - 12, 4, 9, 2).fill(kit.body);
+        g.circle((x0 + x1) / 2, (y0 + y1) / 2 - 13.5, 2.5).fill(kit.dark);
+      }
+      return;
+    }
+    if (this.kind === 'drone') {
+      // Shadow on the ground, the craft high above it: four rotors on a cross.
+      g.ellipse(4, -1, 9, 4).fill({ color: 0x000000, alpha: 0.22 });
+      const h = FLY_HEIGHT;
+      for (const [f, side] of [[0.9, 0.9], [0.9, -0.9], [-0.9, 0.9], [-0.9, -0.9]] as const) {
+        const [x, y] = pt(f * r, side * r, h);
+        const [cx, cy] = pt(0, 0, h);
+        g.moveTo(cx, cy).lineTo(x, y).stroke({ width: 2, color: kit.dark });
+        g.ellipse(x, y, 5, 2.5).fill({ color: kit.body, alpha: 0.7 });
+      }
+      const [cx, cy] = pt(0, 0, h);
+      g.ellipse(cx, cy, 5, 3.5).fill(kit.dark);
+      return;
+    }
     // Vehicles: shadow, hull, then cab or turret; the sun is at the lower left.
     const half = r * 0.45;
     g.poly([...pt(-r, -half), ...pt(r, -half), ...pt(r, half), ...pt(-r, half)].map((v, i) => v + (i % 2 ? -3 : 5))).fill({ color: 0x000000, alpha: 0.28 });
     quad(-r, r, half, 0.12, kit.dark);
     quad(-r, r, half * 0.9, 0.3, kit.body);
-    if (this.kind === 'tank') {
-      const [tx, ty] = pt(-r * 0.1, 0, 0.42);
-      g.ellipse(tx, ty, isoX(r * 0.26, -r * 0.26), isoX(r * 0.26, -r * 0.26) / 2).fill(kit.dark);
-      const [bx, by] = pt(r * 1.25, 0, 0.42);
-      g.moveTo(tx, ty).lineTo(bx, by).stroke({ width: 4, color: kit.dark, cap: 'round' });
+    if (this.kind === 'tank' || this.kind === 'fortress') {
+      // The fortress carries two turrets.
+      const turrets = this.kind === 'fortress' ? [r * 0.35, -r * 0.45] : [-r * 0.1];
+      for (const f of turrets) {
+        const [tx, ty] = pt(f, 0, 0.42);
+        g.ellipse(tx, ty, isoX(r * 0.26, -r * 0.26), isoX(r * 0.26, -r * 0.26) / 2).fill(kit.dark);
+        const [bx, by] = pt(f + r * 1.1, 0, 0.42);
+        g.moveTo(tx, ty).lineTo(bx, by).stroke({ width: this.kind === 'fortress' ? 6 : 4, color: kit.dark, cap: 'round' });
+      }
+    } else if (this.kind === 'apc') {
+      // Eight wheels and a small roof gun.
+      for (const f of [-0.75, -0.25, 0.25, 0.75]) {
+        for (const side of [-1, 1]) {
+          const [x, y] = pt(f * r, side * half, 0.08);
+          g.circle(x, y, 3).fill(0x1e211b);
+        }
+      }
+      const [tx, ty] = pt(r * 0.15, 0, 0.42);
+      g.circle(tx, ty, 4).fill(kit.dark);
+      const [bx, by] = pt(r * 0.8, 0, 0.42);
+      g.moveTo(tx, ty).lineTo(bx, by).stroke({ width: 2, color: kit.dark, cap: 'round' });
     } else {
       quad(r * 0.35, r * 0.95, half * 0.85, 0.5, kit.dark);
       quad(-r * 0.95, r * 0.25, half * 0.85, 0.42, 0x7a7355);
@@ -110,7 +158,7 @@ export class PlaceholderEnemyView implements EnemyView {
 }
 
 /** Height of the health bar above the ground, in metres, per enemy kind. */
-const BAR_HEIGHT_M: Record<string, number> = { infantry: 2.2, truck: 3.4, tank: 3.2 };
+const BAR_HEIGHT_M: Record<string, number> = { infantry: 2.2, moto: 2.2, drone: 6.5, truck: 3.4, apc: 3.2, tank: 3.2, fortress: 4.5 };
 
 /**
  * An enemy drawn from its rendered atlas: one sprite that swaps between the

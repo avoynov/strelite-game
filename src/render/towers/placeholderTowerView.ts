@@ -7,6 +7,14 @@ const OLIVE = 0x5b6b3a;
 const OLIVE_DARK = 0x3d4a27;
 const STEEL = 0x2b2f2a;
 const SOIL = 0x6b5a3e;
+/** Stand-in colours per gun, until it has rendered art: wood, bronze, steel. */
+const KIT: Record<string, { body: number; dark: number }> = {
+  crossbow: { body: 0x8a6a3e, dark: 0x5a4228 },
+  scorpion: { body: 0x9a7848, dark: 0x5e4426 },
+  greekfire: { body: 0xb07a3a, dark: 0x6b4a22 },
+  trebuchet: { body: 0x7d5f38, dark: 0x4e3a22 },
+  railgun: { body: 0x6a7c8e, dark: 0x2e3a46 },
+};
 
 /**
  * Stand-in for a tower that has no rendered art yet: a simple drawn field gun
@@ -89,6 +97,7 @@ export class PlaceholderTowerView implements TowerView {
     const line = (a: [number, number], b: [number, number], width: number, color: number) =>
       g.moveTo(a[0], a[1]).lineTo(b[0], b[1]).stroke({ width, color, cap: 'round' });
 
+    const kit = KIT[this.spec.tower] ?? { body: OLIVE, dark: OLIVE_DARK };
     g.clear();
     g.ellipse(0, 0, isoX(s * 0.36, -s * 0.36), isoX(s * 0.36, -s * 0.36) / 2).fill({ color: SOIL, alpha: 0.85 });
     // Sandbag ring grows with the level.
@@ -98,14 +107,14 @@ export class PlaceholderTowerView implements TowerView {
     }
     const len = this.barrel();
     // Trails, wheels, shield, barrel: back to front is close enough for a stand-in.
-    line(pt(-0.05 * s, 0, 0.12), pt(-len * 0.9, s * 0.16), 3, OLIVE_DARK);
-    line(pt(-0.05 * s, 0, 0.12), pt(-len * 0.9, -s * 0.16), 3, OLIVE_DARK);
+    line(pt(-0.05 * s, 0, 0.12), pt(-len * 0.9, s * 0.16), 3, kit.dark);
+    line(pt(-0.05 * s, 0, 0.12), pt(-len * 0.9, -s * 0.16), 3, kit.dark);
     for (const side of [-1, 1]) {
       const [x, y] = pt(0, side * s * 0.14, 0.1);
       g.circle(x, y, 2 + s * 1.5).fill(STEEL);
     }
-    line(pt(0.03 * s, -s * 0.13, 0.22), pt(0.03 * s, s * 0.13, 0.22), 7, OLIVE);
-    line(pt(0, 0, 0.2), pt(len, 0, 0.3), 4.5, OLIVE_DARK);
+    line(pt(0.03 * s, -s * 0.13, 0.22), pt(0.03 * s, s * 0.13, 0.22), 7, kit.body);
+    line(pt(0, 0, 0.2), pt(len, 0, 0.3), 4.5, kit.dark);
     if (this.flashAge !== Infinity) {
       const [x, y] = pt(len, 0, 0.3);
       g.circle(x, y, 7).fill({ color: 0xffe7a3, alpha: 0.9 });
