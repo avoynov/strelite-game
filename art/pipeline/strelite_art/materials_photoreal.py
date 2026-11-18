@@ -58,6 +58,12 @@ SPEC = {
     "wood":          ("wood", dict(color=(0.63, 0.48, 0.30))),
     "rope":          ("plain", dict(color=(0.55, 0.47, 0.33), rough=0.95, dust=0.6)),
     "stone":         ("stone", {}),
+    # --- buildings (models/hq.py, lab.py): dressed and pale stone, roof slate, verdigris copper
+    "stone_dressed": ("stone", dict(light=(0.56, 0.52, 0.46), dark=(0.44, 0.41, 0.37))),
+    "stone_pale":    ("stone", dict(light=(0.74, 0.71, 0.64), dark=(0.63, 0.60, 0.54))),
+    "slate":         ("plain", dict(color=(0.11, 0.12, 0.13), rough=0.55, dust=0.35)),
+    "verdigris":     ("plain", dict(color=(0.30, 0.50, 0.42), rough=0.6, dust=0.3)),
+    "plaster":       ("plain", dict(color=(0.62, 0.58, 0.50), rough=0.85, dust=0.6)),
     "dirt":          ("dirt", {}),
     "grass":         ("grass", {}),
     "bore":          ("bore", {}),
@@ -508,14 +514,14 @@ def _timber(name, light, dark, rough=0.8, weather=0.6, dust=0.7, checks=1.0):
     return mat
 
 
-def _stone(name):
+def _stone(name, light=(0.60, 0.53, 0.42), dark=(0.40, 0.36, 0.31)):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     tc = g.node("ShaderNodeTexCoord")
     info = g.node("ShaderNodeObjectInfo")
     P = tc.outputs["Object"]
     n = g.noise(P, 30, detail=6, rough=0.7)
-    a = g.mix(info.outputs["Random"], rgb((0.60, 0.53, 0.42)), rgb((0.40, 0.36, 0.31)))
+    a = g.mix(info.outputs["Random"], rgb(light), rgb(dark))
     col = g.mix(1.0, a, g.math("ADD", 0.7, g.math("MULTIPLY", n, 0.6)), "MULTIPLY")
     _, nz, _ = g.world()
     col = g.mix(g.ramp(nz, 0.9, -0.2), col, rgb(DUST))   # soil clings to the lower half
