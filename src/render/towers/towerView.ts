@@ -15,8 +15,14 @@ export interface TowerView {
   setAim(aim: number): void;
   /** Switch to an upgrade level (1-based). */
   setLevel(level: number): void;
-  /** The gun has just fired: play flash, recoil, smoke. */
-  fire(): void;
+  /**
+   * The gun has just fired: play the shot (or flash, recoil, smoke). `reload`
+   * is the seconds until it can fire again. Returns the seconds until the
+   * round visibly leaves (a trebuchet's arm swings first), 0 for at once.
+   */
+  fire(reload: number): number;
+  /** A stream weapon (the siphon) is pouring, or has stopped. */
+  setFiring(on: boolean): void;
   /** Advance the view's own animations by `dt` seconds. */
   update(dt: number): void;
   /** Where shots leave the barrel at the current aim: grid cells and metres above the ground. */

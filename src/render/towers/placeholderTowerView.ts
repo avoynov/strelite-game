@@ -59,11 +59,14 @@ export class PlaceholderTowerView implements TowerView {
     this.draw();
   }
 
-  fire(): void {
-    if (!this.spec.flash) return;
+  fire(): number {
+    if (!this.spec.flash) return 0;
     this.flashAge = 0;
     this.draw();
+    return 0;
   }
+
+  setFiring(): void {}
 
   update(dt: number): void {
     if (this.flashAge === Infinity) return;

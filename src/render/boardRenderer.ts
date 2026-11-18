@@ -1,4 +1,4 @@
-import { Assets, Container, Graphics, Matrix, Text, TilingSprite, type Texture } from 'pixi.js';
+import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type Texture } from 'pixi.js';
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import type { Building, Fence, Game, Tower } from '../sim/game';
 import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT } from '../sim/base';
@@ -12,7 +12,7 @@ import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
 import { PlaceholderTowerView } from './towers/placeholderTowerView';
 import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTowerView';
-import { shotEffects, spriteScale } from './towers/towerArt';
+import { frameForAim, shotEffects, spriteScale, type ProjectileArtDef } from './towers/towerArt';
 import type { TowerView } from './towers/towerView';
 
 /** What the build menu has picked: a gun, or (siege mode) fences. */
@@ -53,6 +53,13 @@ interface ShotOrigin {
   dy: number;
   /** Muzzle height in tiles. */
   h: number;
+  /** Seconds before the round visibly leaves (a trebuchet's arm swings first), and seconds since the shot. */
+  delay: number;
+  age: number;
+  /** Flight progress when the round visibly left. */
+  t0: number;
+  /** The round's own picture: sheet and frame prefix, when the art has one. */
+  round?: { def: ProjectileArtDef; sheet: string; animation: string };
 }
 
 const FLOAT_LIFE = 0.9;
@@ -105,11 +112,16 @@ export class BoardRenderer {
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
   private readonly buildingViews = new Map<'hq' | 'lab', BuildingView>();
+  /** Base mode: the camera has been put on the base once. */
+  private focused = false;
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
   private readonly effects: Effects | null;
   private readonly shotOrigins = new Map<number, ShotOrigin>();
+  /** Rendered rounds in flight, by projectile id. */
+  private readonly rounds = new Container();
+  private readonly roundSprites = new Map<number, Sprite>();
   private readonly shotFxCache = new Map<string, string[]>();
   private overlayKey = '';
   private groundSprite: TilingSprite | null = null;
@@ -128,7 +140,7 @@ export class BoardRenderer {
     private readonly artUrl: string,
   ) {
     this.objects.sortableChildren = true;
-    this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots);
+    this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots, this.rounds);
     this.root.addChild(this.world, this.floats);
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
@@ -177,6 +189,12 @@ export class BoardRenderer {
     this.screenH = screenH;
     this.resolution = resolution;
     this.camera.configure(this.bounds, view, MAX_TILE_PX / TILE_W);
+    // The base opens on the base: closer in, the headquarters low in the view and the way the enemy comes above it.
+    if (this.game.hq && !this.focused) {
+      this.focused = true;
+      const p = project(HQ_SPOT[0] - 3, HQ_SPOT[1] - 3);
+      this.camera.focus(p.x, p.y, this.camera.minScale * 1.45);
+    }
     this.drawGround();
     this.drawMap();
     this.applyCamera();
@@ -346,9 +364,17 @@ export class BoardRenderer {
     const entry = this.towerViews.get(towerId);
     if (!tower || !entry) return;
     entry.view.setAim(tower.aim);
-    entry.view.fire();
+    const delay = entry.view.fire(this.game.levelOf(tower).fireInterval);
     const m = entry.view.muzzle();
-    this.shotOrigins.set(projectileId, { dx: m.gx - tower.x, dy: m.gy - tower.y, h: m.heightM / METRES_PER_TILE });
+    this.shotOrigins.set(projectileId, {
+      dx: m.gx - tower.x,
+      dy: m.gy - tower.y,
+      h: m.heightM / METRES_PER_TILE,
+      delay,
+      age: 0,
+      t0: 0,
+      round: this.roundArt(tower.def, tower.level + 1),
+    });
     // Only what this gun's art asks for: powder guns flash and smoke, engines fire silently.
     const fx = this.effects;
     const wanted = this.shotFx(tower.def);
@@ -359,6 +385,14 @@ export class BoardRenderer {
     // Flame along the barrel as it lies on screen; drawn just over the gun it belongs to.
     if (wanted.includes('muzzle_flash')) fx.play('muzzle_flash', m.gx, m.gy, { ...opts, rotation: screenAngle(a), size: 0.5 + 0.5 * size });
     if (wanted.includes('muzzle_smoke')) fx.play('muzzle_smoke', m.gx, m.gy, { ...opts, zBias: opts.zBias + 0.01, size: 0.6 + 0.6 * size, lift: 10 });
+  }
+
+  /** The picture of a gun's round in flight at a level, if the art has one. */
+  private roundArt(tower: string, level: number): ShotOrigin['round'] {
+    const def = this.art?.manifest.projectiles?.[tower];
+    if (!def?.levels.length) return undefined;
+    const lv = def.levels.includes(level) ? level : Math.max(...def.levels.filter((l) => l <= level), def.levels[0]!);
+    return { def, sheet: def.sheet, animation: def.animation.replace('<level>', String(lv)) };
   }
 
   /** Effects a gun shows when it fires (cached per gun id). */
@@ -392,7 +426,12 @@ export class BoardRenderer {
   /** A railgun slug: the rendered beam when the art has it, else a bright drawn line out to the end of its range. */
   onRail(towerId: number, x1: number, y1: number, x2: number, y2: number): void {
     const tower = this.game.towerById(towerId);
-    const m = this.towerViews.get(towerId)?.view.muzzle();
+    const view = this.towerViews.get(towerId)?.view;
+    if (tower && view) {
+      view.setAim(tower.aim);
+      view.fire(this.game.levelOf(tower).fireInterval);
+    }
+    const m = view?.muzzle();
     if (tower && m && this.shotFx(tower.def).includes('rail_beam') && this.effects?.has('rail_beam')) {
       const a = Math.atan2(y2 - y1, x2 - x1);
       const len = Math.hypot(x2 - m.gx, y2 - m.gy);
@@ -533,6 +572,7 @@ export class BoardRenderer {
         entry.view.setLevel(t.level + 1);
       }
       entry.view.setAim(t.aim);
+      entry.view.setFiring(t.firing);
       entry.view.update(dt);
     }
     for (const [id, entry] of this.towerViews) {
@@ -639,34 +679,87 @@ export class BoardRenderer {
     }
   }
 
+  /** Height flyers are drawn at, in tiles: the airship's own when its art is in. */
+  private flyHeight(): number {
+    const m = this.art?.manifest.enemies?.drone?.flightHeightM;
+    return m ? m / METRES_PER_TILE : FLY_HEIGHT;
+  }
+
+  /**
+   * Put a round's rendered picture at a point of its flight: the frame for its
+   * heading (bolts) or the next tumbling frame (stones). False while the art
+   * is not loaded, so the caller draws the stand-in.
+   */
+  private drawRound(id: number, o: ShotOrigin, gx: number, gy: number, h: number, heading: number): boolean {
+    const r = o.round;
+    if (!r || !this.art) return false;
+    const n = r.def.headings ? frameForAim(heading, r.def.frames) : Math.floor((o.age - o.delay) * r.def.fps) % r.def.frames;
+    const tex = this.art.sheetTexture(r.sheet, `${r.animation}_${String(n).padStart(2, '0')}`);
+    if (!tex) return false;
+    let sprite = this.roundSprites.get(id);
+    if (!sprite) {
+      sprite = new Sprite();
+      sprite.anchor.set(0.5);
+      sprite.scale.set(this.artScale());
+      this.rounds.addChild(sprite);
+      this.roundSprites.set(id, sprite);
+    }
+    sprite.texture = tex;
+    sprite.position.set(isoX(gx, gy), isoY(gx, gy, h));
+    return true;
+  }
+
   private drawShots(alpha: number, dt: number): void {
     const g = this.shots;
     g.clear();
     const live = new Set<number>();
     for (const p of this.game.projectiles) {
       live.add(p.id);
-      const o = this.shotOrigins.get(p.id) ?? { dx: 0, dy: 0, h: 0.3 };
-      const t = p.pt + (p.t - p.pt) * alpha;
+      const o = this.shotOrigins.get(p.id) ?? { dx: 0, dy: 0, h: 0.3, delay: 0, age: 0, t0: 0 };
+      const st = p.pt + (p.t - p.pt) * alpha;
+      // A round still in the sling: wait for the arm, then cover the rest of the flight in the time left.
+      o.age += dt;
+      if (o.age < o.delay) {
+        o.t0 = st;
+        continue;
+      }
+      const t = o.t0 > 0 ? Math.max(0, (st - o.t0) / (1 - o.t0)) : st;
       // The simulation fires from the gun's centre; visibly the round leaves the muzzle.
-      const gx = p.px + (p.x - p.px) * alpha + o.dx * (1 - t);
-      const gy = p.py + (p.y - p.py) * alpha + o.dy * (1 - t);
+      let gx: number;
+      let gy: number;
+      if (o.t0 > 0) {
+        gx = p.ox + (p.tx - p.ox) * t + o.dx * (1 - t);
+        gy = p.oy + (p.ty - p.oy) * t + o.dy * (1 - t);
+      } else {
+        gx = p.px + (p.x - p.px) * alpha + o.dx * (1 - t);
+        gy = p.py + (p.y - p.py) * alpha + o.dy * (1 - t);
+      }
       if (p.kind === 'shell') {
         const lob = Math.hypot(p.tx - p.ox, p.ty - p.oy) * 0.22;
         const h = o.h + (0 - o.h) * t + 4 * lob * t * (1 - t);
         g.ellipse(isoX(gx, gy), isoY(gx, gy), 3.5, 1.75).fill({ color: 0x000000, alpha: 0.22 });
-        g.circle(isoX(gx, gy), isoY(gx, gy, h), 2.6).fill(PALETTE.shell);
+        if (!this.drawRound(p.id, o, gx, gy, h, Math.atan2(p.ty - p.oy, p.tx - p.ox))) g.circle(isoX(gx, gy), isoY(gx, gy, h), 2.6).fill(PALETTE.shell);
       } else {
-        // Rounds at a drone climb to it.
-        const hit = this.game.enemies.find((e) => e.id === p.targetId)?.air ? FLY_HEIGHT : HIT_HEIGHT;
+        // Rounds at a flyer climb to it.
+        const hit = this.game.enemies.find((e) => e.id === p.targetId)?.air ? this.flyHeight() : HIT_HEIGHT;
         const h = o.h + (hit - o.h) * t;
         const x = isoX(gx, gy);
         const y = isoY(gx, gy, h);
         const dx = isoX(p.tx, p.ty) - x;
         const dy = isoY(p.tx, p.ty, hit) - y;
         const d = Math.hypot(dx, dy) || 1;
+        if (o.round) {
+          g.ellipse(isoX(gx, gy), isoY(gx, gy), 4, 2).fill({ color: 0x000000, alpha: 0.25 });
+          if (this.drawRound(p.id, o, gx, gy, h, Math.atan2(p.ty - gy, p.tx - gx))) continue;
+        }
         const len = Math.min(d, 16);
         g.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
       }
+    }
+    for (const [id, sprite] of this.roundSprites) {
+      if (live.has(id)) continue;
+      sprite.destroy();
+      this.roundSprites.delete(id);
     }
     for (const id of this.shotOrigins.keys()) if (!live.has(id)) this.shotOrigins.delete(id);
     if (this.game.mode === 'siege') this.drawSiege(g, dt);
