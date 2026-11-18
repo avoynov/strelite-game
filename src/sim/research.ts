@@ -1,8 +1,11 @@
+import { LAB_LEVELS } from './base';
 import type { TowerId } from './content';
 
 /**
  * Research tree: gold banked from battles buys guns, boosts and effects. Each
- * item costs gold and takes real time; one runs at a time. The state is plain
+ * item costs gold and takes real time. The laboratory in the player's base
+ * decides how many run at once, and the deeper items need it raised (it never
+ * makes research faster); while it lies destroyed, research stands still. The state is plain
  * data (saved by the app) and every function here is pure, so the timing and
  * effects are testable without a clock or storage.
  */
@@ -56,6 +59,8 @@ export interface ResearchItem {
   /** Items that must be finished first. */
   requires: readonly string[];
   effect: ItemEffect;
+  /** Laboratory level (1-based) it needs, when above 1. */
+  lab?: number;
 }
 
 const MIN = 60;
@@ -63,7 +68,15 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 type Effect = ResearchItem['effect'];
-const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => ({ id, branch, cost, seconds, requires, effect });
+/** Laboratory level (1-based) an item of this price needs: the deeper (dearer) the item, the higher the laboratory. */
+export function labFor(cost: number): number {
+  return cost < 1000 ? 1 : cost < 2000 ? 2 : cost < 3500 ? 3 : cost < 5500 ? 4 : 5;
+}
+
+const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => {
+  const lab = labFor(cost);
+  return { id, branch, cost, seconds, requires, effect, ...(lab > 1 ? { lab } : {}) };
+};
 const gun = (g: TowerId): Effect => ({ kind: 'gun', gun: g });
 const lvl = (g: TowerId, level: number): Effect => ({ kind: 'maxLevel', gun: g, level });
 const mod = (g: TowerId, mods: Partial<GunMods>): Effect => ({ kind: 'gunMod', gun: g, mods });
@@ -123,16 +136,32 @@ export function researchItem(id: string): ResearchItem | undefined {
   return BY_ID.get(id);
 }
 
-export interface ResearchState {
-  /** Banked gold, spent here only. */
-  gold: number;
-  done: string[];
-  /** The item in progress and when it finishes (ms since the epoch). */
-  active: { id: string; endsAt: number } | null;
+export interface ActiveItem {
+  id: string;
+  /** ms since the epoch. */
+  endsAt: number;
 }
 
+export interface ResearchState {
+  /** The treasury: banked gold, spent on research and on the base. */
+  gold: number;
+  done: string[];
+  /** Items in progress and when they finish. */
+  active: ActiveItem[];
+  /** When the laboratory was destroyed (clocks stand still), or null while it stands. */
+  pausedAt: number | null;
+}
+
+/** The laboratory as research sees it: its 0-based level, and whether it stands. */
+export interface LabInfo {
+  level: number;
+  standing: boolean;
+}
+
+export const FIRST_LAB: LabInfo = { level: 0, standing: true };
+
 export function newResearch(): ResearchState {
-  return { gold: 0, done: [], active: null };
+  return { gold: 0, done: [], active: [], pausedAt: null };
 }
 
 /** Repairs a state loaded from storage: unknown items and bad numbers are dropped. */
@@ -142,9 +171,16 @@ export function sanitize(raw: unknown): ResearchState {
   const r = raw as Partial<ResearchState>;
   if (typeof r.gold === 'number' && Number.isFinite(r.gold)) s.gold = Math.max(0, Math.floor(r.gold));
   if (Array.isArray(r.done)) s.done = [...new Set(r.done.filter((id): id is string => typeof id === 'string' && BY_ID.has(id)))];
-  if (r.active && typeof r.active.id === 'string' && BY_ID.has(r.active.id) && Number.isFinite(r.active.endsAt) && !s.done.includes(r.active.id)) {
-    s.active = { id: r.active.id, endsAt: r.active.endsAt };
+  // Older saves kept a single item.
+  const list: unknown[] = Array.isArray(r.active) ? r.active : r.active ? [r.active] : [];
+  for (const a of list) {
+    if (!a || typeof a !== 'object') continue;
+    const { id, endsAt } = a as Partial<ActiveItem>;
+    if (typeof id === 'string' && BY_ID.has(id) && typeof endsAt === 'number' && Number.isFinite(endsAt) && !s.done.includes(id) && !s.active.some((o) => o.id === id)) {
+      s.active.push({ id, endsAt });
+    }
   }
+  if (typeof r.pausedAt === 'number' && Number.isFinite(r.pausedAt)) s.pausedAt = r.pausedAt;
   return s;
 }
 
@@ -152,34 +188,65 @@ export type ResearchStatus = 'done' | 'active' | 'ready' | 'locked';
 
 export function status(s: ResearchState, id: string): ResearchStatus {
   if (s.done.includes(id)) return 'done';
-  if (s.active?.id === id) return 'active';
+  if (s.active.some((a) => a.id === id)) return 'active';
   const item = BY_ID.get(id);
   return item && item.requires.every((r) => s.done.includes(r)) ? 'ready' : 'locked';
 }
 
-export type StartError = 'busy' | 'locked' | 'noGold' | 'done';
+export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'labLevel';
+
+/** Items the laboratory runs at once. */
+export const labSlots = (lab: LabInfo): number => LAB_LEVELS[lab.level]?.slots ?? 1;
 
 /** Why `id` cannot be started now, or null when it can. */
-export function startError(s: ResearchState, id: string): StartError | null {
+export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LAB): StartError | null {
   const st = status(s, id);
   if (st === 'done' || st === 'active') return 'done';
   if (st === 'locked') return 'locked';
-  if (s.active) return 'busy';
-  if (s.gold < BY_ID.get(id)!.cost) return 'noGold';
+  const item = BY_ID.get(id)!;
+  if (!lab.standing) return 'noLab';
+  if ((item.lab ?? 1) > lab.level + 1) return 'labLevel';
+  if (s.active.length >= labSlots(lab)) return 'busy';
+  if (s.gold < item.cost) return 'noGold';
   return null;
 }
 
-/** Pay for `id` and start its clock. `speed` > 1 shortens every timer (for testing builds). */
-export function start(s: ResearchState, id: string, now: number, speed = 1): ResearchState {
-  if (startError(s, id)) return s;
-  const item = BY_ID.get(id)!;
-  return { ...s, gold: s.gold - item.cost, active: { id, endsAt: now + (item.seconds * 1000) / speed } };
+/** Real seconds an item takes; `speed` > 1 shortens every timer (testing builds). */
+export function itemSeconds(item: ResearchItem, speed = 1): number {
+  return item.seconds / speed;
 }
 
-/** Finish the running item if its time is up. */
+/** Pay for `id` and start its clock. */
+export function start(s: ResearchState, id: string, now: number, speed = 1, lab: LabInfo = FIRST_LAB): ResearchState {
+  if (startError(s, id, lab)) return s;
+  const item = BY_ID.get(id)!;
+  return { ...s, gold: s.gold - item.cost, active: [...s.active, { id, endsAt: now + itemSeconds(item, speed) * 1000 }] };
+}
+
+/** Finish the running items whose time is up (nothing moves while the laboratory lies destroyed). */
 export function settle(s: ResearchState, now: number): ResearchState {
-  if (!s.active || now < s.active.endsAt) return s;
-  return { ...s, done: [...s.done, s.active.id], active: null };
+  if (s.pausedAt !== null) return s;
+  const done = s.active.filter((a) => a.endsAt <= now);
+  if (!done.length) return s;
+  return { ...s, done: [...s.done, ...done.map((a) => a.id)], active: s.active.filter((a) => a.endsAt > now) };
+}
+
+/** The laboratory was destroyed: the clocks stop. */
+export function pause(s: ResearchState, now: number): ResearchState {
+  return s.pausedAt !== null ? s : { ...settle(s, now), pausedAt: now };
+}
+
+/** The laboratory stands again: the clocks go on from where they stopped. */
+export function resume(s: ResearchState, now: number): ResearchState {
+  if (s.pausedAt === null) return s;
+  const gap = Math.max(0, now - s.pausedAt);
+  return { ...s, pausedAt: null, active: s.active.map((a) => ({ ...a, endsAt: a.endsAt + gap })) };
+}
+
+/** Take gold out of the treasury (the base's spending); never below zero. */
+export function setGold(s: ResearchState, gold: number): ResearchState {
+  const g = Math.max(0, Math.floor(gold));
+  return g === s.gold ? s : { ...s, gold: g };
 }
 
 export function bank(s: ResearchState, gold: number): ResearchState {

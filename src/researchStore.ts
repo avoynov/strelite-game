@@ -1,5 +1,5 @@
 import { TOWER_IDS } from './sim/content';
-import { bank, newResearch, sanitize, settle, start, startError, upgrades, type ResearchState, type StartError, type Upgrades } from './sim/research';
+import { bank, FIRST_LAB, newResearch, pause, resume, sanitize, setGold, settle, start, startError, upgrades, type LabInfo, type ResearchState, type StartError, type Upgrades } from './sim/research';
 
 const KEY = 'strelite.research';
 
@@ -9,6 +9,8 @@ const KEY = 'strelite.research';
  */
 export class ResearchStore {
   private s: ResearchState;
+  /** The laboratory in the player's base: how many items, how fast, and whether research runs at all. */
+  private labInfo: LabInfo = FIRST_LAB;
   private readonly listeners = new Set<() => void>();
 
   constructor(
@@ -42,14 +44,31 @@ export class ResearchStore {
     return true;
   }
 
+  get lab(): LabInfo {
+    return this.labInfo;
+  }
+
+  /** The laboratory changed: destroyed stops the clocks, standing again starts them. */
+  setLab(lab: LabInfo, now = Date.now()): void {
+    this.labInfo = lab;
+    const next = lab.standing ? resume(this.s, now) : pause(this.s, now);
+    if (next !== this.s) this.set(next);
+  }
+
   start(id: string): StartError | null {
-    const err = startError(this.state, id);
-    if (!err) this.set(start(this.s, id, Date.now(), this.speed));
+    const err = startError(this.state, id, this.labInfo);
+    if (!err) this.set(start(this.s, id, Date.now(), this.speed, this.labInfo));
     return err;
   }
 
   bank(gold: number): void {
     if (gold > 0) this.set(bank(this.s, gold));
+  }
+
+  /** The base spends straight from the treasury. */
+  setGold(gold: number): void {
+    const next = setGold(this.s, gold);
+    if (next !== this.s) this.set(next);
   }
 
   onChange(fn: () => void): () => void {

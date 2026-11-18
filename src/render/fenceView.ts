@@ -37,7 +37,7 @@ export function fencePieces(mask: number): FencePiece[] {
   return [...back, 'post', ...front];
 }
 
-interface Look {
+export interface Look {
   top: number;
   left: number;
   right: number;
@@ -51,7 +51,7 @@ const LOOKS: readonly Look[] = [
 ];
 
 /** An upright box [x0, x1] × [y0, y1] from height z0 to z1 (tiles), seen from the camera's corner. */
-function box(g: Graphics, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, look: Look): void {
+export function box(g: Graphics, x0: number, y0: number, x1: number, y1: number, z0: number, z1: number, look: Look): void {
   const p = (x: number, y: number, z: number) => [isoX(x, y), isoY(x, y, z)] as const;
   const [lbx, lby] = p(x0, y1, z0);
   const [bbx, bby] = p(x1, y1, z0);

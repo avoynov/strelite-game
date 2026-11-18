@@ -17,6 +17,8 @@ export interface LevelsCallbacks {
   mode(): Mode;
   setMode(mode: Mode): void;
   play(level: number): void;
+  /** Siege mode: the next attack on the player's base. */
+  attack(): number;
   close(): void;
 }
 
@@ -84,6 +86,7 @@ export class LevelSelect {
   private render(): void {
     const won = this.cb.won();
     const current = this.cb.current();
+    const base = this.cb.mode() === 'siege';
     const pages = levelPages(won);
     this.page = Math.min(Math.max(0, this.page), pages - 1);
     const from = this.page * LEVELS_PER_PAGE + 1;
@@ -108,16 +111,18 @@ export class LevelSelect {
       <div class="lv-modes" role="tablist">
         ${MODES.map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
       </div>
-      ${pages > 1
+      ${base
+        ? `<div class="lv-base"><p>${t('levels.baseNote')}</p><button class="btn primary" data-lv="${this.cb.attack()}">${t('action.enterBase', { n: this.cb.attack() })}</button></div>`
+        : pages > 1
         ? `<nav class="lv-pages">
             <button class="chip" data-lv="prev" ${this.page === 0 ? 'disabled' : ''} aria-label="${t('levels.prev')}">‹</button>
             <span>${t('levels.range', { from, to })}</span>
             <button class="chip" data-lv="next" ${this.page >= pages - 1 ? 'disabled' : ''} aria-label="${t('levels.nextPage')}">›</button>
           </nav>`
         : ''}
-      <ol class="lv-list">${items.join('')}</ol>
+      ${base ? '' : `<ol class="lv-list">${items.join('')}</ol>`}
       <footer class="lab-foot">
-        <p class="lv-note">${t('levels.replay')}</p>
+        <p class="lv-note">${base ? '' : t('levels.replay')}</p>
         <button class="btn" data-lv="close">${t('action.back')}</button>
       </footer>`;
   }

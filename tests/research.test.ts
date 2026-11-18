@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
 import { Game } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { bank, battleTakings, newResearch, RESEARCH, sanitize, settle, start, startError, status, upgrades, victoryBonus } from '../src/sim/research';
+import { bank, battleTakings, newResearch, pause, RESEARCH, resume, sanitize, settle, start, startError, status, upgrades, victoryBonus } from '../src/sim/research';
 
 describe('research', () => {
   it('every item needs only items that exist, and deeper items cost more and take longer', () => {
@@ -30,13 +30,13 @@ describe('research', () => {
     expect(settle(s, 2 * 60 * 1000 - 1)).toBe(s);
     s = settle(s, 2 * 60 * 1000);
     expect(s.done).toEqual(['boost.gold1']);
-    expect(s.active).toBeNull();
+    expect(s.active).toEqual([]);
     expect(startError(s, 'boost.gold1')).toBe('done');
   });
 
   it('a faster clock shortens the timer', () => {
     const s = start(bank(newResearch(), 1000), 'boost.gold1', 0, 600);
-    expect(s.active?.endsAt).toBe(200);
+    expect(s.active[0]?.endsAt).toBe(200);
   });
 
   it('banks only the gold a battle earned and did not spend, plus a bonus for a win', () => {
@@ -61,7 +61,9 @@ describe('research', () => {
 
   it('repairs a broken save', () => {
     expect(sanitize(null)).toEqual(newResearch());
-    expect(sanitize({ gold: -5, done: ['gun.howitzer', 'nope', 'gun.howitzer'], active: { id: 'gun.howitzer', endsAt: 1 } })).toEqual({ gold: 0, done: ['gun.howitzer'], active: null });
+    expect(sanitize({ gold: -5, done: ['gun.howitzer', 'nope', 'gun.howitzer'], active: { id: 'gun.howitzer', endsAt: 1 } })).toEqual({ gold: 0, done: ['gun.howitzer'], active: [], pausedAt: null });
+    // An older save with one running item keeps it.
+    expect(sanitize({ gold: 1, done: [], active: { id: 'gun.howitzer', endsAt: 5 } }).active).toEqual([{ id: 'gun.howitzer', endsAt: 5 }]);
   });
 
   it('applies boosts and effects to the battle', () => {
@@ -76,5 +78,36 @@ describe('research', () => {
     expect(g.defOf('crossbow').pierce).toBe(0.25);
     expect(g.defOf('scorpion').passThrough).toBe(2);
     expect(g.defOf('greekfire').rampTime).toBe(1);
+  });
+
+  it('the laboratory: a higher one runs two at once (no faster) and opens the deeper items; destroyed, it stops the clocks', () => {
+    const rich = bank(newResearch(), 100000);
+    // Level 1: one at a time.
+    let s = start(rich, 'boost.gold1', 0);
+    expect(startError(s, 'fx.crossbow')).toBe('busy');
+    // Level 4 (index 3): two at once, at the same speed.
+    const lab4 = { level: 3, standing: true };
+    s = start(rich, 'boost.gold1', 0, 1, lab4);
+    expect(s.active[0]!.endsAt).toBe(2 * 60 * 1000);
+    expect(startError(s, 'fx.crossbow', lab4)).toBeNull();
+    s = start(s, 'fx.crossbow', 0, 1, lab4);
+    expect(s.active).toHaveLength(2);
+    expect(startError(s, 'lvl4.crossbow', lab4)).toBe('busy');
+    // Items that need a raised laboratory.
+    const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.trebuchet', 'gun.greekfire'] };
+    expect(startError(railReady, 'gun.railgun')).toBe('labLevel');
+    expect(startError(railReady, 'gun.railgun', { level: 2, standing: true })).toBe('labLevel');
+    expect(startError(railReady, 'gun.railgun', { level: 3, standing: true })).toBeNull();
+    // The deeper (dearer) the item, the higher the laboratory it needs.
+    for (const r of RESEARCH) for (const req of r.requires) expect(r.lab ?? 1, r.id).toBeGreaterThanOrEqual(RESEARCH.find((x) => x.id === req)!.lab ?? 1);
+    expect(RESEARCH.filter((r) => (r.lab ?? 1) === 5).length).toBeGreaterThan(0);
+    // Destroyed: nothing starts, nothing finishes; rebuilt, the clock goes on.
+    expect(startError(rich, 'boost.gold1', { level: 0, standing: false })).toBe('noLab');
+    let p = start(rich, 'boost.gold1', 0);
+    p = pause(p, 60_000);
+    expect(settle(p, 10 * 60_000)).toBe(p);
+    p = resume(p, 10 * 60_000);
+    expect(settle(p, 11 * 60_000 - 1).done).toEqual([]);
+    expect(settle(p, 11 * 60_000).done).toEqual(['boost.gold1']);
   });
 });

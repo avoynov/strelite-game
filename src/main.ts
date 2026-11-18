@@ -16,7 +16,11 @@ import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
 import { Lab, itemName } from './ui/lab';
 import { ResearchStore } from './researchStore';
+import { BaseStore } from './baseStore';
 import { battleTakings, researchItem } from './sim/research';
+import { BASE_MAP, baseTakings, HQ_LEVELS, LAB_LEVELS, lossSale } from './sim/base';
+import { attackStrength, defenceStrength } from './sim/strength';
+import type { BaseHud } from './ui/hud';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
 const MODE_KEY = 'strelite.mode';
@@ -88,11 +92,77 @@ async function start(): Promise<void> {
   document.getElementById('board')!.appendChild(app.canvas);
 
   const params = new URLSearchParams(location.search);
-  // `?fastresearch` runs research timers 600× faster, for trying the tree out.
-  const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
-  const newGame = (level: number) =>
-    new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
+  // `?fastresearch` runs research and building timers 600× faster, for trying things out.
+  const fast = params.has('fastresearch') ? 600 : 1;
+  const research = new ResearchStore(fast);
+  const baseStore = new BaseStore(fast);
+  /** The base spends straight from the treasury. */
+  const wallet = {
+    get gold() {
+      return research.state.gold;
+    },
+    set gold(v: number) {
+      research.setGold(v);
+    },
+  };
+  /** Research follows the laboratory in the base: its level, and whether it stands. */
+  const syncLab = () => {
+    const l = baseStore.state.lab;
+    research.setLab({ level: l?.level ?? 0, standing: l !== null });
+  };
+  baseStore.settle();
+  syncLab();
+  /** Once an attack on the base is over: its reward, and (base lost) what the remains sold for. */
+  let baseResult: { bonus: number; sale: number } | null = null;
+
+  const newGame = (level: number) => {
+    if (mode === 'siege') {
+      // The base: one fixed field; the attack number comes from the saved base.
+      baseStore.settle();
+      syncLab();
+      return new Game(buildArcMap(BASE_MAP, 'siege'), {
+        level: baseStore.state.attack,
+        upgrades: research.upgrades(),
+        base: {
+          get state() {
+            return baseStore.state;
+          },
+          wallet,
+          speed: fast,
+        },
+      });
+    }
+    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
+  };
   let game = newGame(startLevel());
+
+  /** Base mode: write what stands into the saved base (the building levels and jobs stay the store's). */
+  const saveBase = () => {
+    if (!game.base || game.phase === 'lost') return;
+    const snap = game.snapshot();
+    const st = baseStore.state;
+    // A building raised while this battle ran keeps its new level; damage taken carries over.
+    const carry = (hp: number, from: number, to: number) => Math.max(1, Math.min(to, hp + to - from));
+    const hq = { level: st.hq.level, hp: carry(snap.hq.hp, HQ_LEVELS[snap.hq.level]!.hp, HQ_LEVELS[st.hq.level]!.hp) };
+    const lab = st.lab && snap.lab ? { level: st.lab.level, hp: carry(snap.lab.hp, LAB_LEVELS[snap.lab.level]!.hp, LAB_LEVELS[st.lab.level]!.hp) } : st.lab;
+    baseStore.set({ ...st, hq, lab, guns: snap.guns, fences: snap.fences });
+  };
+  let enemyStrength = { attack: 0, value: 0 };
+  const baseHud: BaseHud = {
+    state: () => baseStore.state,
+    startJob: (what) => {
+      saveBase();
+      const err = baseStore.startJob(what, wallet);
+      if (!err) syncLab();
+      return err;
+    },
+    strength: () => {
+      if (enemyStrength.attack !== game.level) enemyStrength = { attack: game.level, value: attackStrength(game.level) };
+      return { you: defenceStrength(game), enemy: enemyStrength.value };
+    },
+    result: () => baseResult,
+    speed: fast,
+  };
   /** Gold this battle put in the treasury when it ended; null while it runs. */
   let banked: number | null = null;
   let board = new BoardRenderer(game, art, ART_URL);
@@ -116,8 +186,10 @@ async function start(): Promise<void> {
       const speed = loop.speed;
       saveNumber(levelKey(), level);
       board.destroy();
+      saveBase();
       game = newGame(level);
       banked = null;
+      baseResult = null;
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -126,12 +198,13 @@ async function start(): Promise<void> {
       armed = null;
       hud.setGame(game);
       relayout();
-      arsenal.open(); // a new level starts with the arsenal again
+      if (!game.base) arsenal.open(); // a new level starts with the arsenal again
     },
     openArsenal: () => arsenal.open(armed && armed !== 'fence' ? armed : undefined),
     openLab: () => lab.open(),
     openLevels: () => levels.open(),
     banked: () => banked ?? 0,
+    base: () => (game.base ? baseHud : null),
   });
 
   const levels = new LevelSelect({
@@ -143,26 +216,44 @@ async function start(): Promise<void> {
       saveString(MODE_KEY, m);
     },
     play: (level) => hud.restartAt(level),
+    attack: () => baseStore.state.attack,
     close: () => hud.update(),
   });
   document.body.appendChild(levels.el);
 
   const lab = new Lab({
     state: () => research.state,
+    lab: () => research.lab,
     start: (id) => research.start(id),
     speed: research.speed,
     close: () => hud.update(),
   });
   document.body.appendChild(lab.el);
   // A finished item is announced wherever the player is; it counts from the next battle.
+  let doneCount = research.state.done.length;
   window.setInterval(() => {
-    const was = research.state.active?.id;
-    if (was && research.tick()) {
-      const item = researchItem(was);
+    const done = research.state.done;
+    for (const id of done.slice(doneCount)) {
+      const item = researchItem(id);
       if (item) hud.showToast(t('toast.researchDone', { name: itemName(item) }));
+    }
+    if (done.length !== doneCount) lab.invalidate();
+    doneCount = done.length;
+    // The base is saved every second, and its builders finish on the clock.
+    saveBase();
+    const before = baseStore.state;
+    if (baseStore.settle()) {
+      const after = baseStore.state;
+      syncLab();
       lab.invalidate();
+      if (after.hq.level !== before.hq.level) hud.showToast(t('toast.jobDone', { name: t('building.hq'), n: after.hq.level + 1 }));
+      if (after.lab && after.lab.level !== before.lab?.level) hud.showToast(t('toast.jobDone', { name: t('building.lab'), n: after.lab.level + 1 }));
+      // In peace the base is rebuilt at once with the new levels; during an attack they count from the next.
+      if (game.base && game.phase === 'build' && game.wave === 0) hud.restartAt(game.level);
     }
   }, 1000);
+  document.addEventListener('visibilitychange', saveBase);
+  window.addEventListener('pagehide', saveBase);
 
   // Before the level: browse the guns; the one on screen when leaving is armed for placing.
   const arsenal = new Arsenal({
@@ -194,7 +285,10 @@ async function start(): Promise<void> {
     const cell = board.cellAt(sx, sy);
     const tower = cell ? game.towerAt(cell.x, cell.y) : undefined;
     const fence = cell ? game.fenceAt(cell.x, cell.y) : undefined;
-    if (tower) {
+    const building = cell ? game.buildingAt(cell.x, cell.y) : undefined;
+    if (building) {
+      selection = selection?.kind === 'building' && selection.what === building.kind ? null : { kind: 'building', what: building.kind };
+    } else if (tower) {
       selection = selection?.kind === 'tower' && selection.id === tower.id ? null : { kind: 'tower', id: tower.id };
     } else if (fence) {
       selection = selection?.kind === 'fence' && selection.id === fence.id ? null : { kind: 'fence', id: fence.id };
@@ -227,7 +321,7 @@ async function start(): Promise<void> {
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
-  if (!params.has('noarsenal')) arsenal.open();
+  if (!params.has('noarsenal') && !game.base) arsenal.open();
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
@@ -238,6 +332,7 @@ async function start(): Promise<void> {
         camera: () => board.camera,
         arm: (def: Armed | null) => (armed = def),
         research: () => research,
+        base: () => baseStore,
       },
     });
   }
@@ -257,17 +352,50 @@ async function start(): Promise<void> {
       else if (ev.type === 'strike') board.onStrike(ev.kind, ev.x1, ev.y1, ev.x2, ev.y2);
       else if (ev.type === 'wrecked') {
         board.onWrecked(ev.x, ev.y, ev.size);
-        if (!ev.fence) hud.showToast(t('toast.gunWrecked'));
+        if (ev.building === 'lab') {
+          // The laboratory is gone: research stops and its building job is lost.
+          const st = baseStore.state;
+          baseStore.set({ ...st, lab: null, jobs: st.jobs.filter((j) => j.what !== 'lab') });
+          syncLab();
+          lab.invalidate();
+          hud.showToast(t('toast.labDown'));
+        } else if (!ev.fence && !ev.building) hud.showToast(t('toast.gunWrecked'));
       }
+      else if (ev.type === 'built') {
+        const tw = game.towerById(ev.towerId);
+        if (tw) hud.showToast(ev.kind === 'build' ? t('toast.built', { name: t(`tower.${tw.def}`) }) : t('toast.jobDone', { name: t(`tower.${tw.def}`), n: tw.level + 1 }));
+      }
+      else if (ev.type === 'waveStart' && game.base && ev.wave === 1) saveBase();
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
     }
     // When the battle ends, the gold it earned and did not spend goes to the treasury (plus a win bonus).
     if (banked === null && (game.phase === 'won' || game.phase === 'lost')) {
-      banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
-      research.bank(banked);
-      if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
+      if (game.base) {
+        // The base: kills already went to the treasury; the defence reward comes on top.
+        const won = game.phase === 'won';
+        banked = baseTakings(game.goldEarned, won, game.level);
+        research.bank(banked);
+        if (won) {
+          saveBase();
+          baseStore.set({ ...baseStore.state, attack: baseStore.state.attack + 1 });
+          baseResult = { bonus: banked, sale: 0 };
+        } else {
+          // The headquarters fell: what still stands is sold off and the base starts over.
+          const snap = game.snapshot();
+          const sale = lossSale({ ...baseStore.state, guns: snap.guns, fences: snap.fences, lab: game.lab ? baseStore.state.lab : null });
+          research.bank(sale);
+          baseStore.reset();
+          syncLab();
+          baseResult = { bonus: banked, sale };
+        }
+      } else {
+        banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
+        research.bank(banked);
+        if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
+      }
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
+    if (selection?.kind === 'building' && !(selection.what === 'hq' ? game.hq : game.lab)) selection = null;
     if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);
     hud.update();
