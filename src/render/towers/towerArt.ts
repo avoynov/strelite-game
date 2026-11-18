@@ -192,6 +192,8 @@ export interface FenceArtDef {
   ny: string;
   heightM: number;
   thicknessM?: number;
+  /** Metres across each frame (its `sourceSize`), drawn at the towers' `pxPerMetre`. */
+  frameM?: number;
 }
 
 /** Frame name `${prefix}_NN`. */
