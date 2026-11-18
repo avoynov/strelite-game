@@ -1,6 +1,8 @@
 import { Assets, Container, Graphics, Matrix, Text, TilingSprite, type Texture } from 'pixi.js';
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
-import type { Fence, Game, Tower } from '../sim/game';
+import type { Building, Fence, Game, Tower } from '../sim/game';
+import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT } from '../sim/base';
+import { BuildingView } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
 import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
@@ -21,6 +23,8 @@ export type Selection =
   | { kind: 'tower'; id: number }
   /** Siege mode: an existing fence, by id. */
   | { kind: 'fence'; id: number }
+  /** Base mode: the headquarters or the laboratory. */
+  | { kind: 'building'; what: 'hq' | 'lab' }
   /** A gun about to be built, footprint's top-left cell at (cx, cy). */
   | { kind: 'place'; def: TowerId; cx: number; cy: number };
 
@@ -100,6 +104,7 @@ export class BoardRenderer {
   /** Siege mode: enemy shots at guns and fences, fading out. */
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
+  private readonly buildingViews = new Map<'hq' | 'lab', BuildingView>();
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
@@ -301,6 +306,8 @@ export class BoardRenderer {
         g.poly(diamond(x + 0.15, y + 0.15, x + 0.85, y + 0.85).map((v, i) => (i % 2 ? v - 6 : v))).fill({ color: PALETTE.rock });
       }
     }
+    // The base draws its headquarters as a building of its own.
+    if (this.game.hq) return;
     const goals = this.game.map.goals;
     const gx = Math.min(...goals.map((c) => c.x));
     const gy = Math.min(...goals.map((c) => c.y));
@@ -444,9 +451,42 @@ export class BoardRenderer {
     }
   }
 
-  /** Siege mode: health bars over damaged guns and fences, and enemy shots. */
+  /** Base mode: the headquarters and the laboratory (gone once destroyed). */
+  private syncBuildings(): void {
+    for (const b of [this.game.hq, this.game.lab] as const) {
+      if (!b) continue;
+      let view = this.buildingViews.get(b.kind);
+      if (!view) {
+        view = new BuildingView(b.kind, b.x, b.y);
+        this.objects.addChild(view.node);
+        this.buildingViews.set(b.kind, view);
+      }
+      view.update(b.level);
+    }
+    for (const [kind, view] of this.buildingViews) {
+      if ((kind === 'hq' ? this.game.hq : this.game.lab) !== null) continue;
+      view.destroy();
+      this.buildingViews.delete(kind);
+    }
+  }
+
+  /** Siege mode: health bars over damaged guns and fences, and enemy shots; in the base, the builders' progress. */
   private drawSiege(g: Graphics, dt: number): void {
-    const bar = (s: Tower | Fence, size: number, lift: number) => {
+    const now = Date.now();
+    const speed = this.game.base?.speed ?? 1;
+    for (const t of this.game.towers) {
+      const view = this.towerViews.get(t.id)?.view;
+      if (view) view.node.alpha = t.job?.kind === 'build' ? 0.45 : 1;
+      if (!t.job) continue;
+      const total = (gunJobSeconds(t.def, t.job.kind === 'build' ? 0 : t.level + 1) * 1000) / speed;
+      const f = Math.min(1, Math.max(0, 1 - (t.job.endsAt - now) / total));
+      const w = Math.max(26, 14 * t.size);
+      const x = isoX(t.x, t.y);
+      const y = isoY(t.x, t.y, 0.35 * t.size + 0.4) - 16;
+      g.rect(x - w / 2 - 1, y - 1, w + 2, 6).fill({ color: 0x000000, alpha: 0.6 });
+      g.rect(x - w / 2, y, w * f, 4).fill(0x5fb4ff);
+    }
+    const bar = (s: Tower | Fence | Building, size: number, lift: number) => {
       if (s.hp >= s.maxHp) return;
       const f = Math.max(0, s.hp / s.maxHp);
       const w = Math.max(22, 14 * size);
@@ -457,6 +497,8 @@ export class BoardRenderer {
     };
     for (const t of this.game.towers) bar(t, t.size, 0.35 * t.size + 0.4);
     for (const f of this.game.fences) bar(f, 1, FENCE_HEIGHT[Math.min(f.level, 2)]! * 1.2 + 0.1);
+    if (this.game.hq) bar(this.game.hq, 3, 1.4 + 0.18 * this.game.hq.level);
+    if (this.game.lab) bar(this.game.lab, 3, 1.1);
     this.strikes = this.strikes.filter((s) => {
       s.age += dt;
       const k = s.age / STRIKE_LIFE;
@@ -530,7 +572,7 @@ export class BoardRenderer {
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0, game.hq?.level, !!game.lab]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
@@ -544,10 +586,23 @@ export class BoardRenderer {
     if (selection?.kind === 'place' || (armed && !selection)) {
       for (let y = 0; y < grid.rows; y++) {
         for (let x = 0; x < grid.cols; x++) {
-          if (grid.get(x, y) !== 'build' || game.towerAt(x, y) || game.fenceAt(x, y)) continue;
+          if (grid.get(x, y) !== 'build' || game.towerAt(x, y) || game.fenceAt(x, y) || game.buildingAt(x, y) || !game.inArea(x, y, 1)) continue;
           o.poly(diamond(x, y, x + 1, y + 1)).stroke({ width: 1, color: PALETTE.gridLine, alpha: 0.22 });
         }
       }
+    }
+
+    // The base: the ring the headquarters lets the player build inside.
+    if (game.hq && (selection?.kind === 'place' || armed || selection?.kind === 'building')) {
+      const r = HQ_LEVELS[game.hq.level]!.radius;
+      const hx = HQ_SPOT[0] + BUILDING_SIZE / 2;
+      const hy = HQ_SPOT[1] + BUILDING_SIZE / 2;
+      const pts: number[] = [];
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        pts.push(isoX(hx + r * Math.cos(a), hy + r * Math.sin(a)), isoY(hx + r * Math.cos(a), hy + r * Math.sin(a)));
+      }
+      o.poly(pts).stroke({ width: 2, color: 0xf2c94c, alpha: 0.7 });
     }
 
     const range = (gx: number, gy: number, radius: number, minRadius = 0) => {
@@ -558,6 +613,11 @@ export class BoardRenderer {
         o.ellipse(isoX(gx, gy), isoY(gx, gy), mr, mr / 2).stroke({ width: 1.5, color: PALETTE.invalid, alpha: 0.5 });
       }
     };
+
+    if (selection?.kind === 'building') {
+      const b = selection.what === 'hq' ? game.hq : game.lab;
+      if (b) o.poly(diamond(b.cx, b.cy, b.cx + b.size, b.cy + b.size)).stroke({ width: 2.5, color: PALETTE.range, alpha: 0.9 });
+    }
 
     if (selection?.kind === 'place') {
       const def = TOWERS[selection.def];
@@ -699,6 +759,7 @@ export class BoardRenderer {
     this.applyCamera();
     this.syncTowers(dtSeconds);
     this.syncFences();
+    if (this.game.hq) this.syncBuildings();
     this.syncEnemies(alpha);
     this.drawOverlay(selection, armed);
     this.drawShots(alpha, dtSeconds);

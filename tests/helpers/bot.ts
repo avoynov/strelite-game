@@ -165,8 +165,8 @@ export function spend(g: Game, only?: readonly TowerId[]): void {
     }
     break;
   }
-  // Money left over that buys no gun goes into stronger walls.
-  if (siege && g.fences.length) fortify(g, true);
+  // Money left over that buys no gun goes into stronger walls (in the base: not while a builder is only busy).
+  if (siege && g.fences.length && g.freeBuilders() > 0) fortify(g, true);
 }
 
 export function run(g: Game, seconds: number): void {

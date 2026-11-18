@@ -1,5 +1,5 @@
 import { t, type MessageKey } from '../i18n';
-import { RESEARCH, researchItem, status, startError, type Branch, type ResearchItem, type ResearchState, type StartError } from '../sim/research';
+import { itemSeconds, labSlots, RESEARCH, researchItem, status, startError, type Branch, type LabInfo, type ResearchItem, type ResearchState, type StartError } from '../sim/research';
 
 /**
  * "Лаборатория": the research tree. Three columns (guns, boosts, effects), each
@@ -8,6 +8,8 @@ import { RESEARCH, researchItem, status, startError, type Branch, type ResearchI
 
 export interface LabCallbacks {
   state(): ResearchState;
+  /** The laboratory in the base: its level and whether it stands. */
+  lab(): LabInfo;
   start(id: string): StartError | null;
   /** Timers run this many times faster than listed (testing builds). */
   speed: number;
@@ -15,7 +17,7 @@ export interface LabCallbacks {
 }
 
 const BRANCHES: Branch[] = ['guns', 'levels', 'boosts', 'effects'];
-const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done' };
+const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', labLevel: 'lab.labLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
 
@@ -150,16 +152,22 @@ export class Lab {
   }
 
   private activeHtml(s: ResearchState): string {
-    if (!s.active) return `<p class="lab-idle">${t('lab.idle')}</p>`;
-    const item = researchItem(s.active.id)!;
-    const left = (s.active.endsAt - Date.now()) / 1000;
-    const total = item.seconds / this.cb.speed;
-    const done = Math.min(1, Math.max(0, 1 - left / total));
-    return `
+    const lab = this.cb.lab();
+    const head = `<p class="lab-idle">${t('lab.building', { n: lab.level + 1, slots: labSlots(lab) })}</p>`;
+    if (!lab.standing) return `<p class="lab-idle lab-down">${t('lab.destroyed')}</p>`;
+    if (!s.active.length) return `${head}<p class="lab-idle">${t('lab.idle')}</p>`;
+    const now = s.pausedAt ?? Date.now();
+    return head + s.active.map((a) => {
+      const item = researchItem(a.id)!;
+      const left = (a.endsAt - now) / 1000;
+      const total = itemSeconds(item, lab, this.cb.speed);
+      const done = Math.min(1, Math.max(0, 1 - left / total));
+      return `
       <div class="lab-active">
         <div class="lab-active-row"><span>${t('lab.inProgress')}: <b>${esc(itemName(item))}</b></span><span class="lab-left">${formatDuration(left)}</span></div>
         <div class="lab-bar"><i style="width:${(done * 100).toFixed(1)}%"></i></div>
       </div>`;
+    }).join('');
   }
 
   private branchHtml(branch: Branch, s: ResearchState): string {
@@ -173,25 +181,29 @@ export class Lab {
 
   private itemHtml(item: ResearchItem, s: ResearchState): string {
     const st = status(s, item.id);
-    const err = startError(s, item.id);
+    const lab = this.cb.lab();
+    const err = startError(s, item.id, lab);
+    const seconds = itemSeconds(item, lab, this.cb.speed);
     let foot: string;
     if (st === 'done') foot = `<span class="lab-tag done">${t('lab.done')}</span>`;
     else if (st === 'active') foot = `<span class="lab-tag active">${t('lab.inProgress')}</span>`;
     else if (st === 'locked') {
       const need = item.requires.filter((r) => !s.done.includes(r)).map((r) => itemName(researchItem(r)!));
       foot = `<span class="lab-need">${esc(t('lab.requires', { list: need.join(', ') }))}</span>`;
+    } else if (err === 'labLevel') {
+      foot = `<span class="lab-need">${esc(t('lab.needsLab', { n: item.lab ?? 1 }))}</span>`;
     } else {
       foot = `<button class="btn primary lab-go" data-lab="start" data-id="${item.id}" ${err ? 'aria-disabled="true"' : ''}>
         ${t('lab.start')}
         <span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>
-        <span class="lab-time">${formatDuration(item.seconds / this.cb.speed)}</span>
+        <span class="lab-time">${formatDuration(seconds)}</span>
       </button>`;
     }
     return `
       <li class="lab-item ${st}">
         <div class="lab-name">${esc(itemName(item))}</div>
         <div class="lab-desc">${esc(itemEffect(item))}</div>
-        <div class="lab-foot-row">${foot}${st === 'locked' ? `<span class="lab-meta"><span class="ico ico-gold"></span>${item.cost} · ${formatDuration(item.seconds / this.cb.speed)}</span>` : ''}</div>
+        <div class="lab-foot-row">${foot}${st === 'locked' || err === 'labLevel' ? `<span class="lab-meta"><span class="ico ico-gold"></span>${item.cost} · ${formatDuration(seconds)}</span>` : ''}</div>
       </li>`;
   }
 }

@@ -484,3 +484,14 @@ html, body {
 .lv-mode b { font: 600 clamp(12px, 3.4vw, 15px)/1.1 var(--display); letter-spacing: 0.02em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lv-mode span { font-size: 12px; color: var(--muted); }
 .lv-mode.on { border-color: var(--brass); background: rgba(211, 154, 63, 0.14); box-shadow: inset 0 0 0 1px var(--brass); }
+
+/* ---- the player's base ---- */
+.ico-hammer { border-radius: 3px; background: linear-gradient(135deg, transparent 42%, #8a6420 42%, #8a6420 58%, transparent 58%), linear-gradient(45deg, transparent 20%, #c9d2da 20%, #c9d2da 48%, transparent 48%); }
+.base-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.base-row .strength { font-size: 13px; color: #f0b3a6; font-weight: 600; }
+.base-row .strength.ahead { color: #a8e09b; }
+.base-row .chip { height: 30px; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
+.stats.job { color: #8cc8ff; }
+.lab-down { color: #f0b3a6; }
+.lv-base { padding: 18px 4px; display: grid; gap: 14px; justify-items: center; text-align: center; }
+.lv-base p { margin: 0; color: var(--muted); max-width: 32ch; }

@@ -5,6 +5,24 @@ import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
 import { arcHalfWidth, arcHpFactor, levelWaves, siegeHpFactor } from './levels';
+import {
+  BASE_RULES,
+  BUILDING_SIZE,
+  buildingValue,
+  builders,
+  gunJobSeconds,
+  HQ_BASE_VALUE,
+  HQ_LEVELS,
+  HQ_SPOT,
+  inBuildArea,
+  LAB_BASE_VALUE,
+  LAB_LEVELS,
+  LAB_SPOT,
+  baseHpFactor,
+  repairCost,
+  type BaseState,
+  type GunJob,
+} from './base';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
@@ -70,6 +88,37 @@ export interface Tower {
   hp: number;
   maxHp: number;
   stats: TowerStats;
+  /** Base mode: a builder at work on it (a gun being built does not fire). */
+  job?: GunJob;
+}
+
+/** Base mode: the headquarters (the goal) or the laboratory. */
+export interface Building {
+  id: number;
+  kind: 'hq' | 'lab';
+  cx: number;
+  cy: number;
+  size: number;
+  x: number;
+  y: number;
+  /** 0-based. */
+  level: number;
+  hp: number;
+  maxHp: number;
+}
+
+/** Base mode: where the gold comes from and goes to (the treasury). */
+export interface Wallet {
+  gold: number;
+}
+
+export interface BaseSetup {
+  state: BaseState;
+  wallet: Wallet;
+  /** Wall clock in ms (builders work in real time). */
+  now?: () => number;
+  /** Building timers run this many times faster (testing builds). */
+  speed?: number;
 }
 
 /** Siege mode: one tile of fence. Level 0 wood, 1 stone, 2 steel. */
@@ -87,9 +136,10 @@ export interface Fence {
   invested: number;
 }
 
-/** Something siege enemies can stop at and break: a gun or a fence. */
-export type Structure = Tower | Fence;
+/** Something siege enemies can stop at and break: a gun, a fence or a building of the base. */
+export type Structure = Tower | Fence | Building;
 const isFence = (s: Structure): s is Fence => 'kind' in s && s.kind === 'fence';
+const isBuilding = (s: Structure): s is Building => 'kind' in s && (s.kind === 'hq' || s.kind === 'lab');
 
 export interface Projectile {
   id: number;
@@ -131,14 +181,16 @@ export type GameEvent =
   | { type: 'leak'; enemyId: number }
   /** Siege mode: a unit shot at or rammed a gun or fence. */
   | { type: 'strike'; kind: Assault['kind']; enemyId: number; x1: number; y1: number; x2: number; y2: number }
-  /** Siege mode: a gun or fence was destroyed. */
-  | { type: 'wrecked'; fence: boolean; x: number; y: number; size: number }
+  /** Siege mode: a gun, fence or building was destroyed. */
+  | { type: 'wrecked'; fence: boolean; building?: 'hq' | 'lab'; x: number; y: number; size: number }
+  /** Base mode: a builder finished a gun or raised it. */
+  | { type: 'built'; towerId: number; kind: GunJob['kind'] }
   | { type: 'waveStart'; wave: number }
   | { type: 'waveClear'; wave: number; bonus: number }
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' | 'noBuilder' };
 
 export interface GameOptions {
   /** Map level, 1-based: decides which guns can be built and which enemies attack. */
@@ -149,6 +201,8 @@ export interface GameOptions {
   waves?: (n: number, level: number) => WaveSpec;
   /** Finished research: which guns can be built, and the boosts. Without it every gun is open and nothing is boosted. */
   upgrades?: Upgrades;
+  /** Siege mode with the player's base: what stands, the treasury, the builders. */
+  base?: BaseSetup;
 }
 
 const ARRIVE_EPS = 1e-6;
@@ -199,7 +253,6 @@ export function startMoney(level: number): number {
 export class Game {
   /** Distance field to the goal; rebuilt in arc mode whenever a gun is built or sold. */
   flow: FlowField;
-  money: number;
   lives = ECONOMY.startLives;
   /** Number of the current or last started wave, 0 before the first. */
   wave = 0;
@@ -214,6 +267,11 @@ export class Game {
   towers: Tower[] = [];
   /** Siege mode only. */
   fences: Fence[] = [];
+  /** Base mode: the headquarters (goal) and the laboratory (null once destroyed). */
+  hq: Building | null = null;
+  lab: Building | null = null;
+  /** Base mode, or null. */
+  readonly base: BaseSetup | null;
   projectiles: Projectile[] = [];
 
   private nextId = 1;
@@ -238,6 +296,8 @@ export class Game {
   private readonly ground: FlowField | null;
   /** Siege mode: cells enemies come in from; nothing can be built there. */
   private readonly entry: Set<number>;
+  /** Gold outside base mode. */
+  private purse = 0;
 
   constructor(
     readonly map: BuiltMap,
@@ -246,7 +306,8 @@ export class Game {
     this.level = Math.max(1, Math.floor(opts.level ?? 1));
     this.totalWaves = opts.totalWaves ?? levelWaves(this.level);
     this.upgrades = opts.upgrades ?? null;
-    this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
+    this.base = map.mode === 'siege' ? (opts.base ?? null) : null;
+    if (!this.base) this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
     this.waves = opts.waves ?? waveSpec;
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
@@ -254,7 +315,133 @@ export class Game {
     const { grid } = map;
     this.ground = map.mode === 'siege' ? new FlowField(grid, map.goals, (x, y) => grid.get(x, y) !== 'blocked') : null;
     this.entry = new Set(map.mode === 'siege' ? (map.arcSpawns ?? []).map((c) => grid.index(c.x, c.y)) : []);
+    if (this.base) this.loadBase(this.base.state);
     this.flow = this.makeFlow(this.occupied);
+  }
+
+  /** Gold to spend: the battle's own, or in base mode the treasury. */
+  get money(): number {
+    return this.base ? this.base.wallet.gold : this.purse;
+  }
+
+  set money(v: number) {
+    if (this.base) this.base.wallet.gold = v;
+    else this.purse = v;
+  }
+
+  private now(): number {
+    return this.base?.now?.() ?? Date.now();
+  }
+
+  /** Base mode: put the saved base on the field. */
+  private loadBase(b: BaseState): void {
+    const [hx, hy] = HQ_SPOT;
+    const hqMax = HQ_LEVELS[b.hq.level]!.hp;
+    this.hq = { id: this.nextId++, kind: 'hq', cx: hx, cy: hy, size: BUILDING_SIZE, x: hx + 1, y: hy + 1, level: b.hq.level, hp: Math.min(b.hq.hp, hqMax), maxHp: hqMax };
+    if (b.lab) {
+      const [lx, ly] = LAB_SPOT;
+      const max = LAB_LEVELS[b.lab.level]!.hp;
+      this.lab = { id: this.nextId++, kind: 'lab', cx: lx, cy: ly, size: BUILDING_SIZE, x: lx + 1, y: ly + 1, level: b.lab.level, hp: Math.min(b.lab.hp, max), maxHp: max };
+      for (let y = ly; y < ly + BUILDING_SIZE; y++) for (let x = lx; x < lx + BUILDING_SIZE; x++) this.occupied[this.map.grid.index(x, y)] = this.lab.id;
+    }
+    for (const g of b.guns) {
+      if (this.placementError(g.def, g.cx, g.cy, true)) continue;
+      const t = this.newTower(g.def, g.cx, g.cy, g.level, g.invested);
+      t.hp = Math.min(g.hp, t.maxHp);
+      if (g.job) t.job = { ...g.job };
+    }
+    for (const f of b.fences) {
+      if (this.fenceError(f.cx, f.cy, true)) continue;
+      const fence = this.newFence(f.cx, f.cy, f.level, f.invested);
+      fence.hp = Math.min(f.hp, fence.maxHp);
+    }
+    this.settleJobs();
+  }
+
+  /** Base mode: the base as it stands now, to be saved (attack number and building jobs are the caller's). */
+  snapshot(): Pick<BaseState, 'hq' | 'lab' | 'guns' | 'fences'> {
+    return {
+      hq: { level: this.hq?.level ?? 0, hp: Math.max(0, this.hq?.hp ?? 0) },
+      lab: this.lab ? { level: this.lab.level, hp: this.lab.hp } : null,
+      guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: t.hp, invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}) })),
+      fences: this.fences.map((f) => ({ cx: f.cx, cy: f.cy, level: f.level, hp: f.hp, invested: f.invested })),
+    };
+  }
+
+  /** Base mode: builders free now (the headquarters' and laboratory's jobs count, as do the guns'). */
+  freeBuilders(): number {
+    if (!this.base) return Infinity;
+    const st = this.base.state;
+    const total = builders({ ...st, lab: this.lab ? { level: this.lab.level, hp: this.lab.hp } : null });
+    return total - st.jobs.length - this.towers.filter((t) => t.job).length;
+  }
+
+  /** Base mode: finish the guns whose builders are done. */
+  private settleJobs(): void {
+    const now = this.now();
+    for (const t of this.towers) {
+      if (!t.job || t.job.endsAt > now) continue;
+      const kind = t.job.kind;
+      delete t.job;
+      if (kind === 'upgrade') this.raise(t);
+      this.events.push({ type: 'built', towerId: t.id, kind });
+    }
+  }
+
+  /** Base mode: may footprints go here (the headquarters' level sets how far out)? */
+  inArea(cx: number, cy: number, size: number): boolean {
+    return !this.base || !this.hq || inBuildArea(this.hq.level, cx, cy, size);
+  }
+
+  /** Base mode: the building on a cell (the laboratory or the headquarters). */
+  buildingAt(cx: number, cy: number): Building | undefined {
+    for (const b of [this.hq, this.lab]) if (b && cx >= b.cx && cx < b.cx + b.size && cy >= b.cy && cy < b.cy + b.size) return b;
+    return undefined;
+  }
+
+  /** Gold a part cost: guns and fences what was paid, buildings the price of their levels. */
+  private worth(s: Structure): number {
+    if (isFence(s)) return s.invested;
+    if (isBuilding(s)) return s.kind === 'hq' ? buildingValue(HQ_LEVELS, s.level, HQ_BASE_VALUE) : buildingValue(LAB_LEVELS, s.level, LAB_BASE_VALUE);
+    return s.stats.invested;
+  }
+
+  /** Base mode: gold to mend a part fully. */
+  repairCost(s: Structure): number {
+    return this.base ? repairCost(s.hp, s.maxHp, this.worth(s)) : 0;
+  }
+
+  private parts(): Structure[] {
+    const out: Structure[] = [...this.towers, ...this.fences];
+    if (this.hq) out.push(this.hq);
+    if (this.lab) out.push(this.lab);
+    return out;
+  }
+
+  /** Base mode: gold to mend everything. */
+  repairAllCost(): number {
+    return this.parts().reduce((sum, s) => sum + this.repairCost(s), 0);
+  }
+
+  /** Base mode: mend one part at once. */
+  repair(s: Structure): ActionResult {
+    if (!this.base || this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    const cost = this.repairCost(s);
+    if (cost <= 0) return { ok: false, reason: 'maxLevel' };
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    s.hp = s.maxHp;
+    return { ok: true };
+  }
+
+  /** Base mode: mend everything that the treasury can pay for: the headquarters first, then the cheapest. */
+  repairAll(): ActionResult {
+    const rank = (s: Structure) => (s === this.hq ? -1e9 : this.repairCost(s));
+    const broken = this.parts().filter((s) => this.repairCost(s) > 0).sort((a, b) => rank(a) - rank(b));
+    if (!broken.length) return { ok: false, reason: 'maxLevel' };
+    let any = false;
+    for (const s of broken) if (this.repair(s).ok) any = true;
+    return any ? { ok: true } : { ok: false, reason: 'noMoney' };
   }
 
   // ---- queries -------------------------------------------------------------
@@ -301,6 +488,16 @@ export class Game {
     return this.fences.find((f) => f.id === id);
   }
 
+  /** Cost to put up a wooden fence. */
+  fenceCost(): number {
+    return FENCE_LEVELS[0].cost;
+  }
+
+  /** Cost to build a gun (level 1). */
+  buildCost(def: TowerId): number {
+    return TOWERS[def].levels[0].cost;
+  }
+
   /** Cost to raise a fence to its next level, or null at steel. */
   fenceUpgradeCost(f: Fence): number | null {
     return FENCE_LEVELS[f.level + 1]?.cost ?? null;
@@ -311,9 +508,10 @@ export class Game {
   }
 
   /** Why a fence cannot go on this cell, or null when it can. */
-  fenceError(cx: number, cy: number): 'notBuildable' | 'occupied' | null {
+  fenceError(cx: number, cy: number, loading = false): 'notBuildable' | 'occupied' | null {
     const { grid } = this.map;
     if (this.mode !== 'siege' || grid.get(cx, cy) !== 'build' || this.entry.has(grid.index(cx, cy))) return 'notBuildable';
+    if (!loading && !this.inArea(cx, cy, 1)) return 'notBuildable';
     if (this.occupied[grid.index(cx, cy)] || this.fenceGrid[grid.index(cx, cy)] || this.walkerOn(cx, cy, 1)) return 'occupied';
     return null;
   }
@@ -367,9 +565,15 @@ export class Game {
     return TOWERS[tower.def].levels[tower.level + 1]?.cost ?? null;
   }
 
-  /** Whether research allows raising the gun to its next level. */
+  /** Highest gun level (1-based) research and, in base mode, the headquarters allow. */
+  maxGunLevel(def: TowerId): number {
+    const research = this.upgrades ? (this.upgrades.maxLevel[def] ?? Infinity) : Infinity;
+    return Math.min(research, this.hq ? HQ_LEVELS[this.hq.level]!.maxGun : Infinity);
+  }
+
+  /** Whether research (and the headquarters) allow raising the gun to its next level. */
   canRaise(tower: Tower): boolean {
-    return !this.upgrades || tower.level + 2 <= (this.upgrades.maxLevel[tower.def] ?? Infinity);
+    return tower.level + 2 <= this.maxGunLevel(tower.def);
   }
 
   sellValue(tower: Tower): number {
@@ -377,9 +581,10 @@ export class Game {
   }
 
   /** Why a gun cannot stand with its footprint's top-left cell at (cx, cy), or null when it can. */
-  placementError(def: TowerId, cx: number, cy: number): 'notBuildable' | 'occupied' | null {
+  placementError(def: TowerId, cx: number, cy: number, loading = false): 'notBuildable' | 'occupied' | null {
     const { grid } = this.map;
     const size = TOWERS[def].size;
+    if (!loading && !this.inArea(cx, cy, size)) return 'notBuildable';
     let occupied = false;
     for (let y = cy; y < cy + size; y++) {
       for (let x = cx; x < cx + size; x++) {
@@ -428,11 +633,20 @@ export class Game {
       if (block) return { ok: false, reason: block };
     }
     if (this.mode === 'siege' && this.walkerOn(cx, cy, d.size)) return { ok: false, reason: 'occupied' };
+    if (this.freeBuilders() <= 0) return { ok: false, reason: 'noBuilder' };
     this.money -= cost;
+    const tower = this.newTower(def, cx, cy, 0, cost);
+    if (this.base) tower.job = { kind: 'build', endsAt: this.now() + (gunJobSeconds(def, 0) * 1000) / (this.base.speed ?? 1) };
+    this.rebuildFlow();
+    return { ok: true };
+  }
+
+  private newTower(def: TowerId, cx: number, cy: number, level: number, invested: number): Tower {
+    const d = TOWERS[def];
     const tower: Tower = {
       id: this.nextId++,
       def,
-      level: 0,
+      level,
       cx,
       cy,
       size: d.size,
@@ -443,14 +657,21 @@ export class Game {
       targetId: 0,
       heat: 0,
       firing: false,
-      hp: gunHp(d.size, 0),
-      maxHp: gunHp(d.size, 0),
-      stats: { dealt: 0, wasted: 0, kills: 0, invested: cost },
+      hp: gunHp(d.size, level),
+      maxHp: gunHp(d.size, level),
+      stats: { dealt: 0, wasted: 0, kills: 0, invested },
     };
     this.towers.push(tower);
     this.markFootprint(tower, tower.id);
-    this.rebuildFlow();
-    return { ok: true };
+    return tower;
+  }
+
+  private newFence(cx: number, cy: number, level: number, invested: number): Fence {
+    const { hp } = FENCE_LEVELS[level]!;
+    const f: Fence = { id: this.nextId++, kind: 'fence', cx, cy, x: cx + 0.5, y: cy + 0.5, level, hp, maxHp: hp, invested };
+    this.fences.push(f);
+    this.fenceGrid[this.map.grid.index(cx, cy)] = f.id;
+    return f;
   }
 
   upgrade(towerId: number): ActionResult {
@@ -459,15 +680,23 @@ export class Game {
     const cost = this.upgradeCost(t);
     if (cost === null) return { ok: false, reason: 'maxLevel' };
     if (!this.canRaise(t)) return { ok: false, reason: 'levelLocked' };
+    if (t.job) return { ok: false, reason: 'busy' };
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    if (this.freeBuilders() <= 0) return { ok: false, reason: 'noBuilder' };
     this.money -= cost;
-    t.level++;
     t.stats.invested += cost;
+    // In the base a builder raises it in real time; it keeps firing at its old level meanwhile.
+    if (this.base) t.job = { kind: 'upgrade', endsAt: this.now() + (gunJobSeconds(t.def, t.level + 1) * 1000) / (this.base.speed ?? 1) };
+    else this.raise(t);
+    return { ok: true };
+  }
+
+  private raise(t: Tower): void {
+    t.level = Math.min(t.level + 1, TOWERS[t.def].levels.length - 1);
     // A bigger gun is sturdier by the difference; damage taken stays.
     const maxHp = gunHp(t.size, t.level);
     t.hp += maxHp - t.maxHp;
     t.maxHp = maxHp;
-    return { ok: true };
   }
 
   sell(towerId: number): ActionResult {
@@ -485,12 +714,10 @@ export class Game {
     if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
     const err = this.fenceError(cx, cy);
     if (err) return { ok: false, reason: err };
-    const { cost, hp } = FENCE_LEVELS[0];
+    const { cost } = FENCE_LEVELS[0];
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
     this.money -= cost;
-    const f: Fence = { id: this.nextId++, kind: 'fence', cx, cy, x: cx + 0.5, y: cy + 0.5, level: 0, hp, maxHp: hp, invested: cost };
-    this.fences.push(f);
-    this.fenceGrid[this.map.grid.index(cx, cy)] = f.id;
+    this.newFence(cx, cy, 0, cost);
     this.rebuildFlow();
     return { ok: true };
   }
@@ -535,6 +762,7 @@ export class Game {
   step(dt: number): void {
     if (this.phase === 'won' || this.phase === 'lost') return;
     this.time += dt;
+    if (this.base) this.settleJobs();
     for (const e of this.enemies) {
       e.px = e.x;
       e.py = e.y;
@@ -606,6 +834,7 @@ export class Game {
   /** Siege mode: the gun or fence on a cell, by index. */
   private structureAt(i: number): Structure | undefined {
     const tid = this.occupied[i];
+    if (tid && this.lab?.id === tid) return this.lab;
     if (tid) return this.towerById(tid);
     const fid = this.fenceGrid[i];
     return fid ? this.fenceById(fid) : undefined;
@@ -678,7 +907,8 @@ export class Game {
       st.timer -= dt;
       while (st.left > 0 && st.timer <= 0) {
         const s = this.spawnCell();
-        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * (this.mode === 'siege' ? siegeHpFactor(this.level) : 1));
+        const siege = this.base ? baseHpFactor(this.level) : this.mode === 'siege' ? siegeHpFactor(this.level) : 1;
+        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * siege);
         this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
@@ -846,7 +1076,7 @@ export class Game {
       let target: Structure | undefined = wall;
       if (!target) {
         let best = Infinity;
-        for (const t of this.towers) {
+        for (const t of this.targetsInBase()) {
           const dist = Math.hypot(Math.max(t.cx - e.x, 0, e.x - t.cx - t.size), Math.max(t.cy - e.y, 0, e.y - t.cy - t.size));
           if (dist <= reach && dist < best) {
             best = dist;
@@ -861,9 +1091,31 @@ export class Game {
     }
   }
 
+  /** What attackers may shoot at when nearby: guns, and in the base its buildings. */
+  private targetsInBase(): Array<Tower | Building> {
+    if (!this.hq) return this.towers;
+    const out: Array<Tower | Building> = [...this.towers, this.hq];
+    if (this.lab) out.push(this.lab);
+    return out;
+  }
+
   private hitStructure(s: Structure, damage: number): void {
+    if (this.phase === 'lost') return;
     s.hp -= damage;
     if (s.hp > 0) return;
+    if (isBuilding(s)) {
+      this.events.push({ type: 'wrecked', fence: false, building: s.kind, x: s.x, y: s.y, size: s.size });
+      if (s.kind === 'hq') {
+        s.hp = 0;
+        this.phase = 'lost';
+        this.events.push({ type: 'lost' });
+        return;
+      }
+      for (let y = s.cy; y < s.cy + s.size; y++) for (let x = s.cx; x < s.cx + s.size; x++) this.occupied[this.map.grid.index(x, y)] = 0;
+      this.lab = null;
+      this.rebuildFlow();
+      return;
+    }
     if (isFence(s)) {
       this.removeFence(s);
       this.events.push({ type: 'wrecked', fence: true, x: s.x, y: s.y, size: 1 });
@@ -885,6 +1137,12 @@ export class Game {
 
   private leak(e: Enemy): void {
     e.alive = false;
+    if (this.hq) {
+      // In the base whatever gets through strikes the headquarters.
+      this.events.push({ type: 'leak', enemyId: e.id });
+      this.hitStructure(this.hq, ENEMIES[e.def].leakDamage * BASE_RULES.leakHp);
+      return;
+    }
     this.lives = Math.max(0, this.lives - ENEMIES[e.def].leakDamage);
     this.events.push({ type: 'leak', enemyId: e.id });
     if (this.lives <= 0) {
@@ -897,6 +1155,8 @@ export class Game {
     for (const t of this.towers) {
       t.cooldown = Math.max(0, t.cooldown - dt);
       t.firing = false;
+      // A gun still being built does not fire.
+      if (t.job?.kind === 'build') continue;
       const def: TowerDef = this.defOf(t.def);
       const lvl = this.levelOf(t);
       const target = this.pickTarget(t);
