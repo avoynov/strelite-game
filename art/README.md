@@ -1,5 +1,7 @@
 # Game art (style В, photoreal)
 
+**Making new art?** Follow [`SOP.md`](SOP.md): style, scale, model building, review, render, pack and handoff rules for every new object.
+
 The game's art style is **В: photoreal military hardware that looks photographed**.
 Everything is rendered from procedural Blender models in `art/pipeline/`; the game
 only loads the finished files in `public/art/`.
@@ -42,7 +44,7 @@ reproduces the path-traced render of the whole tower.
 | Projection | the board's own: 2:1 dimetric, orthographic. One metre of ground is `pxPerMetre` wide along screen x and half of that along screen y. |
 | Aim | frame `i` aims at `i * 2π/32`, measured like `Tower.aim` in the simulation: `atan2(dy, dx)` in grid cells. Frame 0 points along grid +x (screen lower-right). `frameForAim()` does the rounding. |
 | Scale | `pxPerMetre` in the manifest (16 at @1x, 32 at @2x). `spriteScale(cellPx, metresPerTile, 16)` gives the sprite scale for the board. |
-| Tile size | suggested **12 m per tile**: the howitzer's fortifications fill a circle of 6 m radius (`footprintRadiusM`), the field gun 4.8 m. A tile is then `12·√2 ≈ 17 m` wide on screen. |
+| Tile size | **4 m per tile** (`METRES_PER_TILE` in `src/sim/content.ts`). A tower's static art stays inside `footprintRadiusM` ≤ size in tiles × 2 m. |
 | Depth | sort the tower's node by its ground point like any other object. Base and aim always go together (base first). |
 | Light | sun from the screen's lower-left, shadows fall to the upper-right. Enemies and props must be rendered with the same pipeline to match. |
 | Muzzle | `muzzlePx[i]` (offset from the ground point, @1x pixels) and `muzzleM[i]` (grid x, grid y, height in metres) per aim frame: spawn projectiles, flashes and smoke there. |

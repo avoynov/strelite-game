@@ -16,21 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      any: ${{ steps.m.outputs.any }}
     steps:
       - uses: actions/checkout@v4
       - id: m
         run: |
           python3 - <<'EOF' >> "$GITHUB_OUTPUT"
-          import json
+          import json, os
           q = json.load(open("art/pipeline/render-queue.json"))
+          if q.get("branch") != os.environ["GITHUB_REF_NAME"]:      # carried here by a merge: not ours
+              q = {}
           jobs = [{"kind": "tower", "model": m, "level": l} for m, ls in q.get("towers", {}).items() for l in ls]
           jobs += [{"kind": "proj", "model": m, "level": 0} for m in q.get("projectiles", [])]
           jobs += [{"kind": "enemy", "model": m, "level": 0} for m in q.get("enemies", [])]
-          print("matrix=" + json.dumps({"include": jobs}))
+          print("matrix=" + json.dumps({"include": jobs or [{"kind": "none", "model": "none", "level": 0}]}))
+          print("any=" + ("true" if jobs else "false"))
           EOF
 
   render:
     needs: plan
+    if: needs.plan.outputs.any == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
@@ -86,8 +91,8 @@ jobs:
           retention-days: 7
 
   merge:
-    needs: render
-    if: always()
+    needs: [plan, render]
+    if: always() && needs.plan.outputs.any == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

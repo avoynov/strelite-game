@@ -62,6 +62,8 @@ def render(a):
 def pack(a):
     from PIL import Image
 
+    import bpy  # noqa: F401  (provides mathutils, which the model module imports)
+
     from pack_atlas import bbox, load_premultiplied, pack as pack_rects, to_image
     from strelite_art.models.fences import NAMES, PIECES
 
@@ -71,7 +73,8 @@ def pack(a):
         d = os.path.join(a.out, "fences", mat)
         with open(os.path.join(d, "meta.json")) as f:
             meta = json.load(f)
-        for tag, scale in (("@2x", 1.0), ("@1x", 0.5)):
+        for tag, ppm_out in (("@2x", 32.0), ("@1x", 16.0)):     # the towers' pixels per metre
+            scale = ppm_out / meta["pxPerMetre"]
             frames = [load_premultiplied(os.path.join(d, f"{p}.png"), scale) for p in PIECES]
             H, W = frames[0].shape[:2]
             boxes = [bbox(pm) for pm in frames]
@@ -94,7 +97,8 @@ def pack(a):
             print(f"[pack] fences {mat}{tag}: {AW}x{AH}", flush=True)
         entry[mat] = {"name": NAMES[mat], "sheet": f"fences/{mat}",
                       **{p: f"{mat}_{p}" for p in PIECES},
-                      "heightM": meta["heightM"], "thicknessM": meta["thicknessM"]}
+                      "heightM": meta["heightM"], "thicknessM": meta["thicknessM"],
+                      "frameM": round(meta["frame"][0] / meta["pxPerMetre"], 3)}
     path = os.path.join(a.dst, "towers.json")
     with open(path) as f:
         manifest = json.load(f)
@@ -148,7 +152,8 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--materials", nargs="+", default=["wood", "stone", "steel"])
     ap.add_argument("--samples", type=int, default=32)
-    ap.add_argument("--ppm", type=float, default=64.0, help="pixels per metre of the @2x sprites")
+    ap.add_argument("--ppm", type=float, default=64.0,
+                    help="pixels per metre of the render; pack scales it to the towers' 32 (@2x) and 16 (@1x)")
     ap.add_argument("--out", default=os.path.join(HERE, "..", "out"))
     ap.add_argument("--dst", default=os.path.join(HERE, "..", "..", "public", "art"))
     ap.add_argument("--resume", action="store_true")

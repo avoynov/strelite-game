@@ -102,6 +102,24 @@ describe.skipIf(!existsSync(join(ART, 'towers.json')))('enemy and effect art', (
     }
   });
 
+  it('draws every wall piece at the same pixels per metre as the towers', () => {
+    // A wall sheet packed at another scale would stand twice as tall as the guns beside it.
+    const walls = Object.values(manifest!.fences ?? {});
+    expect(walls.length).toBeGreaterThan(0);
+    for (const wall of walls) {
+      for (const density of [1, 2] as const) {
+        const sheet = JSON.parse(readFileSync(join(ART, `${wall.sheet}@${density}x.json`), 'utf8')) as {
+          frames: Record<string, { sourceSize: { w: number } }>;
+        };
+        for (const piece of ['post', 'px', 'nx', 'py', 'ny'] as const) {
+          const f = sheet.frames[wall[piece]];
+          expect(f, `${wall.sheet} ${piece} @${density}x`).toBeDefined();
+          expect(Math.abs(f!.sourceSize.w - wall.frameM! * manifest!.pxPerMetre[`@${density}x`])).toBeLessThanOrEqual(2);
+        }
+      }
+    }
+  });
+
   it('has every effect frame at both densities, and the @1x frames are the @2x ones at half size', () => {
     for (const name of ['muzzle_flash', 'muzzle_smoke', 'shell_burst']) {
       const fx = manifest!.effects?.[name];
