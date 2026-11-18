@@ -1,14 +1,7 @@
 {
- "note": "Editing this file on a claude/** branch starts the render-art workflow: every tower level, projectile set and enemy below renders in its own GitHub Actions job, then the results are packed into public/art and committed back to the branch.",
- "towers": {
-  "trebuchet": [1, 2, 3, 4, 5],
-  "ballista": [1, 2, 3, 4, 5],
-  "scorpion": [1, 2, 3, 4, 5],
-  "zis3": [1, 2, 3, 4, 5],
-  "howitzer": [1, 2, 3, 4, 5],
-  "greekfire": [1, 2, 3, 4, 5],
-  "railgun": [1, 2, 3, 4, 5]
- },
- "projectiles": ["trebuchet", "ballista", "scorpion"],
- "enemies": ["infantry", "bikers", "truck", "apc", "tank", "airship", "fortress"]
+ "note": "The render-art workflow renders this queue only on the branch named in \"branch\" (a merge that carries this file to another branch renders nothing). To queue work: set \"branch\" to your own claude/** branch, list the tower levels, projectiles and enemies, commit and push. Each item renders in its own GitHub Actions job; the results are packed into public/art and committed back to that branch. Empty the lists when you are done.",
+ "branch": "",
+ "towers": {},
+ "projectiles": [],
+ "enemies": []
 }
