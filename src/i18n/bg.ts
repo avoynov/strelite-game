@@ -178,7 +178,7 @@ export const bg = {
   'building.hq': "Главно управление",
   'building.lab': "Лаборатория",
   'building.hqFx': "Строиш до {r} полета от него · оръдия до ниво {g}",
-  'building.labFx': "Проучване ×{speed} · наведнъж {slots} · строители {b}",
+  'building.labFx': "Отключва проучвания до ниво {n} · наведнъж {slots} · строители {b}",
   'building.upgrade': "Ниво {n}",
   'building.rebuild': "Възстанови лабораторията",
   'building.max': "Най-високо ниво",

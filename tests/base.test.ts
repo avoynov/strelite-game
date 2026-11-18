@@ -4,6 +4,7 @@ import {
   BASE_MAP,
   BASE_RULES,
   builders,
+  gunJobSeconds,
   HQ_LEVELS,
   HQ_SPOT,
   inBuildArea,
@@ -59,17 +60,21 @@ describe('the base', () => {
     expect(g.build('crossbow', hx - 1, hy + 3)).toEqual({ ok: false, reason: 'noBuilder' });
     // Fences need no builder.
     expect(g.buildFence(hx - 2, hy + 3).ok).toBe(true);
-    clock.ms = 9_999;
+    // The first level takes a minute, the middle one ten.
+    expect(gunJobSeconds('zis3', 0)).toBe(60);
+    expect(gunJobSeconds('zis3', 2)).toBe(600);
+    expect(gunJobSeconds('zis3', 4)).toBeGreaterThan(gunJobSeconds('zis3', 3));
+    clock.ms = 59_999;
     g.step(TICK);
     expect(t.job).toBeDefined();
-    clock.ms = 10_000;
+    clock.ms = 60_000;
     g.step(TICK);
     expect(t.job).toBeUndefined();
     expect(g.drainEvents().some((e) => e.type === 'built')).toBe(true);
     // Raising it takes time too, the same in battle; it stays at its level until done.
     expect(g.upgrade(t.id).ok).toBe(true);
     expect(t.level).toBe(0);
-    clock.ms += 20_000;
+    clock.ms += gunJobSeconds('zis3', 1) * 1000;
     g.step(TICK);
     expect(t.level).toBe(1);
     expect(t.maxHp).toBe(gunHp(t.size, 1));
@@ -157,6 +162,8 @@ describe('the base', () => {
     // Laboratory level 3: two builders.
     b = { ...b, lab: { level: 2, hp: LAB_LEVELS[2]!.hp } };
     expect(builders(b)).toBe(2);
+    // The laboratory is slow: its top levels take days.
+    expect(LAB_LEVELS[4]!.seconds).toBeGreaterThanOrEqual(3 * 24 * 3600);
     // Destroyed, it is rebuilt at level 1, and that takes long.
     b = { ...b, lab: null };
     b = startJob(b, 'lab', 0);
@@ -223,7 +230,7 @@ describe('balance at the base', () => {
   }, SLOW);
 
   it('more research and gold carry the base further', () => {
-    expect(furthest(campaign(3, 300, 400, 8))).toBeGreaterThanOrEqual(5);
+    expect(furthest(campaign(3, 300, 400, 10))).toBeGreaterThanOrEqual(5);
     expect(furthest(campaign(6, 500, 800, 10))).toBeGreaterThanOrEqual(10);
   }, SLOW);
 

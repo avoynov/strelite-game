@@ -47,6 +47,17 @@ export class Campaign {
     this.base = { ...this.base, ...this.game.snapshot() };
   }
 
+  /** Between attacks: skip the clock ahead to when the next gun job is done. */
+  private waitForBuilders(): void {
+    const g = this.game;
+    const ends = g.towers.map((t) => t.job?.endsAt ?? Infinity);
+    const next = Math.min(...ends);
+    if (!Number.isFinite(next)) return;
+    const now = this.offset + g.time * 1000;
+    if (next > now) this.offset += next - now;
+    g.step(TICK);
+  }
+
   /** Let the clock run (peace or battle). */
   run(seconds: number): void {
     for (let i = 0; i < seconds / TICK && this.game.phase !== 'won' && this.game.phase !== 'lost'; i++) this.game.step(TICK);
@@ -76,7 +87,7 @@ export class Campaign {
       spend(g);
       const busy = g.towers.some((t) => t.job);
       if (!busy && g.money === before) break;
-      this.run(2);
+      this.waitForBuilders();
     }
   }
 

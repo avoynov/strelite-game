@@ -46,9 +46,7 @@ export const HQ_LEVELS: readonly HqLevel[] = [
 
 export interface LabLevel {
   hp: number;
-  /** Research runs this many times faster. */
-  speed: number;
-  /** Research items running at once. */
+  /** Research items running at once. A higher laboratory opens deeper research; it never makes research faster. */
   slots: number;
   /** Building jobs (headquarters, laboratory) running at once. */
   builders: number;
@@ -56,23 +54,25 @@ export interface LabLevel {
   seconds: number;
 }
 
+/** The laboratory is raised very slowly: the higher levels take days. */
 export const LAB_LEVELS: readonly LabLevel[] = [
-  { hp: 600, speed: 1, slots: 1, builders: 1, cost: 0, seconds: 0 },
-  { hp: 900, speed: 1.25, slots: 1, builders: 1, cost: 500, seconds: 20 * MIN },
-  { hp: 1300, speed: 1.5, slots: 1, builders: 2, cost: 1400, seconds: 2 * HOUR },
-  { hp: 1800, speed: 1.75, slots: 2, builders: 2, cost: 3000, seconds: 8 * HOUR },
-  { hp: 2500, speed: 2, slots: 2, builders: 3, cost: 6000, seconds: DAY },
+  { hp: 600, slots: 1, builders: 1, cost: 0, seconds: 0 },
+  { hp: 900, slots: 1, builders: 1, cost: 600, seconds: 8 * HOUR },
+  { hp: 1300, slots: 1, builders: 2, cost: 1600, seconds: DAY },
+  { hp: 1800, slots: 2, builders: 2, cost: 3500, seconds: 3 * DAY },
+  { hp: 2500, slots: 2, builders: 3, cost: 7000, seconds: 6 * DAY },
 ];
 
 /** Building the laboratory again after it was destroyed: it comes back at level 1. */
-export const LAB_REBUILD = { cost: 400, seconds: 3 * HOUR };
+export const LAB_REBUILD = { cost: 400, seconds: 12 * HOUR };
 
 /**
  * Real seconds a builder takes to build a gun (to level 1) or raise it to each
- * next level; heavy 3×3 guns take half as long again. Fences go up at once.
- * During an attack it is the same price and the same time.
+ * next level: the middle level takes 10 minutes, the higher ones more. Heavy
+ * 3×3 guns take half as long again. Fences go up at once. During an attack it
+ * is the same price and the same time.
  */
-export const GUN_JOB_SECONDS = [10, 20, 45, 90, 180] as const;
+export const GUN_JOB_SECONDS = [1 * MIN, 4 * MIN, 10 * MIN, 30 * MIN, 90 * MIN] as const;
 
 export function gunJobSeconds(def: TowerId, level: number): number {
   return GUN_JOB_SECONDS[Math.min(level, GUN_JOB_SECONDS.length - 1)]! * (TOWERS[def].size >= 3 ? 1.5 : 1);

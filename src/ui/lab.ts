@@ -160,7 +160,7 @@ export class Lab {
     return head + s.active.map((a) => {
       const item = researchItem(a.id)!;
       const left = (a.endsAt - now) / 1000;
-      const total = itemSeconds(item, lab, this.cb.speed);
+      const total = itemSeconds(item, this.cb.speed);
       const done = Math.min(1, Math.max(0, 1 - left / total));
       return `
       <div class="lab-active">
@@ -183,7 +183,7 @@ export class Lab {
     const st = status(s, item.id);
     const lab = this.cb.lab();
     const err = startError(s, item.id, lab);
-    const seconds = itemSeconds(item, lab, this.cb.speed);
+    const seconds = itemSeconds(item, this.cb.speed);
     let foot: string;
     if (st === 'done') foot = `<span class="lab-tag done">${t('lab.done')}</span>`;
     else if (st === 'active') foot = `<span class="lab-tag active">${t('lab.inProgress')}</span>`;

@@ -179,7 +179,7 @@ export const en: Record<MessageKey, string> = {
   'building.hq': "Headquarters",
   'building.lab': "Laboratory",
   'building.hqFx': "Build up to {r} tiles out · guns up to level {g}",
-  'building.labFx': "Research ×{speed} · {slots} at once · {b} builders",
+  'building.labFx': "Opens research up to level {n} · {slots} at once · {b} builders",
   'building.upgrade': "Level {n}",
   'building.rebuild': "Rebuild the lab",
   'building.max': "Top level",

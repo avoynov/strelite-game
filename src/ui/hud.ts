@@ -312,7 +312,7 @@ export class Hud {
     const level = what === 'hq' ? st.hq.level : (st.lab?.level ?? b.level);
     const fx = what === 'hq'
       ? t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun })
-      : t('building.labFx', { speed: LAB_LEVELS[level]!.speed, slots: LAB_LEVELS[level]!.slots, b: LAB_LEVELS[level]!.builders });
+      : t('building.labFx', { n: level + 1, slots: LAB_LEVELS[level]!.slots, b: LAB_LEVELS[level]!.builders });
     const jobBtn = (target: JobTarget, label: string) => {
       const job = st.jobs.find((j) => j.what === target);
       if (job) return `<button class="btn" disabled>${t('building.inWork', { time: formatDuration((job.endsAt - Date.now()) / 1000) })}</button>`;

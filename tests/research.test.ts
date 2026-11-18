@@ -80,15 +80,15 @@ describe('research', () => {
     expect(g.defOf('greekfire').rampTime).toBe(1);
   });
 
-  it('the laboratory: a higher one researches faster and two at once; some items need it; destroyed, it stops the clocks', () => {
+  it('the laboratory: a higher one runs two at once (no faster) and opens the deeper items; destroyed, it stops the clocks', () => {
     const rich = bank(newResearch(), 100000);
     // Level 1: one at a time.
     let s = start(rich, 'boost.gold1', 0);
     expect(startError(s, 'fx.crossbow')).toBe('busy');
-    // Level 4 (index 3): two at once, 1.75× faster.
+    // Level 4 (index 3): two at once, at the same speed.
     const lab4 = { level: 3, standing: true };
     s = start(rich, 'boost.gold1', 0, 1, lab4);
-    expect(s.active[0]!.endsAt).toBeCloseTo((2 * 60 * 1000) / 1.75, 0);
+    expect(s.active[0]!.endsAt).toBe(2 * 60 * 1000);
     expect(startError(s, 'fx.crossbow', lab4)).toBeNull();
     s = start(s, 'fx.crossbow', 0, 1, lab4);
     expect(s.active).toHaveLength(2);
@@ -96,7 +96,11 @@ describe('research', () => {
     // Items that need a raised laboratory.
     const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.trebuchet', 'gun.greekfire'] };
     expect(startError(railReady, 'gun.railgun')).toBe('labLevel');
-    expect(startError(railReady, 'gun.railgun', { level: 2, standing: true })).toBeNull();
+    expect(startError(railReady, 'gun.railgun', { level: 2, standing: true })).toBe('labLevel');
+    expect(startError(railReady, 'gun.railgun', { level: 3, standing: true })).toBeNull();
+    // The deeper (dearer) the item, the higher the laboratory it needs.
+    for (const r of RESEARCH) for (const req of r.requires) expect(r.lab ?? 1, r.id).toBeGreaterThanOrEqual(RESEARCH.find((x) => x.id === req)!.lab ?? 1);
+    expect(RESEARCH.filter((r) => (r.lab ?? 1) === 5).length).toBeGreaterThan(0);
     // Destroyed: nothing starts, nothing finishes; rebuilt, the clock goes on.
     expect(startError(rich, 'boost.gold1', { level: 0, standing: false })).toBe('noLab');
     let p = start(rich, 'boost.gold1', 0);

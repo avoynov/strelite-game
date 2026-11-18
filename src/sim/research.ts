@@ -4,8 +4,8 @@ import type { TowerId } from './content';
 /**
  * Research tree: gold banked from battles buys guns, boosts and effects. Each
  * item costs gold and takes real time. The laboratory in the player's base
- * decides how many run at once and how fast; some items need it raised; while
- * it lies destroyed, research stands still. The state is plain
+ * decides how many run at once, and the deeper items need it raised (it never
+ * makes research faster); while it lies destroyed, research stands still. The state is plain
  * data (saved by the app) and every function here is pure, so the timing and
  * effects are testable without a clock or storage.
  */
@@ -68,7 +68,15 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 type Effect = ResearchItem['effect'];
-const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect, lab?: number): ResearchItem => ({ id, branch, cost, seconds, requires, effect, ...(lab ? { lab } : {}) });
+/** Laboratory level (1-based) an item of this price needs: the deeper (dearer) the item, the higher the laboratory. */
+export function labFor(cost: number): number {
+  return cost < 1000 ? 1 : cost < 2000 ? 2 : cost < 3500 ? 3 : cost < 5500 ? 4 : 5;
+}
+
+const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => {
+  const lab = labFor(cost);
+  return { id, branch, cost, seconds, requires, effect, ...(lab > 1 ? { lab } : {}) };
+};
 const gun = (g: TowerId): Effect => ({ kind: 'gun', gun: g });
 const lvl = (g: TowerId, level: number): Effect => ({ kind: 'maxLevel', gun: g, level });
 const mod = (g: TowerId, mods: Partial<GunMods>): Effect => ({ kind: 'gunMod', gun: g, mods });
@@ -84,24 +92,24 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('gun.howitzer', 'guns', 500, 20 * MIN, [], gun('howitzer')),
   item('gun.scorpion', 'guns', 800, HOUR, ['gun.howitzer'], gun('scorpion')),
   item('gun.trebuchet', 'guns', 1500, 4 * HOUR, ['gun.scorpion'], gun('trebuchet')),
-  item('gun.greekfire', 'guns', 2200, 8 * HOUR, ['gun.trebuchet'], gun('greekfire'), 2),
-  item('gun.railgun', 'guns', 4000, DAY, ['gun.greekfire'], gun('railgun'), 3),
+  item('gun.greekfire', 'guns', 2200, 8 * HOUR, ['gun.trebuchet'], gun('greekfire')),
+  item('gun.railgun', 'guns', 4000, DAY, ['gun.greekfire'], gun('railgun')),
 
   // Gun levels 4 and 5 (1–3 are open from the start).
   item('lvl4.crossbow', 'levels', 400, 20 * MIN, [], lvl('crossbow', 4)),
   item('lvl4.zis3', 'levels', 450, 25 * MIN, [], lvl('zis3', 4)),
   item('lvl4.howitzer', 'levels', 900, 2 * HOUR, ['gun.howitzer'], lvl('howitzer', 4)),
-  item('lvl5.crossbow', 'levels', 1200, 4 * HOUR, ['lvl4.crossbow'], lvl('crossbow', 5), 2),
-  item('lvl5.zis3', 'levels', 1300, 4 * HOUR, ['lvl4.zis3'], lvl('zis3', 5), 2),
+  item('lvl5.crossbow', 'levels', 1200, 4 * HOUR, ['lvl4.crossbow'], lvl('crossbow', 5)),
+  item('lvl5.zis3', 'levels', 1300, 4 * HOUR, ['lvl4.zis3'], lvl('zis3', 5)),
   item('lvl4.scorpion', 'levels', 1800, 8 * HOUR, ['gun.scorpion'], lvl('scorpion', 4)),
   item('lvl4.trebuchet', 'levels', 2600, 12 * HOUR, ['gun.trebuchet'], lvl('trebuchet', 4)),
-  item('lvl5.howitzer', 'levels', 2800, 12 * HOUR, ['lvl4.howitzer'], lvl('howitzer', 5), 3),
+  item('lvl5.howitzer', 'levels', 2800, 12 * HOUR, ['lvl4.howitzer'], lvl('howitzer', 5)),
   item('lvl4.greekfire', 'levels', 3500, DAY, ['gun.greekfire'], lvl('greekfire', 4)),
-  item('lvl5.scorpion', 'levels', 3800, DAY, ['lvl4.scorpion'], lvl('scorpion', 5), 3),
-  item('lvl4.railgun', 'levels', 5000, 2 * DAY, ['gun.railgun'], lvl('railgun', 4), 4),
-  item('lvl5.trebuchet', 'levels', 5000, 2 * DAY, ['lvl4.trebuchet'], lvl('trebuchet', 5), 4),
-  item('lvl5.greekfire', 'levels', 5500, 2 * DAY, ['lvl4.greekfire'], lvl('greekfire', 5), 4),
-  item('lvl5.railgun', 'levels', 7000, 3 * DAY, ['lvl4.railgun'], lvl('railgun', 5), 5),
+  item('lvl5.scorpion', 'levels', 3800, DAY, ['lvl4.scorpion'], lvl('scorpion', 5)),
+  item('lvl4.railgun', 'levels', 5000, 2 * DAY, ['gun.railgun'], lvl('railgun', 4)),
+  item('lvl5.trebuchet', 'levels', 5000, 2 * DAY, ['lvl4.trebuchet'], lvl('trebuchet', 5)),
+  item('lvl5.greekfire', 'levels', 5500, 2 * DAY, ['lvl4.greekfire'], lvl('greekfire', 5)),
+  item('lvl5.railgun', 'levels', 7000, 3 * DAY, ['lvl4.railgun'], lvl('railgun', 5)),
 
   // Boosts: for every gun.
   item('boost.gold1', 'boosts', 200, 2 * MIN, [], { kind: 'startGold', add: 100 }),
@@ -110,7 +118,7 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('boost.damage2', 'boosts', 1000, 2 * HOUR, ['boost.lives1'], { kind: 'damage', add: 0.1 }),
   item('boost.reload1', 'boosts', 1600, 4 * HOUR, ['boost.damage2'], { kind: 'reload', mul: 0.9 }),
   item('boost.gold2', 'boosts', 2000, 8 * HOUR, ['boost.reload1'], { kind: 'startGold', add: 150 }),
-  item('boost.damage3', 'boosts', 3000, 16 * HOUR, ['boost.gold2'], { kind: 'damage', add: 0.1 }, 3),
+  item('boost.damage3', 'boosts', 3000, 16 * HOUR, ['boost.gold2'], { kind: 'damage', add: 0.1 }),
 
   // Effects: one per gun, once the gun is known.
   item('fx.crossbow', 'effects', 300, 5 * MIN, [], mod('crossbow', { pierce: 0.25 })),
@@ -119,7 +127,7 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('fx.scorpion', 'effects', 1800, 8 * HOUR, ['gun.scorpion', 'fx.howitzer'], mod('scorpion', { passThrough: 1, pierce: 0.2 })),
   item('fx.trebuchet', 'effects', 2600, 12 * HOUR, ['gun.trebuchet', 'fx.scorpion'], mod('trebuchet', { splash: 0.5, pierce: 0.3 })),
   item('fx.greekfire', 'effects', 3500, DAY, ['gun.greekfire', 'fx.trebuchet'], mod('greekfire', { rampTime: 0.5, range: 0.5 })),
-  item('fx.railgun', 'effects', 5000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 }), 4),
+  item('fx.railgun', 'effects', 5000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
 ];
 
 const BY_ID = new Map(RESEARCH.map((r) => [r.id, r]));
@@ -189,8 +197,6 @@ export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'labL
 
 /** Items the laboratory runs at once. */
 export const labSlots = (lab: LabInfo): number => LAB_LEVELS[lab.level]?.slots ?? 1;
-/** How many times faster than listed the laboratory researches. */
-export const labSpeed = (lab: LabInfo): number => LAB_LEVELS[lab.level]?.speed ?? 1;
 
 /** Why `id` cannot be started now, or null when it can. */
 export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LAB): StartError | null {
@@ -205,16 +211,16 @@ export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LA
   return null;
 }
 
-/** Real seconds an item takes in this laboratory; `speed` > 1 shortens every timer (testing builds). */
-export function itemSeconds(item: ResearchItem, lab: LabInfo = FIRST_LAB, speed = 1): number {
-  return item.seconds / (speed * labSpeed(lab));
+/** Real seconds an item takes; `speed` > 1 shortens every timer (testing builds). */
+export function itemSeconds(item: ResearchItem, speed = 1): number {
+  return item.seconds / speed;
 }
 
 /** Pay for `id` and start its clock. */
 export function start(s: ResearchState, id: string, now: number, speed = 1, lab: LabInfo = FIRST_LAB): ResearchState {
   if (startError(s, id, lab)) return s;
   const item = BY_ID.get(id)!;
-  return { ...s, gold: s.gold - item.cost, active: [...s.active, { id, endsAt: now + itemSeconds(item, lab, speed) * 1000 }] };
+  return { ...s, gold: s.gold - item.cost, active: [...s.active, { id, endsAt: now + itemSeconds(item, speed) * 1000 }] };
 }
 
 /** Finish the running items whose time is up (nothing moves while the laboratory lies destroyed). */
