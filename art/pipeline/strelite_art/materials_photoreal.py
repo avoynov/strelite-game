@@ -90,6 +90,14 @@ SPEC = {
     "webbing":       ("plain", dict(color=(0.22, 0.22, 0.19), rough=0.8, dust=0.8)),
     "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2)),
     "boot":          ("plain", dict(color=(0.07, 0.065, 0.06), rough=0.6, dust=1.2)),
+    # --- people (human.py): skin tones, gloves, oxblood scarf of the Iron Concord
+    "skin_fair":     ("plain", dict(color=(0.72, 0.53, 0.43), rough=0.5, dust=0.2)),
+    "skin_olive":    ("plain", dict(color=(0.55, 0.38, 0.27), rough=0.52, dust=0.2)),
+    "skin_dark":     ("plain", dict(color=(0.33, 0.21, 0.14), rough=0.5, dust=0.2)),
+    "hair":          ("plain", dict(color=(0.06, 0.045, 0.035), rough=0.7, dust=0.3)),
+    "boot_leather":  ("plain", dict(color=(0.05, 0.04, 0.034), rough=0.45, dust=0.15)),
+    "glove":         ("plain", dict(color=(0.16, 0.11, 0.07), rough=0.66, dust=0.6)),
+    "cloth_oxblood": ("cloth", dict(color=(0.26, 0.055, 0.045), alt=(0.21, 0.045, 0.04), dust=0.3, wrinkle=7.0)),
     # --- siege engines: one material set per upgrade level
     "timber_raw":    ("timber", dict(light=(0.54, 0.45, 0.34), dark=(0.31, 0.24, 0.17), rough=0.85,
                                      weather=0.55, dust=0.8)),
