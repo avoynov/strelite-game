@@ -191,6 +191,9 @@ describe('the base', () => {
  * Held to: a new player loses the first attack; research and gold carry the
  * base further; the strength shown before an attack points the right way.
  */
+/** Campaigns play many attacks; CI machines are slower than a laptop. */
+const SLOW = 120_000;
+
 describe('balance at the base', () => {
   const campaign = (stage: number, startGold: number, income: number, attacks: number) => {
     const c = new Campaign(upgrades(upTo(stage), TOWER_IDS));
@@ -217,12 +220,12 @@ describe('balance at the base', () => {
 
   it('the first research item and a little gold hold the first attack, but not the second', () => {
     expect(furthest(campaign(1, 200, 200, 6))).toBe(1);
-  });
+  }, SLOW);
 
   it('more research and gold carry the base further', () => {
     expect(furthest(campaign(3, 300, 400, 8))).toBeGreaterThanOrEqual(5);
     expect(furthest(campaign(6, 500, 800, 10))).toBeGreaterThanOrEqual(10);
-  });
+  }, SLOW);
 
   it('the strength shown before an attack points the right way when the sides are far apart', () => {
     const all = [...campaign(1, 200, 200, 4), ...campaign(3, 300, 400, 8)];
@@ -230,5 +233,5 @@ describe('balance at the base', () => {
       if (r.you > 3 * r.enemy) expect(r.won, `attack ${r.attack}: ${r.you} vs ${r.enemy}`).toBe(true);
       if (r.enemy > 1.5 * r.you) expect(r.won, `attack ${r.attack}: ${r.you} vs ${r.enemy}`).toBe(false);
     }
-  });
+  }, SLOW);
 });
