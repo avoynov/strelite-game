@@ -92,7 +92,8 @@ def pack_rounds(model, mod, a, out_dir):
     path = os.path.join(a.dst, "towers.json")
     with open(path) as fh:
         manifest = json.load(fh)
-    manifest.setdefault("projectiles", {})[model] = {
+    from pack_atlas import GAME_ID
+    manifest.setdefault("projectiles", {})[GAME_ID.get(model, model)] = {
         "sheet": f"projectiles/{model}", "levels": list(mod.LEVELS), "frames": a.frames, "fps": a.fps,
         "radiusM": getattr(mod, "PROJ_R", None),
         "animation": f"{model}_L<level>_round",

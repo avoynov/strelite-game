@@ -45,6 +45,9 @@ NAMES = {
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
 }
 
+# Model name -> the game's tower id (src/sim/content.ts), where they differ.
+GAME_ID = {"ballista": "crossbow"}
+
 # What the game shows at the muzzle when the gun fires: only powder guns flash and smoke.
 # Torsion and counterweight engines release silently (the fire animation carries the shot),
 # the siphon shows its fire stream, the rail cannon its charge then beam.
@@ -359,6 +362,7 @@ def main():
                   "<base> first, then <aim>_NN on top, both at the tower's ground point",
     })
     for model, entry in towers.items():         # merge by level, so levels can be packed one by one
+        model = GAME_ID.get(model, model)
         known = manifest.setdefault("towers", {}).setdefault(model, {"levels": []})
         merged = {lv["level"]: lv for lv in known.get("levels", [])}
         merged.update({lv["level"]: lv for lv in entry["levels"]})

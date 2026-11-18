@@ -12,6 +12,8 @@ import os
 import shutil
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 
 def merge_levels(known, new):
     by = {lv["level"]: lv for lv in known.get("levels", [])}
@@ -37,7 +39,9 @@ def main(frags, dst):
         files = os.path.join(d, "files")
         if os.path.isdir(files):
             shutil.copytree(files, dst, dirs_exist_ok=True)
-        model = job["model"]
+        from pack_atlas import GAME_ID as TID
+        from pack_enemies import GAME_ID as EID
+        model = (EID if job["kind"] == "enemy" else TID).get(job["model"], job["model"])
         for k, v in frag.items():                      # top-level notes and constants
             if k not in ("towers", "enemies", "projectiles"):
                 manifest[k] = v
