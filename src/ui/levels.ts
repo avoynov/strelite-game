@@ -7,6 +7,8 @@ import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
  * rest of its page. The next page appears once the player reaches it.
  */
 
+const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
+
 export interface LevelsCallbacks {
   /** Highest map level won (0 for none). */
   won(): number;
@@ -36,8 +38,9 @@ export class LevelSelect {
         this.close();
         return;
       }
-      if (btn.dataset.lv === 'mode-path' || btn.dataset.lv === 'mode-arc') {
-        this.cb.setMode(btn.dataset.lv === 'mode-arc' ? 'arc' : 'path');
+      const mode = MODES.find((m) => btn.dataset.lv === `mode-${m}`);
+      if (mode) {
+        this.cb.setMode(mode);
         this.page = levelPages(this.cb.won()) - 1;
         this.render();
         this.el.querySelector('.lv.next')?.scrollIntoView({ block: 'center' });
@@ -103,7 +106,7 @@ export class LevelSelect {
         </div>
       </header>
       <div class="lv-modes" role="tablist">
-        ${(['path', 'arc'] as const).map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
+        ${MODES.map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
       </div>
       ${pages > 1
         ? `<nav class="lv-pages">

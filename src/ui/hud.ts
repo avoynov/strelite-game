@@ -1,14 +1,14 @@
 import { getLang, setLang, t, type MessageKey } from '../i18n';
-import { TOWER_IDS, TOWERS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
+import { FENCE_LEVELS, TOWER_IDS, TOWERS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import type { ActionResult, Game } from '../sim/game';
-import type { Selection } from '../render/boardRenderer';
+import type { Armed, Selection } from '../render/boardRenderer';
 
 export interface HudCallbacks {
   getSelection(): Selection | null;
   setSelection(sel: Selection | null): void;
-  /** Gun picked in the build menu, if any. */
-  getArmed(): TowerId | null;
-  setArmed(def: TowerId | null): void;
+  /** Gun (or, in siege mode, fence) picked in the build menu, if any. */
+  getArmed(): Armed | null;
+  setArmed(def: Armed | null): void;
   /** CSS for a small picture of a gun, or '' when there is no art for it. */
   towerIcon(def: TowerId): string;
   getSpeed(): number;
@@ -105,7 +105,7 @@ export class Hud {
     const top = `
       <div class="stat" title="${t('hud.money')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${g.money}</b></div>
       <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
-      <button class="stat wave" data-action="levels" title="${t('action.levels')}"><span>${g.mode === 'arc' ? `${t('mode.arc')} · ` : ''}${t('hud.level', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></button>
+      <button class="stat wave" data-action="levels" title="${t('action.levels')}"><span>${g.mode !== 'path' ? `${t(`mode.${g.mode}`)} · ` : ''}${t('hud.level', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></button>
       <div class="spacer"></div>
       ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>` : ''}
       <button class="chip chip-ico" data-action="lab" aria-label="${t('action.lab')}" title="${t('action.lab')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg></button>
@@ -163,6 +163,23 @@ export class Hud {
             <button class="btn" data-action="cancel">${t('action.cancel')}</button>
           </div>
         </div>`;
+    } else if (sel?.kind === 'fence' && g.fenceById(sel.id)) {
+      const f = g.fenceById(sel.id)!;
+      const up = g.fenceUpgradeCost(f);
+      body = `
+        <div class="row">
+          <span class="gun-ico fence-ico fence-${f.level}" aria-hidden="true"></span>
+          <div class="info">
+            <div class="title">${escapeHtml(t(`fence.${f.level}` as MessageKey))}</div>
+            <div class="stats"><span>${t('stat.hp')} <b>${Math.ceil(f.hp)}/${f.maxHp}</b></span></div>
+          </div>
+          <div class="actions">
+            ${up === null
+              ? `<button class="btn" disabled>${t('fence.max')}</button>`
+              : `<button class="btn primary" data-action="fenceUp" ${g.money < up ? 'disabled' : ''}>${escapeHtml(t(`fence.${f.level + 1}` as MessageKey))}<span class="cost"><span class="ico ico-gold"></span>${up}</span></button>`}
+            <button class="btn" data-action="fenceSell">${t('action.sell')}<span class="cost">+${g.fenceSellValue(f)}</span></button>
+          </div>
+        </div>`;
     } else if (sel?.kind === 'tower' && g.towerById(sel.id)) {
       const tower = g.towerById(sel.id)!;
       const lvl = g.levelOf(tower);
@@ -176,6 +193,7 @@ export class Hud {
             <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
             ${this.statsHtml(g.defOf(tower.def), lvl)}
             <div class="stats muted">
+              ${g.mode === 'siege' ? `<span>${t('stat.hp')} ${Math.ceil(tower.hp)}/${tower.maxHp}</span>` : ''}
               <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
               <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
               <span>${t('stat.kills')} ${s.kills}</span>
@@ -202,8 +220,18 @@ export class Hud {
             <span class="cost"><span class="ico ico-gold"></span>${cost}</span>
           </button>`;
       }).join('');
-      const hint = armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
-      body = `<div class="picker"><div class="cards">${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
+      const fenceCost = FENCE_LEVELS[0].cost;
+      const fence = g.mode === 'siege'
+        ? `
+          <button class="card${armed === 'fence' ? ' armed' : ''}${g.money < fenceCost ? ' poor' : ''}" data-action="pick" data-def="fence" aria-pressed="${armed === 'fence'}">
+            <span class="gun-ico fence-ico fence-0" aria-hidden="true"></span>
+            <span class="card-name">${escapeHtml(t('fence.name'))}</span>
+            <span class="cost"><span class="ico ico-gold"></span>${fenceCost}</span>
+          </button>`
+        : '';
+      const hint = armed === 'fence' ? t('hint.fence', { cost: fenceCost }) : armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
+      // The fence card leads, so it is in view however many guns follow.
+      body = `<div class="picker"><div class="cards">${fence}${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
     }
 
     const waveBtn = g.phase === 'build'
@@ -237,6 +265,10 @@ export class Hud {
     const sel = this.cb.getSelection();
     switch (action) {
       case 'pick': {
+        if (def === 'fence') {
+          this.cb.setArmed(this.cb.getArmed() === 'fence' ? null : 'fence');
+          break;
+        }
         const id = TOWER_IDS.find((d) => d === def);
         if (!id) break;
         this.cb.setArmed(this.cb.getArmed() === id ? null : id);
@@ -262,6 +294,17 @@ export class Hud {
         if (action === 'upgrade') this.showResult(g.upgrade(tower.id));
         else {
           g.sell(tower.id);
+          this.cb.setSelection(null);
+        }
+        break;
+      }
+      case 'fenceUp':
+      case 'fenceSell': {
+        const f = sel?.kind === 'fence' ? g.fenceById(sel.id) : undefined;
+        if (!f) break;
+        if (action === 'fenceUp') this.showResult(g.upgradeFence(f.id));
+        else {
+          g.sellFence(f.id);
           this.cb.setSelection(null);
         }
         break;

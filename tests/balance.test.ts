@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
 import { Game } from '../src/sim/game';
 import { levelArcMap, levelMap } from '../src/sim/levels';
-import { buildArcMap, buildPathMap } from '../src/sim/maps';
+import { buildArcMap, buildPathMap, type Mode } from '../src/sim/maps';
 import { battleTakings, RESEARCH, upgrades } from '../src/sim/research';
 import { playOut } from './helpers/bot';
 
@@ -25,8 +25,8 @@ export const STAGES: string[][] = [
 ];
 const FULL = STAGES.length - 1;
 const upTo = (k: number) => STAGES.slice(0, k + 1).flat();
-const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][], arc = false) => {
-  const map = arc ? buildArcMap(levelArcMap(level)) : buildPathMap(levelMap(level));
+const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][], mode: Mode = 'path') => {
+  const map = mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode);
   const g = new Game(map, { level, upgrades: upgrades(upTo(stage), TOWER_IDS) });
   playOut(g, only);
   return g;
@@ -62,7 +62,8 @@ describe('balance', () => {
     const g = play(1, 0);
     expect(g.phase).toBe('lost');
     const first = RESEARCH.find((r) => r.id === STAGES[1]![0])!;
-    expect(2 * battleTakings(g.money, g.goldEarned, false, 1)).toBeGreaterThanOrEqual(first.cost);
+    // A player who builds with the starting gold and saves what the battle pays.
+    expect(2 * battleTakings(g.goldEarned, g.goldEarned, false, 1)).toBeGreaterThanOrEqual(first.cost);
   });
 
   it.each(NEEDS)('map level %i is won with research stage %i', (level, stage) => {
@@ -91,14 +92,38 @@ const ARC_NEEDS: [level: number, stage: number][] = [
 
 describe('balance in arc mode', () => {
   it('a new player loses map level 1 in arc mode too', () => {
-    expect(play(1, 0, undefined, true).phase).toBe('lost');
+    expect(play(1, 0, undefined, 'arc').phase).toBe('lost');
   });
 
   it.each(ARC_NEEDS)('arc map level %i is won with research stage %i', (level, stage) => {
-    expect(play(level, stage, undefined, true).phase).toBe('won');
+    expect(play(level, stage, undefined, 'arc').phase).toBe('won');
   });
 
   it.each(ARC_NEEDS.filter(([, stage]) => stage >= 2))('arc map level %i is lost two stages short of %i', (level, stage) => {
-    expect(play(level, stage - 2, undefined, true).phase).toBe('lost');
+    expect(play(level, stage - 2, undefined, 'arc').phase).toBe('lost');
+  });
+});
+
+/**
+ * Siege mode: the bot keeps its guns out of the attackers' reach and, once it
+ * can spare the gold, walls the goal in with fences and repairs them.
+ */
+const SIEGE_NEEDS: [level: number, stage: number][] = [
+  [1, 1],
+  [5, 6],
+  [12, 7],
+];
+
+describe('balance in siege mode', () => {
+  it('a new player loses map level 1 in siege mode too', () => {
+    expect(play(1, 0, undefined, 'siege').phase).toBe('lost');
+  });
+
+  it.each(SIEGE_NEEDS)('siege map level %i is won with research stage %i', (level, stage) => {
+    expect(play(level, stage, undefined, 'siege').phase).toBe('won');
+  });
+
+  it.each(SIEGE_NEEDS.filter(([, stage]) => stage >= 2))('siege map level %i is lost two stages short of %i', (level, stage) => {
+    expect(play(level, stage - 2, undefined, 'siege').phase).toBe('lost');
   });
 });

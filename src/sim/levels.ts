@@ -97,6 +97,18 @@ export function arcHpFactor(level: number): number {
   return Math.max(ARC_TUNING.hpMin, ARC_TUNING.hpFirst - ARC_TUNING.hpStep * (level - 1));
 }
 
+/**
+ * Siege mode: enemy health relative to arc mode, tuned with the bot. Guns can
+ * be wrecked and every breach costs guns, so later levels are weaker to make
+ * up for it: `hpFirst` on level 1, less by `hpStep` each level, never under `hpMin`.
+ */
+export const SIEGE_TUNING = { hpFirst: 0.75, hpStep: 0.09, hpMin: 0.45 };
+
+/** Siege mode: enemy health relative to arc mode on a level. */
+export function siegeHpFactor(level: number): number {
+  return Math.max(SIEGE_TUNING.hpMin, SIEGE_TUNING.hpFirst - SIEGE_TUNING.hpStep * (level - 1));
+}
+
 /** Half-width of the sector enemies come from on wave n (1-based) of `total`. */
 export function arcHalfWidth(n: number, total: number, level: number): number {
   const { start, endFirst, growth, max } = ARC_TUNING;

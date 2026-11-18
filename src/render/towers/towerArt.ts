@@ -101,6 +101,25 @@ export interface TowerArtManifest {
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
   enemies?: Record<string, EnemyArtDef>;
   effects?: Record<string, EffectArtDef>;
+  /** Siege mode fences by material (wood, stone, steel). */
+  fences?: Record<string, FenceArtDef>;
+}
+
+/**
+ * One fence material: a sheet holding the pieces of a tile (`post`, and half
+ * walls `px` `nx` `py` `ny` from the middle to each edge), each field naming
+ * its frame; all anchored at the tile's centre on the ground.
+ */
+export interface FenceArtDef {
+  name?: { bg: string; en: string };
+  sheet: string;
+  post: string;
+  px: string;
+  nx: string;
+  py: string;
+  ny: string;
+  heightM: number;
+  thicknessM?: number;
 }
 
 /** Frame name `${prefix}_NN`. */

@@ -1,8 +1,9 @@
 import { Assets, Container, Graphics, Matrix, Text, TilingSprite, type Texture } from 'pixi.js';
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
-import type { Game, Tower } from '../sim/game';
+import type { Fence, Game, Tower } from '../sim/game';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
+import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
 import { FLY_HEIGHT, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
 import { depth, diamond, isoX, isoY, project, RISE, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
@@ -12,9 +13,14 @@ import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTow
 import { shotEffects, spriteScale } from './towers/towerArt';
 import type { TowerView } from './towers/towerView';
 
+/** What the build menu has picked: a gun, or (siege mode) fences. */
+export type Armed = TowerId | 'fence';
+
 export type Selection =
   /** An existing gun, by id. */
   | { kind: 'tower'; id: number }
+  /** Siege mode: an existing fence, by id. */
+  | { kind: 'fence'; id: number }
   /** A gun about to be built, footprint's top-left cell at (cx, cy). */
   | { kind: 'place'; def: TowerId; cx: number; cy: number };
 
@@ -46,6 +52,8 @@ interface ShotOrigin {
 }
 
 const FLOAT_LIFE = 0.9;
+const STRIKE_LIFE = 0.18;
+
 const RAIL_LIFE = 0.35;
 
 /** Screen rotation of a direction on the ground (`a` = atan2(dy, dx) in grid cells). */
@@ -89,6 +97,9 @@ export class BoardRenderer {
   private bursts: Burst[] = [];
   /** Railgun traces fading out: ends in grid cells. */
   private rails: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
+  /** Siege mode: enemy shots at guns and fences, fading out. */
+  private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
+  private readonly fenceViews = new Map<number, FenceView>();
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
@@ -275,7 +286,7 @@ export class BoardRenderer {
         else g.poly(pts).fill({ color: PALETTE.path, alpha: alpha * 0.8 });
       }
     }
-    if (this.game.mode === 'arc') this.drawArcField(g);
+    if (this.game.openField) this.drawArcField(g);
   }
 
   /** Arc mode: rock outcrops inside the field and the fortified goal (drawn stand-ins until there is art). */
@@ -389,7 +400,73 @@ export class BoardRenderer {
     this.rails.push({ x1, y1, x2, y2, age: 0 });
   }
 
+  /** Siege mode: a unit fired at or rammed a gun or fence. */
+  onStrike(kind: 'shoot' | 'ram', x1: number, y1: number, x2: number, y2: number): void {
+    if (kind === 'shoot') this.strikes.push({ x1, y1, x2, y2, age: 0 });
+    // A ram lands where the vehicle meets the wall.
+    const ix = kind === 'ram' ? (x1 + x2) / 2 : x2;
+    const iy = kind === 'ram' ? (y1 + y2) / 2 : y2;
+    if (this.effects?.has('shell_burst')) this.effects.play('shell_burst', ix, iy, { size: kind === 'ram' ? 0.45 : 0.22, zBias: 0.3 });
+    else if (kind === 'ram') this.bursts.push({ gx: ix, gy: iy, radius: 0.4, age: 0 });
+  }
+
+  /** Siege mode: a gun or fence was destroyed. */
+  onWrecked(gx: number, gy: number, size: number): void {
+    if (this.effects?.has('shell_burst')) this.effects.play('shell_burst', gx, gy, { size: 0.5 + 0.35 * size, zBias: 0.3 });
+    else this.bursts.push({ gx, gy, radius: 0.5 * size + 0.3, age: 0 });
+  }
+
   // ---- per frame -----------------------------------------------------------
+
+  private syncFences(): void {
+    const fences = this.game.fences;
+    if (!fences.length && !this.fenceViews.size) return;
+    const { grid } = this.game.map;
+    const at = new Set(fences.map((f) => grid.index(f.cx, f.cy)));
+    const has = (x: number, y: number) => grid.inBounds(x, y) && at.has(grid.index(x, y));
+    const seen = new Set<number>();
+    for (const f of fences) {
+      seen.add(f.id);
+      let view = this.fenceViews.get(f.id);
+      if (!view) {
+        view = new FenceView(this.art, this.artScale(), f.x, f.y);
+        this.objects.addChild(view.node);
+        this.fenceViews.set(f.id, view);
+      }
+      // Walls join their neighbours into one line.
+      const mask = (has(f.cx + 1, f.cy) ? PX : 0) | (has(f.cx - 1, f.cy) ? NX : 0) | (has(f.cx, f.cy + 1) ? PY : 0) | (has(f.cx, f.cy - 1) ? NY : 0);
+      view.update(f.level, mask);
+    }
+    for (const [id, view] of this.fenceViews) {
+      if (seen.has(id)) continue;
+      view.destroy();
+      this.fenceViews.delete(id);
+    }
+  }
+
+  /** Siege mode: health bars over damaged guns and fences, and enemy shots. */
+  private drawSiege(g: Graphics, dt: number): void {
+    const bar = (s: Tower | Fence, size: number, lift: number) => {
+      if (s.hp >= s.maxHp) return;
+      const f = Math.max(0, s.hp / s.maxHp);
+      const w = Math.max(22, 14 * size);
+      const x = isoX(s.x, s.y);
+      const y = isoY(s.x, s.y, lift) - 8;
+      g.rect(x - w / 2 - 1, y - 1, w + 2, 6).fill({ color: 0x000000, alpha: 0.6 });
+      g.rect(x - w / 2, y, w * f, 4).fill(f > 0.5 ? 0x7bd36a : f > 0.25 ? 0xe6c14a : 0xe0624f);
+    };
+    for (const t of this.game.towers) bar(t, t.size, 0.35 * t.size + 0.4);
+    for (const f of this.game.fences) bar(f, 1, FENCE_HEIGHT[Math.min(f.level, 2)]! * 1.2 + 0.1);
+    this.strikes = this.strikes.filter((s) => {
+      s.age += dt;
+      const k = s.age / STRIKE_LIFE;
+      if (k >= 1) return false;
+      g.moveTo(isoX(s.x1, s.y1), isoY(s.x1, s.y1, 0.25))
+        .lineTo(isoX(s.x2, s.y2), isoY(s.x2, s.y2, 0.3))
+        .stroke({ width: 1.5, color: 0xff9a5a, alpha: 0.9 * (1 - k), cap: 'round' });
+      return true;
+    });
+  }
 
   private createTowerView(t: Tower): PixiTowerView {
     const spec = { tower: t.def, level: t.level + 1, size: t.size, flash: this.shotFx(t.def).includes('muzzle_flash') };
@@ -448,18 +525,18 @@ export class BoardRenderer {
     }
   }
 
-  private drawOverlay(selection: Selection | null, armed: TowerId | null): void {
+  private drawOverlay(selection: Selection | null, armed: Armed | null): void {
     const o = this.overlay;
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.mode === 'arc' ? game.arcWidth() : 0]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
 
-    // Arc mode: mark the stretch of edge the running or next wave comes in from.
-    if (game.mode === 'arc') {
+    // Open field: mark the stretch of edge the running or next wave comes in from.
+    if (game.openField) {
       for (const c of game.activeSpawns()) o.poly(diamond(c.x, c.y, c.x + 1, c.y + 1)).fill({ color: PALETTE.invalid, alpha: 0.28 });
     }
 
@@ -467,7 +544,7 @@ export class BoardRenderer {
     if (selection?.kind === 'place' || (armed && !selection)) {
       for (let y = 0; y < grid.rows; y++) {
         for (let x = 0; x < grid.cols; x++) {
-          if (grid.get(x, y) !== 'build' || game.towerAt(x, y)) continue;
+          if (grid.get(x, y) !== 'build' || game.towerAt(x, y) || game.fenceAt(x, y)) continue;
           o.poly(diamond(x, y, x + 1, y + 1)).stroke({ width: 1, color: PALETTE.gridLine, alpha: 0.22 });
         }
       }
@@ -496,6 +573,9 @@ export class BoardRenderer {
         range(t.x, t.y, game.levelOf(t).range, 'minRange' in def ? def.minRange : 0);
         o.poly(diamond(t.cx, t.cy, t.cx + t.size, t.cy + t.size)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
       }
+    } else if (selection?.kind === 'fence') {
+      const f = game.fenceById(selection.id);
+      if (f) o.poly(diamond(f.cx, f.cy, f.cx + 1, f.cy + 1)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
     }
   }
 
@@ -529,6 +609,7 @@ export class BoardRenderer {
       }
     }
     for (const id of this.shotOrigins.keys()) if (!live.has(id)) this.shotOrigins.delete(id);
+    if (this.game.mode === 'siege') this.drawSiege(g, dt);
 
     // Greek fire: a jet of flame from the siphon to its target (rendered when the art has it).
     for (const t of this.game.towers) {
@@ -614,9 +695,10 @@ export class BoardRenderer {
    * Draw one frame. `alpha` interpolates between the last two sim steps.
    * `armed` is the gun picked in the build menu, if any.
    */
-  render(alpha: number, selection: Selection | null, armed: TowerId | null, dtSeconds: number): void {
+  render(alpha: number, selection: Selection | null, armed: Armed | null, dtSeconds: number): void {
     this.applyCamera();
     this.syncTowers(dtSeconds);
+    this.syncFences();
     this.syncEnemies(alpha);
     this.drawOverlay(selection, armed);
     this.drawShots(alpha, dtSeconds);
