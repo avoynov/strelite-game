@@ -1,9 +1,11 @@
-import { applyDamage } from './damage';
-import { ECONOMY, ENEMIES, TOWERS, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { afterArmor, applyDamage } from './damage';
+import type { Upgrades } from './research';
+import { ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
-import { TOTAL_WAVES, waveSpec, type WaveSpec } from './waves';
+import { arcHalfWidth, arcHpFactor, levelWaves, siegeHpFactor } from './levels';
+import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
 
@@ -25,6 +27,14 @@ export interface Enemy {
   /** Remaining path length to the goal in cells; lower means further along. */
   remaining: number;
   alive: boolean;
+  /** Flying: goes straight to the goal and only some guns can hit it. */
+  air: boolean;
+  /** Phase of the speed surges of a swerving unit. */
+  phase: number;
+  /** Siege mode: index of the cell of the fence or gun it stands stopped at, -1 when walking. */
+  wall: number;
+  /** Siege mode: seconds until it can strike again. */
+  attackCooldown: number;
 }
 
 export interface TowerStats {
@@ -50,8 +60,36 @@ export interface Tower {
   cooldown: number;
   /** Direction the gun points, radians: atan2(dy, dx) in grid cells. */
   aim: number;
+  /** Enemy the gun is on; kept until it dies or leaves range. 0 for none. */
+  targetId: number;
+  /** Flame: seconds spent on the current target (the flame heats up). */
+  heat: number;
+  /** Flame: true while it is burning a target this step. */
+  firing: boolean;
+  /** Siege mode: health; the gun is wrecked at 0. Unused elsewhere. */
+  hp: number;
+  maxHp: number;
   stats: TowerStats;
 }
+
+/** Siege mode: one tile of fence. Level 0 wood, 1 stone, 2 steel. */
+export interface Fence {
+  id: number;
+  kind: 'fence';
+  cx: number;
+  cy: number;
+  /** Centre in grid cells. */
+  x: number;
+  y: number;
+  level: number;
+  hp: number;
+  maxHp: number;
+  invested: number;
+}
+
+/** Something siege enemies can stop at and break: a gun or a fence. */
+export type Structure = Tower | Fence;
+const isFence = (s: Structure): s is Fence => 'kind' in s && s.kind === 'fence';
 
 export interface Projectile {
   id: number;
@@ -60,6 +98,10 @@ export interface Projectile {
   /** Enemy a direct round follows; 0 for shells. */
   targetId: number;
   damage: number;
+  /** Fraction of armour the round ignores. */
+  pierce: number;
+  /** More enemies a direct round goes on into after its target. */
+  passThrough: number;
   speed: number;
   splash: number;
   /** Where it was fired from and where it is going (shells: fixed burst point). */
@@ -80,20 +122,60 @@ export type GameEvent =
   | { type: 'shot'; towerId: number; projectileId: number }
   | { type: 'hit'; enemyId: number; dealt: number; overkill: number; x: number; y: number }
   | { type: 'burst'; x: number; y: number; radius: number }
+  /** A direct round struck its target. */
+  | { type: 'impact'; x: number; y: number }
   | { type: 'fizzle'; projectileId: number; x: number; y: number }
+  /** A railgun fired: everything on the segment was hit. */
+  | { type: 'rail'; towerId: number; x1: number; y1: number; x2: number; y2: number }
   | { type: 'kill'; enemyId: number; reward: number; x: number; y: number }
   | { type: 'leak'; enemyId: number }
+  /** Siege mode: a unit shot at or rammed a gun or fence. */
+  | { type: 'strike'; kind: Assault['kind']; enemyId: number; x1: number; y1: number; x2: number; y2: number }
+  /** Siege mode: a gun or fence was destroyed. */
+  | { type: 'wrecked'; fence: boolean; x: number; y: number; size: number }
   | { type: 'waveStart'; wave: number }
   | { type: 'waveClear'; wave: number; bonus: number }
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' };
+
+export interface GameOptions {
+  /** Map level, 1-based: decides which guns can be built and which enemies attack. */
+  level?: number;
+  /** Waves to clear to win; the level's own number when absent. */
+  totalWaves?: number;
+  /** Wave plan to use instead of the standard one (for tests and scenarios). */
+  waves?: (n: number, level: number) => WaveSpec;
+  /** Finished research: which guns can be built, and the boosts. Without it every gun is open and nothing is boosted. */
+  upgrades?: Upgrades;
+}
 
 const ARRIVE_EPS = 1e-6;
 /** A gun fires once it points within this angle of its aim point. */
 const AIM_TOLERANCE = (4 * Math.PI) / 180;
 const TWO_PI = Math.PI * 2;
+/** A flame counts as this many hits a second against armour. */
+const BEAM_HITS_PER_SECOND = 2;
+/** Half-width of a railgun slug's path, in tiles (added to each enemy's radius). */
+const RAIL_HALF_WIDTH = 0.35;
+/** A round passing through looks for its next victim this far from the impact. */
+const PASS_THROUGH_REACH = 1.2;
+
+/** Siege mode: what stepping into a wall costs a unit that never breaks one (it goes round any way there is). */
+const NO_BREAK = 1000;
+
+/** Seconds a swerving unit holds one speed before it jerks to another. */
+const SWERVE_SECONDS = 1.4;
+
+/** Deterministic pseudo-random number in [0, 1) from an integer. */
+function hash01(n: number): number {
+  let h = n | 0;
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h = Math.imul(h ^ (h >>> 16), 0x45d9f3b);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+}
 
 /** Smallest signed difference b - a, in (-π, π]. */
 export function angleDelta(a: number, b: number): number {
@@ -108,18 +190,30 @@ interface SpawnState {
   timer: number;
 }
 
+/** Gold at the start of a map level. */
+export function startMoney(level: number): number {
+  const perLevel = ECONOMY.startMoneyPerLevel * (Math.min(level, ECONOMY.startMoneyLevelCap) - 1);
+  return ECONOMY.startMoney + perLevel + Math.round((ECONOMY.headStart * goldBefore(level)) / 5) * 5;
+}
+
 export class Game {
-  readonly flow: FlowField;
-  money = ECONOMY.startMoney;
+  /** Distance field to the goal; rebuilt in arc mode whenever a gun is built or sold. */
+  flow: FlowField;
+  money: number;
   lives = ECONOMY.startLives;
   /** Number of the current or last started wave, 0 before the first. */
   wave = 0;
-  readonly totalWaves = TOTAL_WAVES;
+  readonly totalWaves: number;
+  readonly level: number;
+  /** Gold taken in this battle (kills and wave bonuses), whatever was spent. */
+  goldEarned = 0;
   phase: Phase = 'build';
   time = 0;
 
   enemies: Enemy[] = [];
   towers: Tower[] = [];
+  /** Siege mode only. */
+  fences: Fence[] = [];
   projectiles: Projectile[] = [];
 
   private nextId = 1;
@@ -127,15 +221,64 @@ export class Game {
   private spawnState: SpawnState[] = [];
   private spawned = 0;
   private events: GameEvent[] = [];
+  /** Units dropped during this step (by destroyed APCs); join after it. */
+  private dropped: Enemy[] = [];
+  private readonly waves: (n: number, level: number) => WaveSpec;
+  private readonly upgrades: Upgrades | null;
+  /** Gun stats with research applied, per gun and level. */
+  private readonly levelCache = new Map<string, TowerLevel>();
+  private readonly defCache = new Map<TowerId, TowerDef>();
   /** Tower id per cell, 0 where free. */
   private readonly occupied: Int32Array;
+  /** Siege mode: fence id per cell, 0 where none. */
+  private readonly fenceGrid: Int32Array;
+  /** Siege mode: one field per detour length, built when first needed after the walls change. */
+  private readonly fields = new Map<number, FlowField>();
+  /** Siege mode: the open-ground distance, walls ignored; orders the enemies along the way. */
+  private readonly ground: FlowField | null;
+  /** Siege mode: cells enemies come in from; nothing can be built there. */
+  private readonly entry: Set<number>;
 
-  constructor(readonly map: BuiltMap) {
-    this.flow = new FlowField(map.grid, map.goals, (x, y) => map.grid.get(x, y) === 'path');
+  constructor(
+    readonly map: BuiltMap,
+    opts: GameOptions = {},
+  ) {
+    this.level = Math.max(1, Math.floor(opts.level ?? 1));
+    this.totalWaves = opts.totalWaves ?? levelWaves(this.level);
+    this.upgrades = opts.upgrades ?? null;
+    this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
+    this.lives += this.upgrades?.lives ?? 0;
+    this.waves = opts.waves ?? waveSpec;
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
+    this.fenceGrid = new Int32Array(map.grid.cols * map.grid.rows);
+    const { grid } = map;
+    this.ground = map.mode === 'siege' ? new FlowField(grid, map.goals, (x, y) => grid.get(x, y) !== 'blocked') : null;
+    this.entry = new Set(map.mode === 'siege' ? (map.arcSpawns ?? []).map((c) => grid.index(c.x, c.y)) : []);
+    this.flow = this.makeFlow(this.occupied);
   }
 
   // ---- queries -------------------------------------------------------------
+
+  get mode(): 'path' | 'arc' | 'siege' {
+    return this.map.mode;
+  }
+
+  /** Arc and siege modes: enemies cross open ground from a widening arc. */
+  get openField(): boolean {
+    return this.map.mode !== 'path';
+  }
+
+  /** Arc mode: half-width (radians) of the sector the running or next wave comes from. */
+  arcWidth(): number {
+    const n = this.phase === 'wave' ? this.wave : Math.min(this.wave + 1, this.totalWaves);
+    return arcHalfWidth(n, this.totalWaves, this.level);
+  }
+
+  /** Arc mode: the edge cells the running or next wave comes in from. */
+  activeSpawns(): Cell[] {
+    const w = this.arcWidth();
+    return (this.map.arcSpawns ?? []).filter((s) => Math.abs(s.off) <= w);
+  }
 
   /** The tower whose footprint covers this cell. */
   towerAt(cx: number, cy: number): Tower | undefined {
@@ -148,13 +291,85 @@ export class Game {
     return this.towers.find((t) => t.id === id);
   }
 
+  fenceAt(cx: number, cy: number): Fence | undefined {
+    if (!this.map.grid.inBounds(cx, cy)) return undefined;
+    const id = this.fenceGrid[this.map.grid.index(cx, cy)];
+    return id ? this.fenceById(id) : undefined;
+  }
+
+  fenceById(id: number): Fence | undefined {
+    return this.fences.find((f) => f.id === id);
+  }
+
+  /** Cost to raise a fence to its next level, or null at steel. */
+  fenceUpgradeCost(f: Fence): number | null {
+    return FENCE_LEVELS[f.level + 1]?.cost ?? null;
+  }
+
+  fenceSellValue(f: Fence): number {
+    return Math.floor(f.invested * ECONOMY.sellRefund);
+  }
+
+  /** Why a fence cannot go on this cell, or null when it can. */
+  fenceError(cx: number, cy: number): 'notBuildable' | 'occupied' | null {
+    const { grid } = this.map;
+    if (this.mode !== 'siege' || grid.get(cx, cy) !== 'build' || this.entry.has(grid.index(cx, cy))) return 'notBuildable';
+    if (this.occupied[grid.index(cx, cy)] || this.fenceGrid[grid.index(cx, cy)] || this.walkerOn(cx, cy, 1)) return 'occupied';
+    return null;
+  }
+
   levelOf(tower: Tower): TowerLevel {
-    return TOWERS[tower.def].levels[tower.level]!;
+    return this.levelStats(tower.def, tower.level);
+  }
+
+  /** A gun level's numbers with research applied (level is 0-based). */
+  levelStats(def: TowerId, level: number): TowerLevel {
+    const key = `${def}:${level}`;
+    let l = this.levelCache.get(key);
+    if (!l) {
+      const base: TowerLevel = TOWERS[def].levels[level]!;
+      const m = this.upgrades?.gun[def];
+      l = m
+        ? {
+            ...base,
+            damage: Math.round(base.damage * m.damage * 10) / 10,
+            fireInterval: Math.round(base.fireInterval * m.reload * 1000) / 1000,
+            range: base.range + m.range,
+            ...(base.splash ? { splash: Math.round((base.splash + m.splash) * 100) / 100 } : {}),
+          }
+        : base;
+      this.levelCache.set(key, l);
+    }
+    return l;
+  }
+
+  /** A gun's definition with research applied (armour pierce, pass-through, flame heat-up). */
+  defOf(id: TowerId): TowerDef {
+    let d = this.defCache.get(id);
+    if (!d) {
+      const base: TowerDef = TOWERS[id];
+      const m = this.upgrades?.gun[id];
+      d = m
+        ? {
+            ...base,
+            pierce: Math.min(1, base.pierce + m.pierce),
+            ...(base.passThrough !== undefined || m.passThrough ? { passThrough: (base.passThrough ?? 0) + m.passThrough } : {}),
+            ...(base.rampTime !== undefined ? { rampTime: base.rampTime * m.rampTime } : {}),
+          }
+        : base;
+      this.defCache.set(id, d);
+    }
+    return d;
   }
 
   /** Cost of the next level, or null at max level. */
   upgradeCost(tower: Tower): number | null {
     return TOWERS[tower.def].levels[tower.level + 1]?.cost ?? null;
+  }
+
+  /** Whether research allows raising the gun to its next level. */
+  canRaise(tower: Tower): boolean {
+    return !this.upgrades || tower.level + 2 <= (this.upgrades.maxLevel[tower.def] ?? Infinity);
   }
 
   sellValue(tower: Tower): number {
@@ -168,15 +383,22 @@ export class Game {
     let occupied = false;
     for (let y = cy; y < cy + size; y++) {
       for (let x = cx; x < cx + size; x++) {
-        if (grid.get(x, y) !== 'build') return 'notBuildable';
-        if (this.occupied[grid.index(x, y)]) occupied = true;
+        if (grid.get(x, y) !== 'build' || this.entry.has(grid.index(x, y))) return 'notBuildable';
+        if (this.occupied[grid.index(x, y)] || this.fenceGrid[grid.index(x, y)]) occupied = true;
       }
     }
     return occupied ? 'occupied' : null;
   }
 
+  /** Whether research has opened the gun (every gun is open when the game has no research). */
+  isUnlocked(def: TowerId): boolean {
+    return this.upgrades ? this.upgrades.guns.includes(def) : true;
+  }
+
   canBuildAt(def: TowerId, cx: number, cy: number): boolean {
-    return this.placementError(def, cx, cy) === null;
+    if (this.placementError(def, cx, cy) !== null) return false;
+    if (this.mode === 'siege') return !this.walkerOn(cx, cy, TOWERS[def].size);
+    return this.mode !== 'arc' || this.blockError(cx, cy, TOWERS[def].size) === null;
   }
 
   /** Enemies still to come in the running wave. */
@@ -195,11 +417,17 @@ export class Game {
   /** Build a gun with its footprint's top-left cell at (cx, cy). */
   build(def: TowerId, cx: number, cy: number): ActionResult {
     if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    if (!this.isUnlocked(def)) return { ok: false, reason: 'locked' };
     const err = this.placementError(def, cx, cy);
     if (err) return { ok: false, reason: err };
     const d = TOWERS[def];
     const cost = d.levels[0].cost;
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    if (this.mode === 'arc') {
+      const block = this.blockError(cx, cy, d.size);
+      if (block) return { ok: false, reason: block };
+    }
+    if (this.mode === 'siege' && this.walkerOn(cx, cy, d.size)) return { ok: false, reason: 'occupied' };
     this.money -= cost;
     const tower: Tower = {
       id: this.nextId++,
@@ -212,10 +440,16 @@ export class Game {
       y: cy + d.size / 2,
       cooldown: 0,
       aim: this.initialAim(cx + d.size / 2, cy + d.size / 2),
+      targetId: 0,
+      heat: 0,
+      firing: false,
+      hp: gunHp(d.size, 0),
+      maxHp: gunHp(d.size, 0),
       stats: { dealt: 0, wasted: 0, kills: 0, invested: cost },
     };
     this.towers.push(tower);
     this.markFootprint(tower, tower.id);
+    this.rebuildFlow();
     return { ok: true };
   }
 
@@ -224,10 +458,15 @@ export class Game {
     if (!t) return { ok: false, reason: 'notFound' };
     const cost = this.upgradeCost(t);
     if (cost === null) return { ok: false, reason: 'maxLevel' };
+    if (!this.canRaise(t)) return { ok: false, reason: 'levelLocked' };
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
     this.money -= cost;
     t.level++;
     t.stats.invested += cost;
+    // A bigger gun is sturdier by the difference; damage taken stays.
+    const maxHp = gunHp(t.size, t.level);
+    t.hp += maxHp - t.maxHp;
+    t.maxHp = maxHp;
     return { ok: true };
   }
 
@@ -237,13 +476,53 @@ export class Game {
     this.money += this.sellValue(t);
     this.markFootprint(t, 0);
     this.towers = this.towers.filter((o) => o !== t);
+    this.rebuildFlow();
+    return { ok: true };
+  }
+
+  /** Siege mode: put a wooden fence on one tile. */
+  buildFence(cx: number, cy: number): ActionResult {
+    if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    const err = this.fenceError(cx, cy);
+    if (err) return { ok: false, reason: err };
+    const { cost, hp } = FENCE_LEVELS[0];
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    const f: Fence = { id: this.nextId++, kind: 'fence', cx, cy, x: cx + 0.5, y: cy + 0.5, level: 0, hp, maxHp: hp, invested: cost };
+    this.fences.push(f);
+    this.fenceGrid[this.map.grid.index(cx, cy)] = f.id;
+    this.rebuildFlow();
+    return { ok: true };
+  }
+
+  /** Wood to stone, stone to steel; adds the difference in health. */
+  upgradeFence(id: number): ActionResult {
+    const f = this.fenceById(id);
+    if (!f) return { ok: false, reason: 'notFound' };
+    const cost = this.fenceUpgradeCost(f);
+    if (cost === null) return { ok: false, reason: 'maxLevel' };
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    f.level++;
+    f.invested += cost;
+    const maxHp = FENCE_LEVELS[f.level]!.hp;
+    f.hp += maxHp - f.maxHp;
+    f.maxHp = maxHp;
+    return { ok: true };
+  }
+
+  sellFence(id: number): ActionResult {
+    const f = this.fenceById(id);
+    if (!f) return { ok: false, reason: 'notFound' };
+    this.money += this.fenceSellValue(f);
+    this.removeFence(f);
     return { ok: true };
   }
 
   startWave(): ActionResult {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
     this.wave++;
-    this.currentWave = waveSpec(this.wave);
+    this.currentWave = this.waves(this.wave, this.level);
     this.spawnState = this.currentWave.groups.map((g) => ({ left: g.count, timer: g.delay }));
     this.phase = 'wave';
     this.events.push({ type: 'waveStart', wave: this.wave });
@@ -267,9 +546,14 @@ export class Game {
     }
     this.spawn(dt);
     this.moveEnemies(dt);
+    if (this.mode === 'siege') this.assault(dt);
     this.fireTowers(dt);
     this.moveProjectiles(dt);
     this.enemies = this.enemies.filter((e) => e.alive);
+    if (this.dropped.length) {
+      this.enemies.push(...this.dropped);
+      this.dropped = [];
+    }
     this.checkWaveEnd();
   }
 
@@ -279,8 +563,96 @@ export class Game {
     }
   }
 
-  /** A new gun starts pointing at the nearest stretch of road. */
+  /**
+   * Ground the walkers may use: the road in path mode; open, unbuilt ground in
+   * arc mode. In siege mode the field of the units that never break through.
+   */
+  private makeFlow(occupied: Int32Array): FlowField {
+    const { grid } = this.map;
+    if (this.map.mode === 'path') return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) === 'path');
+    if (this.map.mode === 'siege') return this.field(NO_BREAK);
+    return new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked' && !occupied[grid.index(x, y)]);
+  }
+
+  /**
+   * Siege mode: the way to the goal for a unit that would rather walk `detour`
+   * tiles round to a gap than break through a wall. Walls are walkable at that
+   * cost, so with no gap near it heads into the wall and breaks it.
+   */
+  private field(detour: number): FlowField {
+    let f = this.fields.get(detour);
+    if (!f) {
+      const { grid } = this.map;
+      const wall = (x: number, y: number) => this.occupied[grid.index(x, y)] !== 0 || this.fenceGrid[grid.index(x, y)] !== 0;
+      f = new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked', (x, y) => (wall(x, y) ? 1 + detour : 1));
+      this.fields.set(detour, f);
+    }
+    return f;
+  }
+
+  /** The field a unit walks by: its own detour in siege mode, the shared one elsewhere. */
+  private fieldOf(def: EnemyId): FlowField {
+    if (this.mode !== 'siege') return this.flow;
+    const d = ENEMIES[def];
+    return this.field('assault' in d && 'detour' in d ? d.detour : NO_BREAK);
+  }
+
+  /** Siege mode: whether a fence or gun stands on the cell. */
+  private isWall(x: number, y: number): boolean {
+    const i = this.map.grid.index(x, y);
+    return this.occupied[i] !== 0 || this.fenceGrid[i] !== 0;
+  }
+
+  /** Siege mode: the gun or fence on a cell, by index. */
+  private structureAt(i: number): Structure | undefined {
+    const tid = this.occupied[i];
+    if (tid) return this.towerById(tid);
+    const fid = this.fenceGrid[i];
+    return fid ? this.fenceById(fid) : undefined;
+  }
+
+  /** A walker stands on the square, or is about to step into it. */
+  private walkerOn(cx: number, cy: number, size: number): boolean {
+    const onIt = (x: number, y: number) => x >= cx && x < cx + size && y >= cy && y < cy + size;
+    return this.enemies.some((e) => !e.air && (onIt(Math.floor(e.x), Math.floor(e.y)) || onIt(e.target.x, e.target.y)));
+  }
+
+  /** Arc mode: after the guns changed, walk around them; a walker whose next cell is now built on steps back to its own. */
+  private rebuildFlow(): void {
+    if (this.mode === 'siege') {
+      this.fields.clear();
+      this.flow = this.makeFlow(this.occupied);
+      return;
+    }
+    if (this.mode !== 'arc') return;
+    this.flow = this.makeFlow(this.occupied);
+    for (const e of this.enemies) {
+      if (e.air || this.flow.distanceAt(e.target.x, e.target.y) >= 0) continue;
+      e.target = { x: Math.floor(e.x), y: Math.floor(e.y) };
+    }
+  }
+
+  /**
+   * Arc mode: a gun may not stand on a walker, nor shut the goal off from any
+   * edge enemies can come from or from any walker already on the field.
+   */
+  private blockError(cx: number, cy: number, size: number): 'occupied' | 'blocks' | null {
+    if (this.walkerOn(cx, cy, size)) return 'occupied';
+    const trial = this.occupied.slice();
+    for (let y = cy; y < cy + size; y++) for (let x = cx; x < cx + size; x++) trial[this.map.grid.index(x, y)] = -1;
+    const flow = this.makeFlow(trial);
+    const cut = (c: Cell) => flow.distanceAt(c.x, c.y) < 0;
+    if ((this.map.arcSpawns ?? []).some(cut)) return 'blocks';
+    if (this.enemies.some((e) => !e.air && cut({ x: Math.floor(e.x), y: Math.floor(e.y) }))) return 'blocks';
+    return null;
+  }
+
+  /** A new gun starts pointing at the nearest stretch of road (in arc mode: out towards the arc). */
   private initialAim(x: number, y: number): number {
+    if (this.openField) {
+      const g = this.map.goals[0]!;
+      return Math.atan2(y - g.y - 1, x - g.x - 1);
+    }
     const { grid } = this.map;
     let best = Infinity;
     let aim = -Math.PI / 2;
@@ -305,36 +677,93 @@ export class Game {
       if (st.left <= 0) return;
       st.timer -= dt;
       while (st.left > 0 && st.timer <= 0) {
-        const s = this.map.spawns[this.spawned++ % this.map.spawns.length]!;
-        const x = s.x + 0.5;
-        const y = s.y + 0.5;
-        const next = this.flow.next(s.x, s.y);
-        this.enemies.push({
-          id: this.nextId++,
-          def: g.enemy,
-          hp: g.hp,
-          maxHp: g.hp,
-          reward: g.reward,
-          x,
-          y,
-          px: x,
-          py: y,
-          heading: next ? Math.atan2(next.y - s.y, next.x - s.x) : 0,
-          target: { x: s.x, y: s.y },
-          remaining: this.flow.distanceAt(s.x, s.y),
-          alive: true,
-        });
+        const s = this.spawnCell();
+        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * (this.mode === 'siege' ? siegeHpFactor(this.level) : 1));
+        this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
       }
     });
   }
 
+  /** Where the next enemy enters: the road's start, or (arc mode) a cell of the current arc, spread evenly over it. */
+  private spawnCell(): Cell {
+    const n = this.spawned++;
+    if (!this.openField) return this.map.spawns[n % this.map.spawns.length]!;
+    const cells = this.activeSpawns();
+    return cells[Math.floor(hash01(n * 2654435761 + this.wave) * cells.length)] ?? this.map.arcSpawns![0]!;
+  }
+
+  private makeEnemy(def: EnemyId, hp: number, reward: number, x: number, y: number, target: Cell): Enemy {
+    const id = this.nextId++;
+    const air = 'air' in ENEMIES[def] && ENEMIES[def].air === true;
+    const e: Enemy = {
+      id,
+      def,
+      hp,
+      maxHp: hp,
+      reward,
+      x,
+      y,
+      px: x,
+      py: y,
+      heading: 0,
+      target,
+      remaining: 0,
+      alive: true,
+      air,
+      // Spread the surges of swerving riders so they do not move in step.
+      phase: (id * 2.399963) % TWO_PI,
+      wall: -1,
+      attackCooldown: 0,
+    };
+    if (air) {
+      // Flyers ignore the road and head straight for the goal.
+      e.target = this.map.goals[0] ?? target;
+      e.heading = Math.atan2(e.target.y + 0.5 - y, e.target.x + 0.5 - x);
+      e.remaining = Math.hypot(e.target.x + 0.5 - x, e.target.y + 0.5 - y);
+    } else {
+      const next = this.fieldOf(def).next(target.x, target.y);
+      e.heading = next ? Math.atan2(next.y - target.y, next.x - target.x) : 0;
+      e.remaining = (this.ground ?? this.flow).distanceAt(target.x, target.y) + Math.hypot(target.x + 0.5 - x, target.y + 0.5 - y);
+    }
+    return e;
+  }
+
   /**
-   * Walk a point along the flow field for `budget` cells of distance.
-   * Returns false when it runs off the end of the road (reached the goal).
+   * Speed right now. Swerving units jerk between bursts and brakes: every
+   * SWERVE_SECONDS each picks a new speed between (1 − swerve) and (1 + swerve)
+   * times its nominal speed. It averages out, so they arrive on time, but a gun
+   * that leads its target lands its round where the rider would have been.
    */
-  private walk(pos: { x: number; y: number; target: Cell; heading?: number }, budget: number): boolean {
+  speedOf(e: Enemy): number {
+    const d = ENEMIES[e.def];
+    const swerve = 'swerve' in d ? d.swerve : 0;
+    if (!swerve) return d.speed;
+    const seg = Math.floor((this.time + e.phase) / SWERVE_SECONDS);
+    return d.speed * (1 + swerve * (2 * hash01(e.id * 7919 + seg * 104729) - 1));
+  }
+
+  /** Move a flyer straight towards its goal; false once it arrives. */
+  private fly(e: Enemy, budget: number): boolean {
+    const tx = e.target.x + 0.5;
+    const ty = e.target.y + 0.5;
+    const d = Math.hypot(tx - e.x, ty - e.y);
+    if (d <= budget) return false;
+    e.x += ((tx - e.x) / d) * budget;
+    e.y += ((ty - e.y) / d) * budget;
+    e.remaining = d - budget;
+    return true;
+  }
+
+  /**
+   * Walk a point along a flow field for `budget` cells of distance.
+   * Returns false when it runs off the end of the road (reached the goal).
+   * In siege mode it stops at the middle of its cell when the next one is a
+   * fence or gun, and `wall` says which.
+   */
+  private walk(pos: { x: number; y: number; target: Cell; heading?: number; wall?: number }, budget: number, flow = this.flow): boolean {
+    if (pos.wall !== undefined) pos.wall = -1;
     while (budget > 0) {
       const tx = pos.target.x + 0.5;
       const ty = pos.target.y + 0.5;
@@ -349,8 +778,12 @@ export class Game {
         budget -= m;
         if (m < d) break;
       }
-      const next = this.flow.next(pos.target.x, pos.target.y);
+      const next = flow.next(pos.target.x, pos.target.y);
       if (!next) return false;
+      if (this.mode === 'siege' && this.isWall(next.x, next.y)) {
+        if (pos.wall !== undefined) pos.wall = this.map.grid.index(next.x, next.y);
+        break;
+      }
       pos.target = next;
     }
     return true;
@@ -359,20 +792,95 @@ export class Game {
   private moveEnemies(dt: number): void {
     for (const e of this.enemies) {
       if (!e.alive) continue;
-      if (!this.walk(e, ENEMIES[e.def].speed * dt)) {
+      if (e.air) {
+        if (!this.fly(e, this.speedOf(e) * dt)) this.leak(e);
+        continue;
+      }
+      if (!this.walk(e, this.speedOf(e) * dt, this.fieldOf(e.def))) {
         this.leak(e);
         continue;
       }
       const tdist = Math.hypot(e.target.x + 0.5 - e.x, e.target.y + 0.5 - e.y);
-      e.remaining = this.flow.distanceAt(e.target.x, e.target.y) + tdist;
+      e.remaining = (this.ground ?? this.flow).distanceAt(e.target.x, e.target.y) + tdist;
     }
   }
 
-  /** Where an enemy will be after `seconds`, if nothing stops it. */
+  /**
+   * Where an enemy will be after `seconds` at its nominal speed. Guns lead their
+   * targets with this, so units that surge and brake make them miss.
+   */
   predict(e: Enemy, seconds: number): { x: number; y: number } {
+    const budget = ENEMIES[e.def].speed * seconds;
+    if (e.air) {
+      const tx = e.target.x + 0.5;
+      const ty = e.target.y + 0.5;
+      const d = Math.hypot(tx - e.x, ty - e.y);
+      const k = d > 0 ? Math.min(1, budget / d) : 0;
+      return { x: e.x + (tx - e.x) * k, y: e.y + (ty - e.y) * k };
+    }
     const p = { x: e.x, y: e.y, target: e.target };
-    this.walk(p, ENEMIES[e.def].speed * seconds);
+    this.walk(p, budget, this.fieldOf(e.def));
     return p;
+  }
+
+  /**
+   * Siege mode: every unit with an assault strikes the wall it stands at, or
+   * else a gun within its reach; one that only passes by leans on the wall it
+   * is stuck at.
+   */
+  private assault(dt: number): void {
+    for (const e of this.enemies) {
+      if (!e.alive || e.air) continue;
+      const d = ENEMIES[e.def];
+      // Blows grow with the unit: the square root of how much its wave raised its health.
+      const power = Math.sqrt(e.maxHp / d.baseHp);
+      const wall = e.wall >= 0 ? this.structureAt(e.wall) : undefined;
+      if (!('assault' in d)) {
+        if (wall) this.hitStructure(wall, PUSH_DPS * power * dt);
+        continue;
+      }
+      e.attackCooldown = Math.max(0, e.attackCooldown - dt);
+      if (e.attackCooldown > 0) continue;
+      const a: Assault = d.assault;
+      const reach = a.kind === 'ram' ? a.range + d.radius : a.range;
+      let target: Structure | undefined = wall;
+      if (!target) {
+        let best = Infinity;
+        for (const t of this.towers) {
+          const dist = Math.hypot(Math.max(t.cx - e.x, 0, e.x - t.cx - t.size), Math.max(t.cy - e.y, 0, e.y - t.cy - t.size));
+          if (dist <= reach && dist < best) {
+            best = dist;
+            target = t;
+          }
+        }
+      }
+      if (!target) continue;
+      e.attackCooldown = a.interval;
+      this.events.push({ type: 'strike', kind: a.kind, enemyId: e.id, x1: e.x, y1: e.y, x2: target.x, y2: target.y });
+      this.hitStructure(target, a.damage * power);
+    }
+  }
+
+  private hitStructure(s: Structure, damage: number): void {
+    s.hp -= damage;
+    if (s.hp > 0) return;
+    if (isFence(s)) {
+      this.removeFence(s);
+      this.events.push({ type: 'wrecked', fence: true, x: s.x, y: s.y, size: 1 });
+      return;
+    }
+    if (!this.towerById(s.id)) return;
+    this.markFootprint(s, 0);
+    this.towers = this.towers.filter((o) => o !== s);
+    this.events.push({ type: 'wrecked', fence: false, x: s.x, y: s.y, size: s.size });
+    this.rebuildFlow();
+  }
+
+  private removeFence(f: Fence): void {
+    if (!this.fenceById(f.id)) return;
+    this.fenceGrid[this.map.grid.index(f.cx, f.cy)] = 0;
+    this.fences = this.fences.filter((o) => o !== f);
+    this.rebuildFlow();
   }
 
   private leak(e: Enemy): void {
@@ -388,10 +896,19 @@ export class Game {
   private fireTowers(dt: number): void {
     for (const t of this.towers) {
       t.cooldown = Math.max(0, t.cooldown - dt);
-      const def: TowerDef = TOWERS[t.def];
+      t.firing = false;
+      const def: TowerDef = this.defOf(t.def);
       const lvl = this.levelOf(t);
-      const target = this.pickTarget(t, lvl.range, def.minRange ?? 0);
-      if (!target) continue;
+      const target = this.pickTarget(t);
+      if (!target) {
+        t.targetId = 0;
+        t.heat = 0;
+        continue;
+      }
+      if (target.id !== t.targetId) {
+        t.targetId = target.id;
+        t.heat = 0;
+      }
 
       // Aim point: the target itself, or for a lobbed shell the place it will have reached.
       let ax = target.x;
@@ -408,9 +925,19 @@ export class Game {
       const off = angleDelta(t.aim, want);
       const turn = def.turnRate * dt;
       t.aim = Math.abs(off) <= turn ? want : t.aim + Math.sign(off) * turn;
-      if (t.cooldown > 0 || Math.abs(angleDelta(t.aim, want)) > AIM_TOLERANCE) continue;
+      const aimed = Math.abs(angleDelta(t.aim, want)) <= AIM_TOLERANCE;
 
+      if (def.projectile === 'beam') {
+        if (aimed) this.burn(t, def, lvl, target, dt);
+        continue;
+      }
+      if (t.cooldown > 0 || !aimed) continue;
       t.cooldown += lvl.fireInterval;
+
+      if (def.projectile === 'rail') {
+        this.fireRail(t, def, lvl);
+        continue;
+      }
       const id = this.nextId++;
       this.projectiles.push({
         id,
@@ -418,6 +945,8 @@ export class Game {
         kind: def.projectile,
         targetId: def.projectile === 'direct' ? target.id : 0,
         damage: lvl.damage,
+        pierce: def.pierce,
+        passThrough: def.passThrough ?? 0,
         speed: lvl.projectileSpeed,
         splash: lvl.splash ?? 0,
         ox: t.x,
@@ -435,16 +964,112 @@ export class Game {
     }
   }
 
-  /** "First" targeting: the enemy in range that is closest to the goal. */
-  private pickTarget(t: Tower, range: number, minRange: number): Enemy | undefined {
-    let best: Enemy | undefined;
-    for (const e of this.enemies) {
-      if (!e.alive) continue;
-      const d = Math.hypot(e.x - t.x, e.y - t.y);
-      if (d > range || d < minRange) continue;
-      if (!best || e.remaining < best.remaining) best = e;
+  /** Flame: damage per second ramps from `rampFrom` to full while it stays on one target. */
+  private burn(t: Tower, def: TowerDef, lvl: TowerLevel, target: Enemy, dt: number): void {
+    const full = lvl.damage;
+    // The starting heat grows with the level just like the top heat.
+    const from = (def.rampFrom ?? full) * (full / def.levels[0]!.damage);
+    const k = def.rampTime ? Math.min(1, t.heat / def.rampTime) : 1;
+    const dps = from + (full - from) * k;
+    t.heat += dt;
+    t.firing = true;
+    const per = dps / BEAM_HITS_PER_SECOND;
+    const through = afterArmor(per, ENEMIES[target.def].armor, def.pierce) * BEAM_HITS_PER_SECOND;
+    t.stats.wasted += (dps - through) * dt;
+    t.stats.wasted += this.damageEnemy(target, through * dt, t, 0, 0, false);
+  }
+
+  /** Railgun: everything on the ground along the line, out to full range, takes the whole hit. */
+  private fireRail(t: Tower, def: TowerDef, lvl: TowerLevel): void {
+    const x2 = t.x + Math.cos(t.aim) * lvl.range;
+    const y2 = t.y + Math.sin(t.aim) * lvl.range;
+    this.events.push({ type: 'rail', towerId: t.id, x1: t.x, y1: t.y, x2, y2 });
+    let hitAny = false;
+    for (const e of this.onLine(t.x, t.y, x2, y2)) {
+      hitAny = true;
+      t.stats.wasted += this.damageEnemy(e, lvl.damage, t, ENEMIES[e.def].armor, def.pierce);
     }
-    return best;
+    if (!hitAny) t.stats.wasted += lvl.damage;
+  }
+
+  /** Live ground enemies whose body touches the segment (x1, y1)–(x2, y2). */
+  private onLine(x1: number, y1: number, x2: number, y2: number): Enemy[] {
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len2 = dx * dx + dy * dy || 1;
+    return this.enemies.filter((e) => {
+      if (!e.alive || e.air) return false;
+      const k = Math.max(0, Math.min(1, ((e.x - x1) * dx + (e.y - y1) * dy) / len2));
+      return Math.hypot(e.x - (x1 + dx * k), e.y - (y1 + dy * k)) <= RAIL_HALF_WIDTH + ENEMIES[e.def].radius;
+    });
+  }
+
+  /** Enemies this gun could shoot at now. */
+  private candidates(t: Tower): Enemy[] {
+    const def: TowerDef = this.defOf(t.def);
+    const range = this.levelOf(t).range;
+    const min = def.minRange ?? 0;
+    return this.enemies.filter((e) => {
+      if (!e.alive || (e.air && !def.hitsAir)) return false;
+      const d = Math.hypot(e.x - t.x, e.y - t.y);
+      return d <= range && d >= min;
+    });
+  }
+
+  /**
+   * The gun keeps its target until it dies or leaves range; then it picks by
+   * its own fixed priority, and takes the first on the path when nothing
+   * matches that priority.
+   */
+  private pickTarget(t: Tower): Enemy | undefined {
+    const list = this.candidates(t);
+    if (!list.length) return undefined;
+    const kept = t.targetId ? list.find((e) => e.id === t.targetId) : undefined;
+    if (kept) return kept;
+    const def: TowerDef = this.defOf(t.def);
+    const first = (es: Enemy[]) => es.reduce<Enemy | undefined>((b, e) => (!b || e.remaining < b.remaining ? e : b), undefined);
+    /** Highest score wins; ties go to the one closest to the goal. */
+    const best = (score: (e: Enemy) => number) => {
+      let pick: Enemy | undefined;
+      let top = -Infinity;
+      for (const e of list) {
+        const s = score(e);
+        if (s > top || (s === top && pick && e.remaining < pick.remaining)) {
+          top = s;
+          pick = e;
+        }
+      }
+      return pick;
+    };
+    switch (def.targeting) {
+      case 'airFast': {
+        const air = list.filter((e) => e.air);
+        if (air.length) return first(air);
+        return best((e) => ENEMIES[e.def].speed);
+      }
+      case 'armored': {
+        const max = def.maxArmor ?? Infinity;
+        const fit = list.filter((e) => ENEMIES[e.def].armor > 0 && ENEMIES[e.def].armor <= max);
+        if (!fit.length) return first(list);
+        const top = Math.max(...fit.map((e) => ENEMIES[e.def].armor));
+        return first(fit.filter((e) => ENEMIES[e.def].armor === top));
+      }
+      case 'crowd': {
+        const r = this.levelOf(t).splash ?? 0;
+        return best((e) => list.filter((o) => Math.hypot(o.x - e.x, o.y - e.y) <= r + ENEMIES[o.def].radius).length);
+      }
+      case 'strongest':
+        return best((e) => e.hp);
+      case 'line': {
+        const range = this.levelOf(t).range;
+        return best((e) => {
+          const a = Math.atan2(e.y - t.y, e.x - t.x);
+          return this.onLine(t.x, t.y, t.x + Math.cos(a) * range, t.y + Math.sin(a) * range).reduce((s, o) => s + o.hp, 0);
+        });
+      }
+      default:
+        return first(list);
+    }
   }
 
   private moveProjectiles(dt: number): void {
@@ -476,36 +1101,72 @@ export class Game {
       }
       if (p.kind === 'direct') {
         const target = this.enemies.find((e) => e.id === p.targetId)!;
-        if (tower) tower.stats.wasted += this.damageEnemy(target, p.damage, tower);
+        this.events.push({ type: 'impact', x: target.x, y: target.y });
+        let wasted = this.damageEnemy(target, p.damage, tower, ENEMIES[target.def].armor, p.pierce);
+        // A bolt that goes through carries on into the nearest others behind its target.
+        const hit = new Set([target.id]);
+        for (let i = 0; i < p.passThrough; i++) {
+          const next = this.enemies
+            .filter((e) => e.alive && !hit.has(e.id) && e.air === target.air && Math.hypot(e.x - target.x, e.y - target.y) <= PASS_THROUGH_REACH + ENEMIES[e.def].radius)
+            .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0];
+          if (!next) break;
+          hit.add(next.id);
+          wasted += this.damageEnemy(next, p.damage, tower, ENEMIES[next.def].armor, p.pierce);
+        }
+        if (tower) tower.stats.wasted += wasted;
       } else {
         this.events.push({ type: 'burst', x: p.tx, y: p.ty, radius: p.splash });
         let hitAny = false;
         let wasted = 0;
+        // Shells burst on the ground: flyers are out of reach.
         for (const e of this.enemies) {
-          if (!e.alive || Math.hypot(e.x - p.tx, e.y - p.ty) > p.splash + ENEMIES[e.def].radius) continue;
+          if (!e.alive || e.air || Math.hypot(e.x - p.tx, e.y - p.ty) > p.splash + ENEMIES[e.def].radius) continue;
           hitAny = true;
-          wasted += this.damageEnemy(e, p.damage, tower);
+          wasted += this.damageEnemy(e, p.damage, tower, ENEMIES[e.def].armor, p.pierce);
         }
-        // Overkill on a blast counts per target; a shell that hits nothing is wasted whole.
+        // Overkill and armour on a blast count per target; a shell that hits nothing is wasted whole.
         if (tower) tower.stats.wasted += hitAny ? wasted : p.damage;
       }
     }
     this.projectiles = keep;
   }
 
-  /** Apply a hit; returns the overkill (damage beyond the target's health). */
-  private damageEnemy(target: Enemy, damage: number, tower: Tower | undefined): number {
-    const r = applyDamage(target.hp, damage);
+  /**
+   * Apply a hit through armour; returns the damage lost to overkill and armour.
+   * `announce` is false for the many small ticks of a flame.
+   */
+  private damageEnemy(target: Enemy, damage: number, tower: Tower | undefined, armor = 0, pierce = 0, announce = true): number {
+    const r = applyDamage(target.hp, damage, armor, pierce);
     target.hp = r.hpAfter;
     if (tower) tower.stats.dealt += r.dealt;
-    this.events.push({ type: 'hit', enemyId: target.id, dealt: r.dealt, overkill: r.overkill, x: target.x, y: target.y });
+    if (announce) this.events.push({ type: 'hit', enemyId: target.id, dealt: r.dealt, overkill: r.overkill, x: target.x, y: target.y });
     if (target.hp <= 0) {
       target.alive = false;
       this.money += target.reward;
+      this.goldEarned += target.reward;
       if (tower) tower.stats.kills++;
       this.events.push({ type: 'kill', enemyId: target.id, reward: target.reward, x: target.x, y: target.y });
+      this.dropUnits(target);
     }
-    return r.overkill;
+    return r.overkill + r.blocked;
+  }
+
+  /** A destroyed APC unloads its squad where it stopped, at the same strength as its wave. */
+  private dropUnits(from: Enemy): void {
+    const def = ENEMIES[from.def];
+    if (!('dropsOnDeath' in def)) return;
+    const drop = def.dropsOnDeath;
+    const kind = drop.enemy as EnemyId;
+    const k = from.maxHp / def.baseHp;
+    const hp = Math.max(1, Math.round(ENEMIES[kind].baseHp * k));
+    for (let i = 0; i < drop.count; i++) {
+      // A short file behind the wreck, all walking on towards the same cell.
+      const back = 0.18 * i;
+      const x = from.x - Math.cos(from.heading) * back;
+      const y = from.y - Math.sin(from.heading) * back;
+      const e = this.makeEnemy(kind, hp, ENEMIES[kind].baseReward, x, y, from.target);
+      this.dropped.push(e);
+    }
   }
 
   private checkWaveEnd(): void {
@@ -513,6 +1174,7 @@ export class Game {
     if (this.enemies.length > 0 || this.projectiles.length > 0) return;
     const bonus = this.currentWave?.clearBonus ?? 0;
     this.money += bonus;
+    this.goldEarned += bonus;
     this.currentWave = null;
     this.spawnState = [];
     this.events.push({ type: 'waveClear', wave: this.wave, bonus });

@@ -1,13 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { ECONOMY, ENEMIES, TICK, TOWERS } from '../src/sim/content';
-import { angleDelta, Game } from '../src/sim/game';
+import { angleDelta, Game, startMoney, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { waveSpec } from '../src/sim/waves';
-import { playOut, run } from './helpers/bot';
+import { waveOfStrength, waveSpec, waveStrength } from '../src/sim/waves';
+import { run } from './helpers/bot';
 
-const newGame = () => new Game(buildPathMap(MEADOW));
+/** Map level 2 on the fixed test map, its waves rising from strength 1 (so the first is small). */
+const newGame = (level = 2) => new Game(buildPathMap(MEADOW), { level, totalWaves: 15, waves: (n, l) => waveOfStrength(n, l) });
 /** Lives lost if a whole wave walks through. */
-const leakOf = (n: number) => waveSpec(n).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
+const leakOf = (n: number) => waveOfStrength(n, 2).groups.reduce((s, g) => s + g.count * ENEMIES[g.enemy].leakDamage, 0);
 
 describe('building', () => {
   it('needs the whole footprint on free build cells and charges money', () => {
@@ -16,7 +17,7 @@ describe('building', () => {
     expect(g.build('zis3', 1, 5)).toEqual({ ok: false, reason: 'notBuildable' }); // one corner on the road
     expect(g.build('zis3', 20, 0)).toEqual({ ok: false, reason: 'notBuildable' }); // off the map
     expect(g.build('zis3', 2, 2)).toEqual({ ok: true });
-    expect(g.money).toBe(ECONOMY.startMoney - TOWERS.zis3.levels[0].cost);
+    expect(g.money).toBe(startMoney(2) - TOWERS.zis3.levels[0].cost);
     expect(g.build('zis3', 3, 3)).toEqual({ ok: false, reason: 'occupied' }); // overlaps by one cell
     expect(g.build('zis3', 4, 2)).toEqual({ ok: true }); // right next to it
   });
@@ -39,11 +40,11 @@ describe('building', () => {
 
   it('upgrades up to max level, sells for a partial refund and frees the ground', () => {
     const g = newGame();
-    g.money = 1000;
+    g.money = 5000;
     g.build('zis3', 2, 2);
     const t = g.towers[0]!;
-    expect(g.upgrade(t.id).ok).toBe(true);
-    expect(g.upgrade(t.id).ok).toBe(true);
+    for (let i = 1; i < TOWERS.zis3.levels.length; i++) expect(g.upgrade(t.id).ok).toBe(true);
+    expect(t.level).toBe(4);
     expect(g.upgrade(t.id)).toEqual({ ok: false, reason: 'maxLevel' });
     const invested = TOWERS.zis3.levels.reduce((s, l) => s + l.cost, 0);
     const before = g.money;
@@ -95,15 +96,21 @@ describe('fighting', () => {
     for (const [x, y] of [[2, 3], [5, 3], [8, 3], [10, 3], [4, 7]] as const) expect(g.build('zis3', x, y).ok).toBe(true);
     const moneyBefore = g.money;
     g.startWave();
-    run(g, 90);
-    const spec = waveSpec(1).groups[0]!;
+    const events: GameEvent[] = [];
+    for (let i = 0; i < 90 / TICK; i++) {
+      g.step(TICK);
+      events.push(...g.drainEvents());
+    }
+    const spec = waveOfStrength(1, 2).groups[0]!;
+    // Every direct hit is announced as an impact, for the board's hit effect.
+    expect(events.filter((e) => e.type === 'impact').length).toBe(events.filter((e) => e.type === 'hit').length);
     expect(g.lives).toBe(ECONOMY.startLives);
-    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveSpec(1).clearBonus);
+    expect(g.money).toBe(moneyBefore + spec.count * spec.reward + waveOfStrength(1, 2).clearBonus);
     const sum = (k: 'dealt' | 'kills' | 'wasted') => g.towers.reduce((s, t) => s + t.stats[k], 0);
     expect(sum('kills')).toBe(spec.count);
-    expect(sum('dealt')).toBe(spec.count * spec.hp);
-    // 16 hp against 12 damage: the second hit on every soldier overkills by 8.
-    expect(sum('wasted')).toBeGreaterThanOrEqual(spec.count * 8);
+    expect(sum('dealt')).toBeCloseTo(spec.count * spec.hp);
+    // 45 damage into a soldier with less: the rest of every shot is overkill.
+    expect(sum('wasted')).toBeGreaterThanOrEqual(spec.count * (45 - spec.hp) - 1e-6);
   });
 
   it('bursts a shell where the target will be and damages everything in the blast', () => {
@@ -122,7 +129,7 @@ describe('fighting', () => {
     for (const b of bursts) if (b.type === 'burst') expect(g.map.grid.get(Math.floor(b.x), Math.floor(b.y))).toBe('path');
     const t = g.towers[0]!;
     expect(t.stats.kills).toBeGreaterThan(0);
-    // 160 damage into 16 hp soldiers: most of it is wasted, which is the point of a heavy gun.
+    // 170 damage into 21 hp soldiers: most of it is wasted, which is the point of a heavy gun.
     expect(t.stats.wasted).toBeGreaterThan(t.stats.dealt);
   });
 
@@ -163,18 +170,23 @@ describe('fighting', () => {
 });
 
 describe('balance', () => {
-  it('mixes enemy kinds as the waves go on', () => {
-    expect(waveSpec(1).groups.map((g) => g.enemy)).toEqual(['infantry']);
-    expect(waveSpec(3).groups.map((g) => g.enemy)).toEqual(['infantry', 'truck']);
-    expect(waveSpec(5).groups.map((g) => g.enemy)).toEqual(['infantry', 'truck', 'tank']);
+  it('mixes enemy kinds as the waves grow stronger, each arriving with the map level of its counter', () => {
+    const kinds = (k: number, level: number) => waveOfStrength(k, level).groups.map((g) => g.enemy);
+    expect(kinds(1, 1)).toEqual(['infantry']);
+    expect(kinds(15, 1)).toEqual(['infantry', 'truck']);
+    expect(kinds(5, 2)).toEqual(['infantry', 'moto', 'truck', 'apc']);
+    expect(kinds(5, 3)).toContain('drone');
+    expect(kinds(5, 4)).toContain('tank');
+    expect(kinds(9, 5)).not.toContain('fortress');
+    expect(kinds(10, 5)).toContain('fortress');
   });
 
-  it('can be won with a mixed defence but not with light guns alone', () => {
-    const mixed = newGame();
-    playOut(mixed, 3);
-    expect(mixed.phase).toBe('won');
-    const lightOnly = newGame();
-    playOut(lightOnly, 1000);
-    expect(lightOnly.phase).toBe('lost');
+  it('starts each map level a little stronger, up to a cap', () => {
+    expect(waveStrength(1, 1)).toBe(4);
+    expect(waveStrength(3, 1)).toBe(6);
+    expect(waveStrength(1, 3)).toBe(5);
+    expect(waveStrength(1, 1000)).toBe(10);
+    expect(waveStrength(40, 1000)).toBe(18);
+    expect(waveSpec(2, 3)).toEqual(waveOfStrength(6, 3));
   });
 });

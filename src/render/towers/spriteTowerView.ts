@@ -5,6 +5,20 @@ import type { TowerView, TowerViewSpec } from './towerView';
 
 export type Density = 1 | 2;
 
+/** One gun frame located on its sheet; pixels of that sheet. */
+export interface GunPortrait {
+  url: string;
+  sheetSize: [number, number];
+  /** x, y, w, h of the frame on the sheet. */
+  frame: [number, number, number, number];
+  /** Top-left of the frame relative to the ground point. */
+  offset: [number, number];
+  /** Radius around the ground point that every heading of this gun fits in. */
+  reach: number;
+  /** Half width and half height of the area to fit on screen, if not a square of `reach`. */
+  half?: [number, number];
+}
+
 /**
  * The rendered tower atlases. One instance is shared by all tower views.
  *
@@ -16,6 +30,7 @@ export type Density = 1 | 2;
 export class TowerArt {
   private readonly sheets = new Map<string, Spritesheet>();
   private readonly loading = new Map<string, Promise<void>>();
+  private readonly reach = new WeakMap<Spritesheet, number>();
   private readonly listeners = new Set<() => void>();
   /** Density the board currently wants; views follow it as sheets arrive. */
   density: Density = 1;
@@ -58,7 +73,12 @@ export class TowerArt {
 
   /** Start loading a level's sheet at a density; resolves when it can be drawn. */
   request(lv: TowerArtLevel, density: Density = this.density): Promise<void> {
-    const key = `${lv.sheet}@${density}x`;
+    return this.requestSheet(lv.sheet, density);
+  }
+
+  /** Start loading any sheet (towers, enemies, effects) at a density. */
+  requestSheet(sheet: string, density: Density = this.density): Promise<void> {
+    const key = `${sheet}@${density}x`;
     let p = this.loading.get(key);
     if (!p) {
       // Both densities use the same frame names, so each gets its own cache prefix.
@@ -67,18 +87,20 @@ export class TowerArt {
           this.sheets.set(key, sheet);
           this.listeners.forEach((fn) => fn());
         })
-        .catch((err: unknown) => console.warn(`tower art ${key} failed to load`, err));
+        .catch((err: unknown) => console.warn(`art ${key} failed to load`, err));
       this.loading.set(key, p);
     }
     return p;
   }
 
-  /** Load the first level of every tower, so the first build shows at once. */
+  /** Load the first level of every tower, the enemies and the effects, so they show at once. */
   async preload(): Promise<void> {
-    await Promise.all(Object.keys(this.manifest.towers).map((id) => {
-      const lv = this.level(id, 1);
-      return lv ? this.request(lv) : undefined;
-    }));
+    const sheets = [
+      ...Object.keys(this.manifest.towers).map((id) => this.level(id, 1)?.sheet),
+      ...Object.values(this.manifest.enemies ?? {}).map((e) => e.sheet),
+      ...Object.values(this.manifest.effects ?? {}).map((e) => e.sheet),
+    ];
+    await Promise.all(sheets.map((s) => (s ? this.requestSheet(s) : undefined)));
   }
 
   /**
@@ -98,10 +120,56 @@ export class TowerArt {
     return `width:${f.w}px;height:${f.h}px;background-image:url('${url}');background-position:-${f.x}px -${f.y}px;background-size:${size.w}px ${size.h}px;transform:scale(${k.toFixed(3)}) translate(-50%,-50%)`;
   }
 
+  /**
+   * A large still of a tower level's gun for HTML screens: one aim frame placed
+   * inside its untrimmed square, so every frame shares the same ground point and
+   * scale and the gun can turn in place. Uses @2x when loaded (and starts
+   * loading it), else @1x; undefined while neither is ready.
+   */
+  portrait(tower: string, level: number, frame: number): GunPortrait | undefined {
+    const lv = this.level(tower, level);
+    if (!lv) return undefined;
+    if (!this.sheets.has(`${lv.sheet}@2x`)) void this.requestSheet(lv.sheet, 2);
+    if (!this.sheets.has(`${lv.sheet}@1x`)) void this.requestSheet(lv.sheet, 1);
+    const sheet = this.sheets.get(`${lv.sheet}@2x`) ?? this.sheets.get(`${lv.sheet}@1x`);
+    if (!sheet) return undefined;
+    const data = sheet.data;
+    const name = `${lv.aim}_${String(frame % this.manifest.directions).padStart(2, '0')}`;
+    const f = data.frames[name];
+    if (!f || !data.meta.image || !data.meta.size || !f.sourceSize) return undefined;
+    // Radius around the ground point that holds the gun in every heading.
+    let reach = this.reach.get(sheet);
+    if (reach === undefined) {
+      reach = 1;
+      for (const [key, fr] of Object.entries(data.frames)) {
+        if (!key.startsWith(lv.aim) || !fr.sourceSize) continue;
+        const o = fr.spriteSourceSize ?? { x: 0, y: 0, w: fr.frame.w, h: fr.frame.h };
+        const cx = fr.sourceSize.w / 2, cy = fr.sourceSize.h / 2;
+        reach = Math.max(reach, cx - o.x, o.x + (o.w ?? fr.frame.w) - cx, cy - o.y, o.y + (o.h ?? fr.frame.h) - cy);
+      }
+      this.reach.set(sheet, reach);
+    }
+    const src = f.spriteSourceSize ?? { x: 0, y: 0 };
+    return {
+      url: `${this.baseUrl}/${lv.sheet.replace(/[^/]+$/, '')}${data.meta.image}`,
+      sheetSize: [data.meta.size.w, data.meta.size.h],
+      frame: [f.frame.x, f.frame.y, f.frame.w, f.frame.h],
+      offset: [src.x - f.sourceSize.w / 2, src.y - f.sourceSize.h / 2],
+      reach,
+    };
+  }
+
   /** A frame at the wanted density if loaded, else at the other one, else undefined. */
   texture(lv: TowerArtLevel, frame: string): Texture | undefined {
+    return this.sheetTexture(lv.sheet, frame);
+  }
+
+  /** Like texture(), for any sheet; also starts loading the wanted density. */
+  sheetTexture(sheet: string, frame: string): Texture | undefined {
     const other: Density = this.density === 1 ? 2 : 1;
-    return this.sheets.get(`${lv.sheet}@${this.density}x`)?.textures[frame] ?? this.sheets.get(`${lv.sheet}@${other}x`)?.textures[frame];
+    const want = this.sheets.get(`${sheet}@${this.density}x`);
+    if (!want) void this.requestSheet(sheet);
+    return want?.textures[frame] ?? this.sheets.get(`${sheet}@${other}x`)?.textures[frame];
   }
 }
 
@@ -167,8 +235,10 @@ export class SpriteTowerView implements TowerView {
   }
 
   fire(): void {
-    this.flashAge = 0;
     this.recoilAge = 0;
+    // Silent engines never flash; the board plays the rendered flash when the art has it.
+    if (!this.spec.flash || this.art.manifest.effects?.muzzle_flash) return;
+    this.flashAge = 0;
     const m = this.lv.muzzlePx[this.frame] ?? [0, 0];
     const r = 1.1 * this.art.manifest.pxPerMetre['@1x'] * (this.spec.size / 3);
     this.flash.clear();
@@ -196,6 +266,11 @@ export class SpriteTowerView implements TowerView {
       const d = (-RECOIL_M * kick * this.art.manifest.pxPerMetre['@1x']) / Math.SQRT2;
       this.gun.position.set((Math.cos(a) - Math.sin(a)) * d, ((Math.cos(a) + Math.sin(a)) * d) / 2);
     }
+  }
+
+  /** Barrel direction of the current aim frame, in radians (same convention as setAim). */
+  aimAngle(): number {
+    return (this.frame * 2 * Math.PI) / this.art.manifest.directions;
   }
 
   muzzle(): { gx: number; gy: number; heightM: number } {

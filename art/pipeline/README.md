@@ -51,6 +51,16 @@ python3 render_ground.py      # seamless ground tile
 - Frame `NN` aims at `NN * 2π/32` in the game's own angle (`atan2(dy, dx)` in grid cells).
 - What the game does with the files: `art/README.md`.
 
+### Menu portraits (Arsenal screen)
+```
+./render_portraits.sh         # render_portraits.py (gun only, 32 headings, 44 px/m), then pack_portraits.py
+```
+- Same camera, light and materials as the game sprites, but the soil patch and every static
+  part (sandbags, slab, crates, nets) are hidden: only the gun and its shadow, transparent.
+- `pack_portraits.py` crops all headings of a level to one box and writes
+  `public/art/portraits/<model>_L<n>.webp` plus `public/art/portraits.json`.
+- A new gun: add its frame size to `FRAME_M` in `render_portraits.py` and add it to `MODELS`.
+
 ### Photo-style stills (hero shots, blind tests)
 ```
 python3 render_sprites.py --model howitzer --style photoreal --levels 1 --dirs 16 \

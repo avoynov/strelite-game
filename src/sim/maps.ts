@@ -14,11 +14,42 @@ export interface PathMapSpec {
   band?: number;
 }
 
+/** `path`: a fixed road. `arc`: open field, enemies from a widening arc. `siege`: the same field, with fences, and enemies that wreck guns. */
+export type Mode = 'path' | 'arc' | 'siege';
+
+/** A cell enemies may enter the field from, in arc mode. */
+export interface ArcSpawn extends Cell {
+  /** Angle off the arc's middle direction, radians (negative to one side, positive to the other). */
+  off: number;
+}
+
 export interface BuiltMap {
   id: string;
+  mode: Mode;
   grid: Grid;
+  /** Path mode: where the road starts. Arc mode: unused (see arcSpawns). */
   spawns: Cell[];
   goals: Cell[];
+  /** Arc mode: every edge cell enemies could come from, with its angle off the arc's middle. */
+  arcSpawns?: ArcSpawn[];
+}
+
+/**
+ * Arc mode: an open field (the same portrait band) with a goal near its bottom
+ * end. Enemies walk in over open ground from the far edges, from a sector of
+ * directions around the goal that widens as the waves go on.
+ */
+export interface ArcMapSpec {
+  id: string;
+  cols: number;
+  rows: number;
+  band: number;
+  /** Top-left cell of the 2x2 goal. */
+  goal: [number, number];
+  /** Rock outcrops nobody walks or builds on: top-left cells of 2x2 blocks. */
+  rocks: Array<[number, number]>;
+  /** Spawn cells must be at least this far from the goal, in tiles. */
+  minSpawnDistance: number;
 }
 
 /**
@@ -69,8 +100,52 @@ export function buildPathMap(spec: PathMapSpec): BuiltMap {
   const last = pts[pts.length - 1]!;
   return {
     id: spec.id,
+    mode: 'path',
     grid,
     spawns: [{ x: first[0], y: first[1] }],
     goals: [{ x: last[0], y: last[1] }],
   };
+}
+
+/** The arc's middle direction: from the goal towards the far (top) end of the band. */
+export const ARC_FACING = Math.atan2(-1, -1);
+
+/** The open field of the arc and siege modes. */
+export function buildArcMap(spec: ArcMapSpec, mode: 'arc' | 'siege' = 'arc'): BuiltMap {
+  const grid = new Grid(spec.cols, spec.rows, 'build');
+  for (let y = 0; y < spec.rows; y++) {
+    for (let x = 0; x < spec.cols; x++) if (Math.abs(x - y) > spec.band) grid.set(x, y, 'blocked');
+  }
+  for (const [rx, ry] of spec.rocks) for (let y = ry; y < ry + 2; y++) for (let x = rx; x < rx + 2; x++) grid.set(x, y, 'blocked');
+  const [gx, gy] = spec.goal;
+  const goals: Cell[] = [];
+  for (let y = gy; y < gy + 2; y++) {
+    for (let x = gx; x < gx + 2; x++) {
+      grid.set(x, y, 'path');
+      goals.push({ x, y });
+    }
+  }
+  // Edge cells: open cells next to the outside or the band's edge, far enough from the goal.
+  const cx = gx + 1;
+  const cy = gy + 1;
+  const arcSpawns: ArcSpawn[] = [];
+  for (let y = 0; y < spec.rows; y++) {
+    for (let x = 0; x < spec.cols; x++) {
+      if (grid.get(x, y) !== 'build') continue;
+      const edge = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => {
+        const nx = x + dx!;
+        const ny = y + dy!;
+        return !grid.inBounds(nx, ny) || Math.abs(nx - ny) > spec.band;
+      });
+      if (!edge) continue;
+      const vx = x + 0.5 - cx;
+      const vy = y + 0.5 - cy;
+      if (Math.hypot(vx, vy) < spec.minSpawnDistance) continue;
+      let off = Math.atan2(vy, vx) - ARC_FACING;
+      off = Math.atan2(Math.sin(off), Math.cos(off));
+      arcSpawns.push({ x, y, off });
+    }
+  }
+  arcSpawns.sort((a, b) => a.off - b.off);
+  return { id: spec.id, mode, grid, spawns: [], goals, arcSpawns };
 }

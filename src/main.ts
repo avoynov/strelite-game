@@ -1,25 +1,80 @@
 import { Application } from 'pixi.js';
 import './style.css';
 import { getLang, onLangChange, t } from './i18n';
-import { BoardRenderer, type Selection } from './render/boardRenderer';
+import { BoardRenderer, type Armed, type Selection } from './render/boardRenderer';
 import { PALETTE } from './render/palette';
+import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
-import { TICK, TOWERS, type TowerId } from './sim/content';
+import { TICK, TOWERS } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
-import { buildPathMap, MEADOW } from './sim/maps';
+import { buildArcMap, buildPathMap, type Mode } from './sim/maps';
+import { levelArcMap, levelMap } from './sim/levels';
+import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
+import { Arsenal } from './ui/arsenal';
 import { Hud } from './ui/hud';
+import { Lab, itemName } from './ui/lab';
+import { ResearchStore } from './researchStore';
+import { battleTakings, researchItem } from './sim/research';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
+const MODE_KEY = 'strelite.mode';
+
+const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
+const asMode = (v: string | null): Mode | null => MODES.find((m) => m === v) ?? null;
+
+function readMode(): Mode {
+  const fromUrl = asMode(new URLSearchParams(location.search).get('mode'));
+  if (fromUrl) return fromUrl;
+  try {
+    return asMode(localStorage.getItem(MODE_KEY)) ?? 'path';
+  } catch {
+    return 'path';
+  }
+}
+
+let mode: Mode = readMode();
+/** Each mode keeps its own progress through the levels. */
+const levelKey = () => (mode === 'path' ? 'strelite.level' : `strelite.level.${mode}`);
+const wonKey = () => (mode === 'path' ? 'strelite.won' : `strelite.won.${mode}`);
+
+function readNumber(key: string): number {
+  try {
+    return Math.max(0, Math.floor(Number(localStorage.getItem(key)) || 0));
+  } catch {
+    return 0;
+  }
+}
+
+function saveString(key: string, v: string): void {
+  try {
+    localStorage.setItem(key, v);
+  } catch {
+    // Private mode or blocked storage: it just is not remembered.
+  }
+}
+
+const saveNumber = (key: string, n: number) => saveString(key, String(n));
+
+/** Highest map level won so far. */
+const wonLevel = () => readNumber(wonKey());
+
+/** Map level to play: `?level=N` wins, else the last one played (never past the next unwon), else 1. */
+function startLevel(): number {
+  const fromUrl = Number(new URLSearchParams(location.search).get('level'));
+  if (fromUrl >= 1) return Math.floor(fromUrl);
+  return Math.min(Math.max(1, readNumber(levelKey())), wonLevel() + 1);
+}
 
 async function start(): Promise<void> {
   document.documentElement.lang = getLang();
   document.title = t('game.title');
 
   const app = new Application();
-  const [art] = await Promise.all([
+  const [art, portraits] = await Promise.all([
     TowerArt.load(ART_URL),
+    PortraitArt.load(ART_URL),
     app.init({
       resizeTo: window,
       background: PALETTE.background,
@@ -29,13 +84,21 @@ async function start(): Promise<void> {
     }),
   ]);
   await art?.preload();
+  portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
 
-  let game = new Game(buildPathMap(MEADOW));
+  const params = new URLSearchParams(location.search);
+  // `?fastresearch` runs research timers 600× faster, for trying the tree out.
+  const research = new ResearchStore(params.has('fastresearch') ? 600 : 1);
+  const newGame = (level: number) =>
+    new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
+  let game = newGame(startLevel());
+  /** Gold this battle put in the treasury when it ended; null while it runs. */
+  let banked: number | null = null;
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
-  let armed: TowerId | null = null;
+  let armed: Armed | null = null;
   let loop = new FixedStep(TICK, (dt) => game.step(dt));
 
   const hud = new Hud(document.getElementById('hud')!, game, {
@@ -49,10 +112,12 @@ async function start(): Promise<void> {
     towerIcon: (def) => art?.iconCss(def, 52) ?? '',
     getSpeed: () => loop.speed,
     setSpeed: (s) => (loop.speed = s),
-    restart: () => {
+    restart: (level = game.level) => {
       const speed = loop.speed;
+      saveNumber(levelKey(), level);
       board.destroy();
-      game = new Game(buildPathMap(MEADOW));
+      game = newGame(level);
+      banked = null;
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -61,8 +126,60 @@ async function start(): Promise<void> {
       armed = null;
       hud.setGame(game);
       relayout();
+      arsenal.open(); // a new level starts with the arsenal again
     },
+    openArsenal: () => arsenal.open(armed && armed !== 'fence' ? armed : undefined),
+    openLab: () => lab.open(),
+    openLevels: () => levels.open(),
+    banked: () => banked ?? 0,
   });
+
+  const levels = new LevelSelect({
+    won: wonLevel,
+    current: () => (game.mode === mode ? game.level : 0),
+    mode: () => mode,
+    setMode: (m) => {
+      mode = m;
+      saveString(MODE_KEY, m);
+    },
+    play: (level) => hud.restartAt(level),
+    close: () => hud.update(),
+  });
+  document.body.appendChild(levels.el);
+
+  const lab = new Lab({
+    state: () => research.state,
+    start: (id) => research.start(id),
+    speed: research.speed,
+    close: () => hud.update(),
+  });
+  document.body.appendChild(lab.el);
+  // A finished item is announced wherever the player is; it counts from the next battle.
+  window.setInterval(() => {
+    const was = research.state.active?.id;
+    if (was && research.tick()) {
+      const item = researchItem(was);
+      if (item) hud.showToast(t('toast.researchDone', { name: itemName(item) }));
+      lab.invalidate();
+    }
+  }, 1000);
+
+  // Before the level: browse the guns; the one on screen when leaving is armed for placing.
+  const arsenal = new Arsenal({
+    // Clean render of the gun alone; the board atlas (with its soil patch) until one exists.
+    portrait: (def, level, frame) =>
+      portraits?.has(def) ? portraits.portrait(def, level, frame, art?.manifest.directions ?? 32) : art?.portrait(def, level, frame),
+    onArt: (fn) => art?.onChange(fn) ?? (() => {}),
+    directions: art?.manifest.directions ?? 32,
+    close: (def) => {
+      armed = def;
+      selection = null;
+      hud.update();
+    },
+    // Guns not researched yet show as locked.
+    isUnlocked: (def) => game.isUnlocked(def),
+  });
+  document.body.appendChild(arsenal.el);
 
   const relayout = () => {
     hud.update();
@@ -72,18 +189,28 @@ async function start(): Promise<void> {
     board.layout(view, app.screen.width, app.screen.height, app.renderer.resolution);
   };
 
-  // A tap places the picked gun's outline, or selects the gun standing there.
+  // A tap places the picked gun's outline, puts down a fence, or selects the gun or fence standing there.
   attachGestures(app.canvas, () => board.camera, (sx, sy) => {
     const cell = board.cellAt(sx, sy);
     const tower = cell ? game.towerAt(cell.x, cell.y) : undefined;
+    const fence = cell ? game.fenceAt(cell.x, cell.y) : undefined;
     if (tower) {
       selection = selection?.kind === 'tower' && selection.id === tower.id ? null : { kind: 'tower', id: tower.id };
+    } else if (fence) {
+      selection = selection?.kind === 'fence' && selection.id === fence.id ? null : { kind: 'fence', id: fence.id };
+    } else if (armed === 'fence') {
+      // Fences are cheap and many: a tap builds one straight away.
+      selection = null;
+      if (cell) hud.showResult(game.buildFence(cell.x, cell.y));
     } else if (armed) {
       // Centre the footprint on the finger.
       const g = board.gridAt(sx, sy);
       const size = TOWERS[armed].size;
       selection = { kind: 'place', def: armed, cx: Math.round(g.x - size / 2), cy: Math.round(g.y - size / 2) };
-      if (!game.canBuildAt(armed, selection.cx, selection.cy)) hud.showToast(t(game.placementError(armed, selection.cx, selection.cy) === 'occupied' ? 'reason.occupied' : 'hint.notBuildable'));
+      if (!game.canBuildAt(armed, selection.cx, selection.cy)) {
+        const err = game.placementError(armed, selection.cx, selection.cy);
+        hud.showToast(t(err === 'occupied' ? 'reason.occupied' : err ? 'hint.notBuildable' : 'reason.blocks'));
+      }
     } else {
       selection = null;
     }
@@ -93,10 +220,14 @@ async function start(): Promise<void> {
   onLangChange(() => {
     document.title = t('game.title');
     hud.invalidate();
+    arsenal.invalidate();
+    lab.invalidate();
+    levels.invalidate();
     relayout();
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
+  if (!params.has('noarsenal')) arsenal.open();
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
@@ -105,7 +236,8 @@ async function start(): Promise<void> {
         gridToScreen: (x: number, y: number) => board.gridToScreen(x, y),
         game: () => game,
         camera: () => board.camera,
-        arm: (def: TowerId | null) => (armed = def),
+        arm: (def: Armed | null) => (armed = def),
+        research: () => research,
       },
     });
   }
@@ -116,10 +248,27 @@ async function start(): Promise<void> {
     for (const ev of game.drainEvents()) {
       if (ev.type === 'shot') board.onShot(ev.towerId, ev.projectileId);
       else if (ev.type === 'burst') board.onBurst(ev.x, ev.y, ev.radius);
-      else if (ev.type === 'kill') board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+      else if (ev.type === 'impact') board.onImpact(ev.x, ev.y);
+      else if (ev.type === 'rail') board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
+      else if (ev.type === 'kill') {
+        board.onKill(ev.enemyId);
+        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+      }
+      else if (ev.type === 'strike') board.onStrike(ev.kind, ev.x1, ev.y1, ev.x2, ev.y2);
+      else if (ev.type === 'wrecked') {
+        board.onWrecked(ev.x, ev.y, ev.size);
+        if (!ev.fence) hud.showToast(t('toast.gunWrecked'));
+      }
       else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
     }
+    // When the battle ends, the gold it earned and did not spend goes to the treasury (plus a win bonus).
+    if (banked === null && (game.phase === 'won' || game.phase === 'lost')) {
+      banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
+      research.bank(banked);
+      if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
+    }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
+    if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
     board.render(alpha, selection, armed, frame * loop.speed);
     hud.update();
   });

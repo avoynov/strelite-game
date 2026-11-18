@@ -26,6 +26,12 @@ export interface TowerArtDef {
   name: { bg: string; en: string };
   /** True while the gun is a stand-in for the final roster. */
   placeholder: boolean;
+  /**
+   * What the game shows when the gun fires, by effect name. Powder guns flash
+   * and smoke; torsion and counterweight engines release silently; the siphon
+   * shows its fire stream; the rail cannon its charge, then its beam.
+   */
+  shotEffects?: string[];
   levels: TowerArtLevel[];
 }
 
@@ -35,6 +41,52 @@ export interface GroundArtDef {
   sizePx1x: [number, number];
   /** Side of the repeating square of ground, in metres. */
   metres: number;
+}
+
+/** A moving unit rendered in `directions` headings, frames `${frames}_NN`. */
+export interface EnemyArtDef {
+  name: { bg: string; en: string };
+  placeholder: boolean;
+  /** Spritesheet path without the "@1x.json" / "@2x.json" suffix. */
+  sheet: string;
+  /** Frame prefix: frame `${frames}_NN` faces angle NN * 2π / directions. */
+  frames: string;
+  directions: number;
+  lengthM: number;
+  radiusM: number;
+}
+
+/** A short animation: frames `${frames}_00` … played once at `fps`. */
+export interface EffectArtDef {
+  sheet: string;
+  frames: string;
+  count: number;
+  fps: number;
+  anchor: [number, number];
+  blend: 'add' | 'normal';
+  /** Plays over and over while held (fire stream, rail charge) instead of once. */
+  loop?: boolean;
+  /** Length in metres of a line effect drawn along +x (fire stream, rail beam). */
+  lengthM?: number;
+}
+
+/**
+ * Shot effects per gun when the manifest does not say (guns whose art is not
+ * in yet). Same rule as the art pipeline's SHOT_FX: only powder guns flash.
+ */
+export const DEFAULT_SHOT_EFFECTS: Record<string, string[]> = {
+  crossbow: [],
+  scorpion: [],
+  trebuchet: [],
+  zis3: ['muzzle_flash', 'muzzle_smoke'],
+  howitzer: ['muzzle_flash', 'muzzle_smoke'],
+  greekfire: ['fire_stream'],
+  railgun: ['rail_charge', 'rail_beam'],
+};
+
+/** The effects a gun shows when it fires: the manifest's word first, then the default above. */
+export function shotEffects(manifest: Pick<TowerArtManifest, 'towers'> | null | undefined, tower: string): string[] {
+  return manifest?.towers[tower]?.shotEffects ?? DEFAULT_SHOT_EFFECTS[tower] ?? [];
 }
 
 export interface TowerArtManifest {
@@ -47,6 +99,32 @@ export interface TowerArtManifest {
   towers: Record<string, TowerArtDef>;
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
+  enemies?: Record<string, EnemyArtDef>;
+  effects?: Record<string, EffectArtDef>;
+  /** Siege mode fences by material (wood, stone, steel). */
+  fences?: Record<string, FenceArtDef>;
+}
+
+/**
+ * One fence material: a sheet holding the pieces of a tile (`post`, and half
+ * walls `px` `nx` `py` `ny` from the middle to each edge), each field naming
+ * its frame; all anchored at the tile's centre on the ground.
+ */
+export interface FenceArtDef {
+  name?: { bg: string; en: string };
+  sheet: string;
+  post: string;
+  px: string;
+  nx: string;
+  py: string;
+  ny: string;
+  heightM: number;
+  thicknessM?: number;
+}
+
+/** Frame name `${prefix}_NN`. */
+export function frameName(prefix: string, n: number): string {
+  return `${prefix}_${String(n).padStart(2, '0')}`;
 }
 
 /**

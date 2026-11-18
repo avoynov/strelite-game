@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { METRES_PER_TILE, TOWERS } from '../src/sim/content';
-import { aimFrameName, frameForAim, spriteScale, stickyFrameForAim, type TowerArtManifest } from '../src/render/towers/towerArt';
+import { ENEMIES, METRES_PER_TILE, TOWERS } from '../src/sim/content';
+import { aimFrameName, frameForAim, frameName, spriteScale, stickyFrameForAim, type TowerArtManifest } from '../src/render/towers/towerArt';
 
 const ART = fileURLToPath(new URL('../public/art', import.meta.url));
 
@@ -65,6 +65,44 @@ describe('tower art', () => {
             expect(sheet.frames[name], name).toBeDefined();
           }
         }
+      }
+    }
+  });
+});
+
+describe.skipIf(!existsSync(join(ART, 'towers.json')))('enemy and effect art', () => {
+  const manifest = existsSync(join(ART, 'towers.json')) ? (JSON.parse(readFileSync(join(ART, 'towers.json'), 'utf8')) as TowerArtManifest) : null;
+  const frames = (sheet: string, density: 1 | 2) =>
+    (JSON.parse(readFileSync(join(ART, `${sheet}@${density}x.json`), 'utf8')) as { frames: Record<string, { frame: { w: number; h: number } }> }).frames;
+
+  it('has a sprite for every heading of every enemy it draws, at the size the game uses', () => {
+    // Enemies without art yet (new kinds) are drawn as stand-ins by the board.
+    const drawn = Object.entries(manifest!.enemies ?? {});
+    expect(drawn.length).toBeGreaterThan(0);
+    for (const [id, art] of drawn) {
+      const def = ENEMIES[id as keyof typeof ENEMIES];
+      expect(def, id).toBeDefined();
+      // The sprite is real size; the simulation's hit radius may be a little tighter.
+      expect(Math.abs(art.radiusM - def.radius * METRES_PER_TILE)).toBeLessThan(0.6);
+      for (const density of [1, 2] as const) {
+        const sheet = frames(art.sheet, density);
+        for (let n = 0; n < art.directions; n++) expect(sheet[frameName(art.frames, n)], `${id} ${n} @${density}x`).toBeDefined();
+      }
+    }
+  });
+
+  it('has every effect frame at both densities, and the @1x frames are the @2x ones at half size', () => {
+    for (const name of ['muzzle_flash', 'muzzle_smoke', 'shell_burst']) {
+      const fx = manifest!.effects?.[name];
+      expect(fx, name).toBeDefined();
+      const one = frames(fx!.sheet, 1);
+      const two = frames(fx!.sheet, 2);
+      for (let n = 0; n < fx!.count; n++) {
+        const a = one[frameName(fx!.frames, n)]!.frame;
+        const b = two[frameName(fx!.frames, n)]!.frame;
+        // Catches a broken downscale: @1x frames that came out empty or as noise.
+        expect(Math.abs(a.w - b.w / 2), `${name} ${n} width`).toBeLessThanOrEqual(4);
+        expect(Math.abs(a.h - b.h / 2), `${name} ${n} height`).toBeLessThanOrEqual(4);
       }
     }
   });
