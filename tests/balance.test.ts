@@ -86,7 +86,7 @@ describe('balance', () => {
 const ARC_NEEDS: [level: number, stage: number][] = [
   [1, 1],
   [5, 6],
-  [12, 6],
+  [12, 7],
 ];
 
 describe('balance in arc mode', () => {
@@ -110,7 +110,7 @@ describe('balance in arc mode', () => {
 const SIEGE_NEEDS: [level: number, stage: number][] = [
   [1, 1],
   [5, 6],
-  [12, 6],
+  [12, 7],
 ];
 
 describe('balance in siege mode', () => {

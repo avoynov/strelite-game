@@ -229,11 +229,11 @@ export const TOWER_IDS = Object.keys(TOWERS) as TowerId[];
 export const ENEMIES = {
   infantry: { id: 'infantry', baseHp: 20, armor: 0, speed: 1.0, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 1, assault: { kind: 'shoot', damage: 2, interval: 1, range: 2 }, detour: 8 },
   moto: { id: 'moto', baseHp: 40, armor: 0, speed: 2.2, leakDamage: 1, radius: 0.35, baseReward: 2, swerve: 0.8, unlockLevel: 2 },
-  drone: { id: 'drone', baseHp: 45, armor: 0, speed: 1.8, leakDamage: 1, radius: 0.3, baseReward: 3, air: true, unlockLevel: 3 },
+  drone: { id: 'drone', baseHp: 45, armor: 0, speed: 1.8, leakDamage: 1, radius: 1.0, baseReward: 3, air: true, unlockLevel: 3 },
   truck: { id: 'truck', baseHp: 130, armor: 3, speed: 1.6, leakDamage: 2, radius: 0.7, baseReward: 4, unlockLevel: 1 },
-  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.75, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
+  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.95, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
   tank: { id: 'tank', baseHp: 800, armor: 14, speed: 0.6, leakDamage: 5, radius: 0.8, baseReward: 14, unlockLevel: 4, assault: { kind: 'shoot', damage: 25, interval: 2.5, range: 3.5 }, detour: 3 },
-  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.2, baseReward: 80, unlockLevel: 5, assault: { kind: 'shoot', damage: 60, interval: 3, range: 4 }, detour: 1 },
+  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.85, baseReward: 80, unlockLevel: 5, assault: { kind: 'shoot', damage: 60, interval: 3, range: 4 }, detour: 1 },
 } as const satisfies Record<string, EnemyDef>;
 
 export type EnemyId = keyof typeof ENEMIES;
