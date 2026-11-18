@@ -1,5 +1,5 @@
 """Clean gun portraits for menus (the Arsenal screen): the gun alone, no soil patch and
-no fortifications, on a transparent background with only its own shadow.
+no fortifications and no cast shadow (--shadow keeps it), on a transparent background.
 
 Same camera, light and materials as the game sprites (orthographic 2:1, frame NN aims
 at game angle NN * 2*pi/dirs), so the pictures match the board.
@@ -21,7 +21,8 @@ import bpy  # noqa: E402
 from strelite_art import materials, materials_photoreal, scene as stage  # noqa: E402
 
 # Metres across the square render: room for the barrel in every heading plus its shadow.
-FRAME_M = {"howitzer": 15.0, "zis3": 11.0}
+FRAME_M = {"howitzer": 17.0, "zis3": 12.0, "ballista": 8.0, "scorpion": 9.0, "greekfire": 8.0,
+           "trebuchet": 22.0, "railgun": 11.0}
 
 
 def render(model_name, level, a):
@@ -45,6 +46,11 @@ def render(model_name, level, a):
     for o in scene.objects:
         if o.type in {"MESH", "CURVE"} and o not in gun and not o.is_shadow_catcher:
             o.hide_render = True
+    # No ground and no cast shadow in menus: the long sun shadow read as dirt on the card.
+    if not a.shadow:
+        for o in scene.objects:
+            if o.is_shadow_catcher:
+                o.hide_render = True
 
     out_dir = os.path.join(a.out, "portraits", model_name, f"L{level}")
     os.makedirs(out_dir, exist_ok=True)
@@ -73,6 +79,7 @@ def main(argv=None):
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--frame", type=float, default=None)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--shadow", action="store_true", help="keep the gun's cast shadow (off for menus)")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "out"))
     a = ap.parse_args(argv)
     for level in a.levels:

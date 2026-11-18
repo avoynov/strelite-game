@@ -94,12 +94,14 @@ SPEC = {
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
     "webbing":       ("plain", dict(color=(0.22, 0.22, 0.19), rough=0.8, dust=0.8)),
-    "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2)),
+    "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2, sss=0.2)),
     "boot":          ("plain", dict(color=(0.07, 0.065, 0.06), rough=0.6, dust=1.2)),
     # --- people (human.py): skin tones, gloves, oxblood scarf of the Iron Concord
-    "skin_fair":     ("plain", dict(color=(0.72, 0.53, 0.43), rough=0.5, dust=0.2)),
-    "skin_olive":    ("plain", dict(color=(0.55, 0.38, 0.27), rough=0.52, dust=0.2)),
-    "skin_dark":     ("plain", dict(color=(0.33, 0.21, 0.14), rough=0.5, dust=0.2)),
+    "skin_fair":     ("plain", dict(color=(0.72, 0.53, 0.43), rough=0.5, dust=0.2, sss=0.2)),
+    "skin_olive":    ("plain", dict(color=(0.55, 0.38, 0.27), rough=0.52, dust=0.2, sss=0.2)),
+    "skin_dark":     ("plain", dict(color=(0.33, 0.21, 0.14), rough=0.5, dust=0.2, sss=0.15)),
+    "eye_white":     ("plain", dict(color=(0.60, 0.56, 0.50), rough=0.12, dust=0.0)),
+    "eye_iris":      ("plain", dict(color=(0.035, 0.025, 0.018), rough=0.08, dust=0.0)),
     "hair":          ("plain", dict(color=(0.06, 0.045, 0.035), rough=0.7, dust=0.3)),
     "tyre":          ("plain", dict(color=(0.05, 0.05, 0.05), rough=0.8, dust=0.55)),
     "boot_leather":  ("plain", dict(color=(0.05, 0.04, 0.034), rough=0.45, dust=0.15)),
@@ -448,15 +450,19 @@ def _metal(name, color, rough, dust=0.5, rust=0.0):
     return mat
 
 
-def _plain(name, color, rough, dust=1.0):
+def _plain(name, color, rough, dust=1.0, sss=0.0):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     P = g.coords()
     dust_m, _, cavity = _dust_mask(g, P, dust)
     var = g.math("ADD", 0.85, g.math("MULTIPLY", g.noise(P, 20, detail=4), 0.3))
     col = g.mix(dust_m, g.mix(1.0, rgb(color), var, "MULTIPLY"), rgb(DUST))
-    g.finish(col, g.mixf(dust_m, rough, 0.95), 0.0, height=g.noise(P, 120, detail=3),
-             bump=0.15, bump_dist=0.001)
+    bsdf = g.finish(col, g.mixf(dust_m, rough, 0.95), 0.0, height=g.noise(P, 120, detail=3),
+                    bump=0.15, bump_dist=0.001)
+    if sss:     # skin: light scatters a few millimetres under the surface, reddest deepest
+        bsdf.inputs["Subsurface Weight"].default_value = sss
+        bsdf.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
+        bsdf.inputs["Subsurface Scale"].default_value = 0.006
     return mat
 
 

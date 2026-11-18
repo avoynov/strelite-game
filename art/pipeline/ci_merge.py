@@ -1,9 +1,10 @@
 """Merge the outputs of the parallel render jobs (render-art workflow) into public/art.
 
 Each job uploads a fragment directory:
-  job.json      {"kind": "tower"|"proj"|"enemy", "model": ..., "level": n}
-  towers.json   the manifest as that job left it
-  files/...     every file under public/art the job added or changed (not towers.json)
+  job.json        {"kind": "tower"|"proj"|"enemy"|"portrait", "model": ..., "level": n}
+  towers.json     the manifest as that job left it
+  portraits.json  the portraits manifest as that job left it (portrait jobs)
+  files/...       every file under public/art the job added or changed (not the two manifests)
 
     python3 ci_merge.py <fragments dir> <public/art>
 """
@@ -24,6 +25,22 @@ def merge_levels(known, new):
     return out
 
 
+def merge_portraits(frag_path, path):
+    """portraits.json: each portrait job adds the levels it rendered."""
+    with open(frag_path) as f:
+        frag = json.load(f)
+    if os.path.exists(path):
+        with open(path) as f:
+            manifest = json.load(f)
+    else:
+        manifest = {k: v for k, v in frag.items() if k != "guns"}
+        manifest["guns"] = {}
+    for gid, g in frag.get("guns", {}).items():
+        manifest["guns"][gid] = merge_levels(manifest["guns"].get(gid, {"levels": []}), g)
+    with open(path, "w") as f:
+        json.dump(manifest, f, indent=1)
+
+
 def main(frags, dst):
     path = os.path.join(dst, "towers.json")
     with open(path) as f:
@@ -39,6 +56,10 @@ def main(frags, dst):
         files = os.path.join(d, "files")
         if os.path.isdir(files):
             shutil.copytree(files, dst, dirs_exist_ok=True)
+        if job["kind"] == "portrait":
+            merge_portraits(os.path.join(d, "portraits.json"), os.path.join(dst, "portraits.json"))
+            print(f"[merge] {job}")
+            continue
         from pack_atlas import GAME_ID as TID
         from pack_enemies import GAME_ID as EID
         model = (EID if job["kind"] == "enemy" else TID).get(job["model"], job["model"])
