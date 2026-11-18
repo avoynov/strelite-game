@@ -153,12 +153,15 @@ function crackle(len: number, r: () => number, rate: number, tau: number): Float
   for (let i = 0; i < len; i++) {
     const t = i / SAMPLE_RATE;
     if (r() < (rate / SAMPLE_RATE) * Math.exp(-t / tau)) {
-      const amp = (r() * 0.7 + 0.3) * (r() < 0.5 ? -1 : 1);
-      const l = 8 + Math.floor(r() * 40);
-      for (let j = 0; j < l && i + j < len; j++) out[i + j]! += amp * Math.exp(-j / (l / 4)) * (j % 2 ? -1 : 1);
+      // Each crack is a tiny burst of noise. (Alternating-sign clicks would sit at the Nyquist
+      // frequency and leave a high whine after the sound.)
+      const amp = r() * 0.7 + 0.3;
+      const l = 12 + Math.floor(r() * 60);
+      for (let j = 0; j < l && i + j < len; j++) out[i + j]! += amp * (r() * 2 - 1) * Math.exp(-j / (l / 4));
     }
   }
-  return out;
+  // Keep the grit in the 1–5 kHz band, nothing up near the top.
+  return biquad(out, 'lp', 5000);
 }
 
 /** A metal body ringing: inharmonic partials. */
@@ -166,6 +169,7 @@ function ring(len: number, base: number, tau: number, r: () => number): Float32A
   const out = new Float32Array(len);
   for (const [ratio, g] of [[1, 1], [2.76, 0.6], [5.4, 0.35], [8.93, 0.2]] as const) {
     const f = base * ratio * (0.98 + r() * 0.04);
+    if (f > 6000) continue; // very high partials ring on as a whistle
     mix(out, tone(len, () => f, tau / Math.sqrt(ratio)), g);
   }
   return out;
@@ -299,7 +303,7 @@ export function synth(name: SoundName, seed = 1): Float32Array {
       mix(out, biquad(charge, 'lp', 4000), 0.25);
       // The discharge: a hard electric crack and a metallic ring.
       mix(out, decay(biquad(white(len, r), 'hp', 2500), 0.03), 1.2, 0.16);
-      mix(out, ring(len, 1180, 0.25, r), 0.4, 0.16);
+      mix(out, ring(len, 1180, 0.14, r), 0.35, 0.16);
       // Mains buzz of the coils, dying away.
       mix(out, decay(biquad(tone(len, () => 100, 99, 'saw'), 'lp', 1600), 0.18), 0.5, 0.16);
       // The slug's sonic boom far down range.
