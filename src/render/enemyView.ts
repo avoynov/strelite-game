@@ -1,7 +1,7 @@
 import { Container, Graphics, Sprite } from 'pixi.js';
 import type { TowerArt } from './towers/spriteTowerView';
 import { frameForAim, frameName, type EnemyArtDef } from './towers/towerArt';
-import { depth, isoX, isoY, RISE } from './iso';
+import { depth, isoX, isoY, RISE, TILE_W } from './iso';
 
 /**
  * How the game shows one enemy, independent of how it is drawn. Like
@@ -27,8 +27,10 @@ const KIT = {
   tank: { body: 0x55603d, dark: 0x2e3523 },
   fortress: { body: 0x4a4f3c, dark: 0x262a1f },
 } as const;
-/** Height a flyer is drawn above its ground point, in tiles. */
+/** Height a flyer is drawn above its ground point, in tiles (stand-in; the airship art says its own). */
 export const FLY_HEIGHT = 1.2;
+/** Added to a flyer's depth so it draws over everything on the ground. */
+const FLYER_Z = 10_000;
 
 /** Stand-in enemies until style В sprites exist: a squad, a truck, a tank, drawn flat. */
 export class PlaceholderEnemyView implements EnemyView {
@@ -158,7 +160,8 @@ export class PlaceholderEnemyView implements EnemyView {
 }
 
 /** Height of the health bar above the ground, in metres, per enemy kind. */
-const BAR_HEIGHT_M: Record<string, number> = { infantry: 2.2, moto: 2.2, drone: 6.5, truck: 3.4, apc: 3.2, tank: 3.2, fortress: 4.5 };
+/** Over the craft's own centre for flyers. */
+const BAR_HEIGHT_M: Record<string, number> = { infantry: 2.2, moto: 2.2, drone: 3, truck: 3.4, apc: 3.2, tank: 3.2, fortress: 4.5 };
 
 /**
  * An enemy drawn from its rendered atlas: one sprite that swaps between the
@@ -172,6 +175,7 @@ export class SpriteEnemyView implements EnemyView {
   private frame = -1;
   private health = -1;
   private readonly off: () => void;
+  private readonly flying: boolean;
 
   constructor(
     private readonly art: TowerArt,
@@ -182,8 +186,17 @@ export class SpriteEnemyView implements EnemyView {
   ) {
     this.sprite.anchor.set(0.5);
     this.sprite.scale.set(scale);
+    this.flying = !!def.flying;
+    const lift = def.flying ? ((def.flightHeightM ?? 0) / metresPerTile) * RISE : 0;
+    if (def.flying) {
+      // The craft hangs high over its ground point; its shadow lies on the ground below.
+      const rx = (def.lengthM / metresPerTile) * TILE_W * 0.26;
+      const shadow = new Graphics().ellipse(0, 0, rx, rx / 2).fill({ color: 0x000000, alpha: 0.2 });
+      this.node.addChild(shadow);
+      this.sprite.position.y = -lift;
+    }
     this.node.addChild(this.sprite, this.bar);
-    this.bar.position.y = -((BAR_HEIGHT_M[kind] ?? 3) / metresPerTile) * RISE;
+    this.bar.position.y = -lift - ((BAR_HEIGHT_M[kind] ?? 3) / metresPerTile) * RISE;
     this.off = art.onChange(() => this.refresh());
     this.setHeading(0);
     this.setHealth(1);
@@ -191,7 +204,8 @@ export class SpriteEnemyView implements EnemyView {
 
   place(gx: number, gy: number): void {
     this.node.position.set(isoX(gx, gy), isoY(gx, gy));
-    this.node.zIndex = depth(gx, gy);
+    // Flyers pass over everything on the ground.
+    this.node.zIndex = depth(gx, gy) + (this.flying ? FLYER_Z : 0);
   }
 
   setHeading(heading: number): void {

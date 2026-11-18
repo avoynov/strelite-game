@@ -20,6 +20,58 @@ export interface TowerArtLevel {
   muzzlePx: [number, number][];
   /** Per aim frame: muzzle in metres: grid x, grid y, height above the ground. */
   muzzleM: [number, number, number][];
+  /** The shot itself, rendered per direction; loaded only for the way the gun faces. */
+  fire?: TowerFireArt;
+}
+
+/**
+ * A shot animation. Each direction is its own small sheet (`sheet` and
+ * `animation` with `<DD>` replaced by the two-digit direction); frames are
+ * `${animation}_01` … `${animation}_NN`, drawn instead of the aim layer.
+ * Frames before `releaseFrame` are the wind-up, the round leaves at
+ * `releaseFrame`, and from `reloadFrom` on the frames are spread over the
+ * reload. A `loop` animation is one shot per loop (or a stream, held).
+ */
+export interface TowerFireArt {
+  sheet: string;
+  animation: string;
+  dirs: number;
+  frames: number;
+  fps: number;
+  releaseFrame: number;
+  reloadFrom: number;
+  loop?: boolean;
+}
+
+/** Sheet and frame prefix of a fire animation for one direction. */
+export function fireSheet(fire: TowerFireArt, dir: number): { sheet: string; animation: string } {
+  const dd = String(dir).padStart(2, '0');
+  return { sheet: fire.sheet.replace('<DD>', dd), animation: fire.animation.replace('<DD>', dd) };
+}
+
+/**
+ * Which fire frame (1-based) shows `age` seconds after a shot, or 0 once the
+ * animation is over. Wind-up and release play at `fps`; the reload frames are
+ * spread over what is left of `reload`. When the reload is shorter than the
+ * animation at full speed, all of it plays faster to fit.
+ */
+export function fireFrameAt(fire: TowerFireArt, age: number, reload: number): number {
+  const full = fire.frames / fire.fps;
+  const k = reload > 0 && reload < full ? reload / full : 1;
+  const step = k / fire.fps;
+  const lead = fire.reloadFrom - 1;
+  if (age < lead * step) return 1 + Math.floor(age / step);
+  const tail = fire.frames - lead;
+  const rest = Math.max(tail * step, reload - lead * step);
+  const f = lead + 1 + Math.floor(((age - lead * step) / rest) * tail);
+  return f > fire.frames ? 0 : f;
+}
+
+/** Seconds from the start of a shot animation to the frame where the round leaves. */
+export function releaseDelay(fire: TowerFireArt, reload: number): number {
+  const full = fire.frames / fire.fps;
+  const k = reload > 0 && reload < full ? reload / full : 1;
+  return ((fire.releaseFrame - 1) * k) / fire.fps;
 }
 
 export interface TowerArtDef {
@@ -54,6 +106,24 @@ export interface EnemyArtDef {
   directions: number;
   lengthM: number;
   radiusM: number;
+  /** Flyers: drawn this high over their ground point, with a shadow on the ground. */
+  flying?: boolean;
+  flightHeightM?: number;
+}
+
+/**
+ * A round in flight, per gun: `animation` with `<level>` replaced, frames
+ * `${animation}_00` …. With `headings` the frame is the flight direction,
+ * else the frames tumble at `fps`. The art has no shadow.
+ */
+export interface ProjectileArtDef {
+  sheet: string;
+  levels: number[];
+  frames: number;
+  fps: number;
+  animation: string;
+  headings: boolean;
+  radiusM?: number | null;
 }
 
 /** A short animation: frames `${frames}_00` … played once at `fps`. */
@@ -100,6 +170,8 @@ export interface TowerArtManifest {
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
   enemies?: Record<string, EnemyArtDef>;
+  /** Rounds seen in flight (bolts, stones), by gun id. */
+  projectiles?: Record<string, ProjectileArtDef>;
   effects?: Record<string, EffectArtDef>;
   /** Siege mode fences by material (wood, stone, steel). */
   fences?: Record<string, FenceArtDef>;

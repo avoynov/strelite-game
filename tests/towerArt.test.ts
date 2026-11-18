@@ -3,7 +3,18 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { ENEMIES, METRES_PER_TILE, TOWERS } from '../src/sim/content';
-import { aimFrameName, frameForAim, frameName, spriteScale, stickyFrameForAim, type TowerArtManifest } from '../src/render/towers/towerArt';
+import {
+  aimFrameName,
+  fireFrameAt,
+  fireSheet,
+  frameForAim,
+  frameName,
+  releaseDelay,
+  spriteScale,
+  stickyFrameForAim,
+  type TowerArtManifest,
+  type TowerFireArt,
+} from '../src/render/towers/towerArt';
 
 const ART = fileURLToPath(new URL('../public/art', import.meta.url));
 
@@ -105,5 +116,29 @@ describe.skipIf(!existsSync(join(ART, 'towers.json')))('enemy and effect art', (
         expect(Math.abs(a.h - b.h / 2), `${name} ${n} height`).toBeLessThanOrEqual(4);
       }
     }
+  });
+});
+
+describe('fire animation timing', () => {
+  // Trebuchet-like: 16 frames at 16 fps, the stone leaves at frame 6, reload from 12.
+  const fire: TowerFireArt = { sheet: 's_<DD>', animation: 'a_<DD>', dirs: 32, frames: 16, fps: 16, releaseFrame: 6, reloadFrom: 12 };
+
+  it('names the sheet of a direction', () => {
+    expect(fireSheet(fire, 7)).toEqual({ sheet: 's_07', animation: 'a_07' });
+  });
+
+  it('plays the swing at fps, then spreads the reload frames over the reload', () => {
+    expect(fireFrameAt(fire, 0, 4)).toBe(1);
+    expect(fireFrameAt(fire, 5.5 / 16, 4)).toBe(6);
+    expect(fireFrameAt(fire, 11 / 16 + 0.01, 4)).toBe(12);
+    expect(fireFrameAt(fire, 3.9, 4)).toBe(16);
+    expect(fireFrameAt(fire, 4.01, 4)).toBe(0);
+    expect(releaseDelay(fire, 4)).toBeCloseTo(5 / 16);
+  });
+
+  it('fits the whole shot into a reload shorter than the animation', () => {
+    expect(fireFrameAt(fire, 0.49, 0.5)).toBe(16);
+    expect(fireFrameAt(fire, 0.51, 0.5)).toBe(0);
+    expect(releaseDelay(fire, 0.5)).toBeCloseTo(5 / 32);
   });
 });

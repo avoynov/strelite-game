@@ -1,6 +1,6 @@
 import { Assets, Container, Graphics, Sprite, type Spritesheet, type Texture } from 'pixi.js';
 import { depth, isoX, isoY, TILE_W } from '../iso';
-import { spriteScale, stickyFrameForAim, type TowerArtLevel, type TowerArtManifest } from './towerArt';
+import { fireFrameAt, fireSheet, releaseDelay, spriteScale, stickyFrameForAim, type TowerArtLevel, type TowerArtManifest } from './towerArt';
 import type { TowerView, TowerViewSpec } from './towerView';
 
 export type Density = 1 | 2;
@@ -93,12 +93,13 @@ export class TowerArt {
     return p;
   }
 
-  /** Load the first level of every tower, the enemies and the effects, so they show at once. */
+  /** Load the first level of every tower, the enemies, effects and rounds, so they show at once. */
   async preload(): Promise<void> {
     const sheets = [
       ...Object.keys(this.manifest.towers).map((id) => this.level(id, 1)?.sheet),
       ...Object.values(this.manifest.enemies ?? {}).map((e) => e.sheet),
       ...Object.values(this.manifest.effects ?? {}).map((e) => e.sheet),
+      ...Object.values(this.manifest.projectiles ?? {}).map((p) => p.sheet),
     ];
     await Promise.all(sheets.map((s) => (s ? this.requestSheet(s) : undefined)));
   }
@@ -195,6 +196,11 @@ export class SpriteTowerView implements TowerView {
   private gy = 0;
   private flashAge = Infinity;
   private recoilAge = Infinity;
+  /** Seconds into the rendered shot, Infinity when not firing. */
+  private fireAge = Infinity;
+  private reload = 0;
+  /** A held stream (the siphon) loops its fire frames until it stops. */
+  private streaming = false;
   private readonly off: () => void;
 
   constructor(
@@ -234,10 +240,21 @@ export class SpriteTowerView implements TowerView {
     this.refresh();
   }
 
-  fire(): void {
+  fire(reload: number): number {
+    const fire = this.lv.fire;
+    if (fire) {
+      // The rendered shot carries its own kick. Its sheet may still be on the
+      // way (the gun has just turned): the frames show from when it arrives,
+      // and this one shot kicks back instead.
+      this.fireAge = 0;
+      this.reload = reload;
+      const ready = !!this.fireTexture(1);
+      this.showGun();
+      if (ready) return releaseDelay(fire, reload);
+    }
     this.recoilAge = 0;
     // Silent engines never flash; the board plays the rendered flash when the art has it.
-    if (!this.spec.flash || this.art.manifest.effects?.muzzle_flash) return;
+    if (!this.spec.flash || this.art.manifest.effects?.muzzle_flash) return 0;
     this.flashAge = 0;
     const m = this.lv.muzzlePx[this.frame] ?? [0, 0];
     const r = 1.1 * this.art.manifest.pxPerMetre['@1x'] * (this.spec.size / 3);
@@ -247,9 +264,21 @@ export class SpriteTowerView implements TowerView {
     this.flash.circle(0, 0, r * 0.3).fill({ color: 0xffffff });
     this.flash.position.set(m[0], m[1]);
     this.flash.visible = true;
+    return 0;
+  }
+
+  setFiring(on: boolean): void {
+    if (on === this.streaming || !this.lv.fire?.loop) return;
+    this.streaming = on;
+    this.fireAge = on ? 0 : Infinity;
+    this.showGun();
   }
 
   update(dt: number): void {
+    if (this.fireAge !== Infinity) {
+      this.fireAge += dt;
+      this.showGun();
+    }
     if (this.flashAge < FLASH_LIFE) {
       this.flashAge += dt;
       const k = Math.min(1, this.flashAge / FLASH_LIFE);
@@ -285,11 +314,41 @@ export class SpriteTowerView implements TowerView {
 
   private refresh(): void {
     void this.art.request(this.lv);
-    const n = String(this.frame).padStart(2, '0');
+    // The shot for the way the gun now faces: a few KB, fetched ahead of the first shot.
+    if (this.lv.fire) void this.art.requestSheet(fireSheet(this.lv.fire, this.fireDir()).sheet);
     const base = this.art.texture(this.lv, this.lv.base);
-    const gun = this.art.texture(this.lv, `${this.lv.aim}_${n}`);
     if (base) this.base.texture = base;
-    if (gun) this.gun.texture = gun;
+    const gun = this.showGun();
     this.node.visible = !!(base && gun);
+  }
+
+  /** Direction of the fire animation that matches the current aim frame. */
+  private fireDir(): number {
+    const dirs = this.lv.fire?.dirs ?? this.art.manifest.directions;
+    return Math.round((this.frame * dirs) / this.art.manifest.directions) % dirs;
+  }
+
+  /** Fire frame (1-based) to show now, 0 for the aim layer. */
+  private fireFrame(): number {
+    const fire = this.lv.fire;
+    if (!fire || this.fireAge === Infinity) return 0;
+    if (this.streaming) return 1 + (Math.floor(this.fireAge * fire.fps) % fire.frames);
+    const f = fireFrameAt(fire, this.fireAge, this.reload);
+    if (!f) this.fireAge = Infinity;
+    return f;
+  }
+
+  private fireTexture(n: number): Texture | undefined {
+    if (!this.lv.fire) return undefined;
+    const { sheet, animation } = fireSheet(this.lv.fire, this.fireDir());
+    return this.art.sheetTexture(sheet, `${animation}_${String(n).padStart(2, '0')}`);
+  }
+
+  /** Put the right frame on the gun sprite: the shot while it plays, else the aim frame. */
+  private showGun(): Texture | undefined {
+    const f = this.fireFrame();
+    const tex = (f && this.fireTexture(f)) || this.art.texture(this.lv, `${this.lv.aim}_${String(this.frame).padStart(2, '0')}`);
+    if (tex && tex !== this.gun.texture) this.gun.texture = tex;
+    return tex;
   }
 }

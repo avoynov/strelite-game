@@ -329,6 +329,7 @@ async function start(): Promise<void> {
       strelite: {
         gridToScreen: (x: number, y: number) => board.gridToScreen(x, y),
         game: () => game,
+        board: () => board,
         camera: () => board.camera,
         arm: (def: Armed | null) => (armed = def),
         research: () => research,

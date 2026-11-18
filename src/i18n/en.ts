@@ -39,7 +39,7 @@ export const en: Record<MessageKey, string> = {
   'tower.trebuchet': 'Trebuchet',
   'tower.railgun': 'Railgun',
   'enemy.moto': 'Motorcyclists',
-  'enemy.drone': 'Drone',
+  'enemy.drone': 'Airship',
   'enemy.apc': 'APC',
   'enemy.fortress': 'Fortress',
   'reason.locked': 'Research it in the Lab.',

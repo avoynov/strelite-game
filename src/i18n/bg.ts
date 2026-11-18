@@ -38,7 +38,7 @@ export const bg = {
   'tower.trebuchet': 'Требушет',
   'tower.railgun': 'Релсотрон',
   'enemy.moto': 'Мотоциклисти',
-  'enemy.drone': 'Дрон',
+  'enemy.drone': 'Дирижабъл',
   'enemy.apc': 'БТР',
   'enemy.fortress': 'Крепост',
   'reason.locked': 'Проучи го в Лабораторията.',
