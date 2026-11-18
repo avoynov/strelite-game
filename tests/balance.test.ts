@@ -62,7 +62,8 @@ describe('balance', () => {
     const g = play(1, 0);
     expect(g.phase).toBe('lost');
     const first = RESEARCH.find((r) => r.id === STAGES[1]![0])!;
-    expect(2 * battleTakings(g.money, g.goldEarned, false, 1)).toBeGreaterThanOrEqual(first.cost);
+    // A player who builds with the starting gold and saves what the battle pays.
+    expect(2 * battleTakings(g.goldEarned, g.goldEarned, false, 1)).toBeGreaterThanOrEqual(first.cost);
   });
 
   it.each(NEEDS)('map level %i is won with research stage %i', (level, stage) => {
@@ -86,7 +87,7 @@ describe('balance', () => {
 const ARC_NEEDS: [level: number, stage: number][] = [
   [1, 1],
   [5, 6],
-  [12, 7],
+  [12, 6],
 ];
 
 describe('balance in arc mode', () => {

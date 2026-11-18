@@ -40,10 +40,10 @@ describe('arc mode', () => {
     g.money = 100000;
     const [gx, gy] = levelArcMap(1).goal;
     const before = g.flow.distanceAt(gx - 4, gy - 4);
-    // A ring of 1x1 crossbows around the goal: the last gap must be refused.
+    // A ring of 2x2 crossbows around the goal: the last gap must be refused.
     const ring: [number, number][] = [];
-    for (let x = gx - 1; x <= gx + 2; x++) ring.push([x, gy - 1], [x, gy + 2]);
-    for (let y = gy; y <= gy + 1; y++) ring.push([gx - 1, y], [gx + 2, y]);
+    for (let x = gx - 2; x <= gx + 2; x += 2) ring.push([x, gy - 2], [x, gy + 2]);
+    ring.push([gx - 2, gy], [gx + 2, gy]);
     const results = ring.filter(([x, y]) => g.canBuildAt('crossbow', x, y)).map(([x, y]) => g.build('crossbow', x, y));
     expect(results.some((r) => !r.ok && r.reason === 'blocks')).toBe(true);
     expect(results.filter((r) => r.ok).length).toBeGreaterThan(3);

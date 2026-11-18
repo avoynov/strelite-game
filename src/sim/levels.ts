@@ -102,7 +102,7 @@ export function arcHpFactor(level: number): number {
  * be wrecked and every breach costs guns, so later levels are weaker to make
  * up for it: `hpFirst` on level 1, less by `hpStep` each level, never under `hpMin`.
  */
-export const SIEGE_TUNING = { hpFirst: 0.8, hpStep: 0.09, hpMin: 0.45 };
+export const SIEGE_TUNING = { hpFirst: 0.75, hpStep: 0.09, hpMin: 0.45 };
 
 /** Siege mode: enemy health relative to arc mode on a level. */
 export function siegeHpFactor(level: number): number {

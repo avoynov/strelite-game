@@ -140,13 +140,13 @@ export const TOWERS = {
   /** Repeating crossbow: a hail of bolts; clears infantry, useless against armour, hits drones. */
   crossbow: {
     id: 'crossbow',
-    size: 1,
+    size: 2,
     turnRate: deg(360),
     projectile: 'direct',
     targeting: 'first',
     pierce: 0,
     hitsAir: true,
-    levels: levels({ cost: 40, damage: 6, fireInterval: 0.2, range: 5, projectileSpeed: 22 }),
+    levels: levels({ cost: 45, damage: 6, fireInterval: 0.2, range: 5, projectileSpeed: 22 }),
   },
   /** Scorpion: long-range bolt thrower; hunts drones and fast riders, the bolt goes through two. */
   scorpion: {
@@ -260,7 +260,7 @@ export const FENCE_LEVELS = [
 export const PUSH_DPS = 2;
 
 export const ECONOMY = {
-  startMoney: 200,
+  startMoney: 160,
   /** Extra starting gold per map level above the first, up to `startMoneyLevelCap`. */
   startMoneyPerLevel: 60,
   startMoneyLevelCap: 20,

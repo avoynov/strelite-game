@@ -29,7 +29,7 @@ const SWARM = new Set<EnemyId>(['infantry', 'moto', 'drone']);
  * `strengthStep`: each map level starts this much stronger than the one before,
  * up to `maxFirstStrength`.
  */
-export const TUNING = { hpScale: 1.8, firstStrength: 4, strengthStep: 0.5, maxFirstStrength: 10 };
+export const TUNING = { hpScale: 1.7, firstStrength: 4, strengthStep: 0.5, maxFirstStrength: 10 };
 /** …and by this fraction of the base for each map level above the first… */
 export const LEVEL_HP_GROWTH = 0.04;
 /** …up to this map level; past it only the number of waves keeps growing. */
