@@ -11222,5 +11222,50 @@
    "headings": true,
    "note": "one frame per flight heading (frame = round(angle / (2pi / frames)) mod frames), no shadow: draw a dark ellipse on the ground below it"
   }
- }
+ },
+ "fences": {
+  "wood": {
+   "name": {
+    "bg": "Дървена палисада",
+    "en": "Timber palisade"
+   },
+   "sheet": "fences/wood",
+   "post": "wood_post",
+   "px": "wood_px",
+   "nx": "wood_nx",
+   "py": "wood_py",
+   "ny": "wood_ny",
+   "heightM": 2.2,
+   "thicknessM": 0.5
+  },
+  "stone": {
+   "name": {
+    "bg": "Каменна стена",
+    "en": "Stone wall"
+   },
+   "sheet": "fences/stone",
+   "post": "stone_post",
+   "px": "stone_px",
+   "nx": "stone_nx",
+   "py": "stone_py",
+   "ny": "stone_ny",
+   "heightM": 1.9,
+   "thicknessM": 0.65
+  },
+  "steel": {
+   "name": {
+    "bg": "Стоманена стена",
+    "en": "Steel wall"
+   },
+   "sheet": "fences/steel",
+   "post": "steel_post",
+   "px": "steel_px",
+   "nx": "steel_nx",
+   "py": "steel_py",
+   "ny": "steel_ny",
+   "heightM": 2.0,
+   "thicknessM": 0.55
+  }
+ },
+ "fencesNote": "fences/<material>@1x|@2x.json, frames <material>_<piece>, anchor = ground point of the tile centre. Per tile draw <material>_post, then the half-segments toward each fenced neighbour: px (+x), nx (-x), py (+y), ny (-y) in grid cells. Draw order: segments behind the post (ny, nx) first, then post, then py, px; sort tiles back to front as usual."
 }
