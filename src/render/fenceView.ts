@@ -6,7 +6,7 @@ import type { TowerArt } from './towers/spriteTowerView';
  * Siege mode fences. Each fence tile is drawn as pieces: a post in the middle
  * and a half wall from the middle to each edge that has a fence beyond it, so
  * neighbouring tiles join into one thin wall. Rendered pieces come from the
- * art manifest (`fences.wood|stone|steel`, frames `post px nx py ny`) once
+ * art manifest (`fences.wood|stone|steel`, pieces `post px nx py ny`) once
  * they exist; until then the same pieces are drawn from simple shapes.
  */
 
@@ -30,10 +30,10 @@ export function fencePieces(mask: number): FencePiece[] {
   const m = mask || PX | NX;
   const back: FencePiece[] = [];
   const front: FencePiece[] = [];
-  if (m & NX) back.push('nx');
   if (m & NY) back.push('ny');
-  if (m & PX) front.push('px');
+  if (m & NX) back.push('nx');
   if (m & PY) front.push('py');
+  if (m & PX) front.push('px');
   return [...back, 'post', ...front];
 }
 
@@ -167,7 +167,7 @@ export class FenceView {
   update(level: number, mask: number): void {
     const pieces = fencePieces(mask);
     const def = this.art?.manifest.fences?.[FENCE_MATERIALS[level] ?? 'steel'];
-    const textures = def ? pieces.map((p) => this.art!.sheetTexture(def.sheet, p)) : [];
+    const textures = def ? pieces.map((p) => this.art!.sheetTexture(def.sheet, def[p])) : [];
     const rendered = def !== undefined && textures.every(Boolean);
     const key = `${level}:${mask}:${rendered}`;
     if (key === this.key) return;
