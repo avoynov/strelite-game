@@ -3,6 +3,7 @@ import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import type { Fence, Game, Tower } from '../sim/game';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
+import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
 import { FLY_HEIGHT, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
 import { depth, diamond, isoX, isoY, project, RISE, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
@@ -53,46 +54,6 @@ interface ShotOrigin {
 const FLOAT_LIFE = 0.9;
 const STRIKE_LIFE = 0.18;
 
-/** Siege mode fences, wood, stone, steel: faces lit from the upper left. */
-const FENCE_LOOK = [
-  { top: 0x9c7446, left: 0x6e4f2e, right: 0x84603a, line: 0x4a3420, h: 0.42 },
-  { top: 0xa49f93, left: 0x6f6b62, right: 0x88847a, line: 0x55524b, h: 0.5 },
-  { top: 0x8a96a3, left: 0x4f5964, right: 0x66727e, line: 0x2f363d, h: 0.58 },
-] as const;
-
-/** A fence tile drawn from simple shapes: a palisade, a mortared wall or riveted plates. */
-function drawFence(g: Graphics, level: number): void {
-  const look = FENCE_LOOK[Math.min(level, 2)]!;
-  const r = 0.45;
-  const h = look.h * RISE;
-  const top = diamond(-r, -r, r, r).map((v, i) => (i % 2 ? v - h : v));
-  const [, , rx, ry, bx, by, lx, ly] = diamond(-r, -r, r, r) as [number, number, number, number, number, number, number, number];
-  g.poly([lx, ly, bx, by, bx, by - h, lx, ly - h]).fill(look.left);
-  g.poly([bx, by, rx, ry, rx, ry - h, bx, by - h]).fill(look.right);
-  g.poly(top).fill(look.top).stroke({ width: 1, color: look.line, alpha: 0.8 });
-  if (level === 0) {
-    // Stakes: vertical splits down both faces, pointed tops.
-    for (let k = 1; k < 4; k++) {
-      const t = k / 4;
-      for (const [ax, ay] of [[lx, ly], [rx, ry]] as const) {
-        const x = ax + (bx - ax) * t;
-        const y = ay + (by - ay) * t;
-        g.moveTo(x, y).lineTo(x, y - h).stroke({ width: 1, color: look.line, alpha: 0.7 });
-      }
-    }
-  } else if (level === 1) {
-    // Courses of stone.
-    for (const t of [0.35, 0.7]) {
-      g.moveTo(lx, ly - h * t).lineTo(bx, by - h * t).lineTo(rx, ry - h * t).stroke({ width: 1, color: look.line, alpha: 0.7 });
-    }
-  } else {
-    // Rivets along the plates.
-    for (let k = 1; k < 4; k++) {
-      const t = k / 4;
-      for (const [ax, ay] of [[lx, ly], [rx, ry]] as const) g.circle(ax + (bx - ax) * t, ay + (by - ay) * t - h * 0.75, 1.2).fill(0xc9d2da);
-    }
-  }
-}
 const RAIL_LIFE = 0.35;
 
 /** Screen rotation of a direction on the ground (`a` = atan2(dy, dx) in grid cells). */
@@ -138,7 +99,7 @@ export class BoardRenderer {
   private rails: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   /** Siege mode: enemy shots at guns and fences, fading out. */
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
-  private readonly fenceViews = new Map<number, { node: Graphics; level: number }>();
+  private readonly fenceViews = new Map<number, FenceView>();
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
@@ -458,24 +419,27 @@ export class BoardRenderer {
   // ---- per frame -----------------------------------------------------------
 
   private syncFences(): void {
+    const fences = this.game.fences;
+    if (!fences.length && !this.fenceViews.size) return;
+    const { grid } = this.game.map;
+    const at = new Set(fences.map((f) => grid.index(f.cx, f.cy)));
+    const has = (x: number, y: number) => grid.inBounds(x, y) && at.has(grid.index(x, y));
     const seen = new Set<number>();
-    for (const f of this.game.fences) {
+    for (const f of fences) {
       seen.add(f.id);
-      let entry = this.fenceViews.get(f.id);
-      if (!entry || entry.level !== f.level) {
-        entry?.node.destroy();
-        const node = new Graphics();
-        drawFence(node, f.level);
-        node.position.set(isoX(f.x, f.y), isoY(f.x, f.y));
-        node.zIndex = depth(f.x, f.y);
-        this.objects.addChild(node);
-        entry = { node, level: f.level };
-        this.fenceViews.set(f.id, entry);
+      let view = this.fenceViews.get(f.id);
+      if (!view) {
+        view = new FenceView(this.art, this.artScale(), f.x, f.y);
+        this.objects.addChild(view.node);
+        this.fenceViews.set(f.id, view);
       }
+      // Walls join their neighbours into one line.
+      const mask = (has(f.cx + 1, f.cy) ? PX : 0) | (has(f.cx - 1, f.cy) ? NX : 0) | (has(f.cx, f.cy + 1) ? PY : 0) | (has(f.cx, f.cy - 1) ? NY : 0);
+      view.update(f.level, mask);
     }
-    for (const [id, entry] of this.fenceViews) {
+    for (const [id, view] of this.fenceViews) {
       if (seen.has(id)) continue;
-      entry.node.destroy();
+      view.destroy();
       this.fenceViews.delete(id);
     }
   }
@@ -492,7 +456,7 @@ export class BoardRenderer {
       g.rect(x - w / 2, y, w * f, 4).fill(f > 0.5 ? 0x7bd36a : f > 0.25 ? 0xe6c14a : 0xe0624f);
     };
     for (const t of this.game.towers) bar(t, t.size, 0.35 * t.size + 0.4);
-    for (const f of this.game.fences) bar(f, 1, FENCE_LOOK[f.level]!.h + 0.1);
+    for (const f of this.game.fences) bar(f, 1, FENCE_HEIGHT[Math.min(f.level, 2)]! * 1.2 + 0.1);
     this.strikes = this.strikes.filter((s) => {
       s.age += dt;
       const k = s.age / STRIKE_LIFE;
