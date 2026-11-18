@@ -19,7 +19,17 @@ NAMES = {
     "infantry": {"bg": "Пехота", "en": "Infantry"},
     "truck": {"bg": "Камион", "en": "Truck"},
     "tank": {"bg": "Танк", "en": "Tank"},
+    "bikers": {"bg": "Мотоциклисти", "en": "Motorcycle raiders"},
+    "drone": {"bg": "Дрон", "en": "Drone"},
+    "airship": {"bg": "Дирижабъл", "en": "Armoured airship"},
+    "apc": {"bg": "БТР", "en": "Armoured personnel carrier"},
+    "fortress": {"bg": "Крепост", "en": "Land fortress"},
 }
+
+
+# Model name -> the game's enemy id (src/sim/content.ts): the bikers are "moto", and the
+# armoured airship is the game's air unit "drone" (it replaced the drone model).
+GAME_ID = {"bikers": "moto", "airship": "drone"}
 
 
 def pack_model(src, dst, model):
@@ -60,6 +70,9 @@ def pack_model(src, dst, model):
         "directions": n,
         "lengthM": meta["lengthM"],
         "radiusM": meta["radiusM"],
+        **({"flying": True, "flightHeightM": meta.get("flightHeightM"),
+            "shadow": "no shadow in the sprite: draw a dark ellipse on the ground below it"}
+           if meta.get("flying") else {}),
     }
 
 
@@ -75,7 +88,7 @@ def main():
         manifest = json.load(f)
     enemies = manifest.setdefault("enemies", {})
     for model in a.models:
-        enemies[model] = pack_model(a.src, a.dst, model)
+        enemies[GAME_ID.get(model, model)] = pack_model(a.src, a.dst, model)
     manifest["enemiesNote"] = ("enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle "
                                "NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen "
                                "lower-right); anchor = the unit's ground centre; shadow included")

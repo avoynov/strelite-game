@@ -55,6 +55,8 @@ def main(argv=None):
                     help="also render these firing-animation frames (all if no number) as fire_DD_FF.png "
                          "for the directions in --fire-dirs; the model must define FIRE_FRAMES")
     ap.add_argument("--fire-dirs", type=int, default=16, help="directions of the firing animation")
+    ap.add_argument("--fire-samples", type=int, default=None,
+                    help="samples for the firing frames (motion-blurred, so fewer are enough)")
     ap.add_argument("--enemy", action="store_true",
                     help="moving unit: the whole model turns; writes <out>/enemies/<model>/dir_NN.png")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(__file__), "..", "out"))
@@ -168,6 +170,8 @@ def render_tower_layers(model, a, level):
     if a.fire is not None and hasattr(model, "set_fire_frame"):
         frames = a.fire or list(range(1, model.FIRE_FRAMES + 1))
         model.key_fire_animation(scene)
+        if a.fire_samples:
+            scene.cycles.samples = a.fire_samples
         scene.render.use_motion_blur = True
         scene.render.motion_blur_shutter = 0.5
         for owner in (scene.render, scene.cycles):          # shutter closes at the frame
@@ -184,7 +188,8 @@ def render_tower_layers(model, a, level):
         model.set_fire_frame(0, scene)
         scene.render.use_motion_blur = False
         fire = {"dirs": a.fire_dirs, "frames": model.FIRE_FRAMES, "fps": model.FIRE_FPS,
-                "releaseFrame": model.RELEASE_FRAME, "reloadFrom": model.RELOAD_FROM}
+                "releaseFrame": model.RELEASE_FRAME, "reloadFrom": model.RELOAD_FROM,
+                "loop": getattr(model, "LOOP", False)}
     meta = {
         "model": a.model, "level": level, "dirs": a.dirs, "pxPerMetre": a.ppm,
         "frame": [size, size_y], "anchorPx": anchor_px, "fire": fire,
@@ -203,8 +208,11 @@ def render_enemy(model, a):
     materials.clear_cache()
     frame_m = a.frame or model.SPRITE_FRAME_M
     size = int(round(frame_m * a.ppm / 2)) * 2
-    scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m, ground="patch",
+    flying = getattr(model, "FLYING", False)        # no ground shadow: the game draws one
+    scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m,
+                              ground="none" if flying else "patch",
                               target_z=0.0, projection="ortho", catcher_hole=0.0)
+    scene.render.film_transparent = True
     scene.cycles.seed = 1
     scene.render.use_persistent_data = True
     root, _ = model.build("photoreal", 1)
@@ -223,7 +231,8 @@ def render_enemy(model, a):
         bpy.ops.render.render(write_still=True)
         print(f"[render] enemy {a.model} dir_{i:02d}: {time.time() - t:.1f}s", flush=True)
     meta = {"model": a.model, "dirs": a.dirs, "pxPerMetre": a.ppm, "frame": [size, size],
-            "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M}
+            "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M,
+            "flying": flying, "flightHeightM": getattr(model, "FLIGHT_HEIGHT_M", None)}
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
 

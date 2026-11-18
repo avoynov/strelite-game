@@ -38,7 +38,25 @@ TAU_LO, TAU_HI = 3.0 / 255, 12.0 / 255   # "changed" thresholds (premultiplied R
 NAMES = {
     "howitzer": {"bg": "Гаубица", "en": "Howitzer"},
     "trebuchet": {"bg": "Требушет", "en": "Trebuchet"},
+    "ballista": {"bg": "Самострел", "en": "Repeating ballista"},
+    "scorpion": {"bg": "Скорпион", "en": "Heavy bolt thrower"},
+    "greekfire": {"bg": "Гръцки огън", "en": "Greek fire siphon"},
+    "railgun": {"bg": "Релсотрон", "en": "Rail cannon"},
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
+}
+
+# Model name -> the game's tower id (src/sim/content.ts), where they differ.
+GAME_ID = {"ballista": "crossbow"}
+
+# What the game shows at the muzzle when the gun fires: only powder guns flash and smoke.
+# Torsion and counterweight engines release silently (the fire animation carries the shot),
+# the siphon shows its fire stream, the rail cannon its charge then beam.
+SHOT_FX = {
+    "howitzer": ["muzzle_flash", "muzzle_smoke"],
+    "zis3": ["muzzle_flash", "muzzle_smoke"],
+    "ballista": [], "scorpion": [], "trebuchet": [],
+    "greekfire": ["fire_stream"],
+    "railgun": ["rail_charge", "rail_beam"],
 }
 
 
@@ -241,11 +259,14 @@ def pack_fire(src, dst, model, level, meta):
         "sheet": f"towers/{prefix}_<DD>", "animation": f"{prefix}_<DD>", "dirs": fire["dirs"],
         "frames": fire["frames"], "fps": fire["fps"], "releaseFrame": fire["releaseFrame"],
         "reloadFrom": fire["reloadFrom"],
+        "loop": fire.get("loop", False),
         "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
         "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); "
                "frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), "
                "play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; "
                "after the last frame show the aim layer again",
+        **({"loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / "
+                       "frames shots a second at full speed)"} if fire.get("loop") else {}),
     }
 
 
@@ -317,6 +338,7 @@ def main():
             levels.append(info)
         if levels:
             towers[model] = {"name": NAMES.get(model, {"bg": model, "en": model}),
+                             "shotEffects": SHOT_FX.get(model, ["muzzle_flash", "muzzle_smoke"]),
                              "placeholder": True, "levels": levels}
     if not towers:
         raise SystemExit("nothing to pack: no meta.json under " + a.src)
@@ -340,6 +362,7 @@ def main():
                   "<base> first, then <aim>_NN on top, both at the tower's ground point",
     })
     for model, entry in towers.items():         # merge by level, so levels can be packed one by one
+        model = GAME_ID.get(model, model)
         known = manifest.setdefault("towers", {}).setdefault(model, {"levels": []})
         merged = {lv["level"]: lv for lv in known.get("levels", [])}
         merged.update({lv["level"]: lv for lv in entry["levels"]})

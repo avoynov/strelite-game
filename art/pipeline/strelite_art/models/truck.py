@@ -9,6 +9,7 @@ import math
 
 from .. import materials_photoreal as mp
 from ..geo import Kit
+from . import faction as fx
 from . import vehicle
 
 SPRITE_FRAME_M = 8.6
@@ -29,6 +30,12 @@ def build(style, level=1):
     _chassis(k, root)
     _cab(k, root)
     _bed(k, root)
+    # parallel-world faction marks: emblem on the tilt roof and doors, brass fittings
+    fx.emblem(k, root, (0, -1.35, 3.12), (0, 0, 1), r=0.55)
+    for sx in (-1, 1):
+        fx.emblem(k, root, (sx * 1.09, 1.35, 1.55), (sx, 0, 0), r=0.22)
+        fx.band(k, root, (sx * 1.11, 0.78, 1.4), (sx * 1.11, 1.95, 1.4), (0.02, 0.1))
+    fx.gauge(k, root, (0.6, 3.17, 1.65), (0, 1, 0.2), r=0.06)
     return root, root
 
 
@@ -46,14 +53,14 @@ def _cab(k, root):
     # bonnet: engine cover with a grille in front
     k.plate("bonnet", [(1.95, 1.0), (3.15, 1.0), (3.15, 1.62), (2.95, 1.72), (1.95, 1.75)], 1.24, 0.0,
             G, parent=root, bevel=0.02)
-    k.box("grille", (1.0, 0.03, 0.55), (0, 3.16, 1.3), "gunmetal", parent=root, bevel=False)
+    k.box("grille", (1.0, 0.03, 0.55), (0, 3.16, 1.3), "brass", parent=root, bevel=False)
     for i in range(7):
         k.box("grille_bar", (0.9, 0.035, 0.03), (0, 3.18, 1.08 + i * 0.07), WORN, parent=root, bevel=False)
     for sx in (-1, 1):
         # front wings over the wheels and headlights on them
         k.plate("wing", [(1.55, 1.12), (2.85, 1.12), (2.95, 1.25), (2.6, 1.42), (1.75, 1.42)], 0.46,
                 sx * 0.88, G, parent=root, bevel=0.012)
-        k.cylinder("headlight", 0.1, 0.12, (sx * 0.86, 2.8, 1.52), G, segs=16, rot=(-math.pi / 2, 0, 0),
+        k.cylinder("headlight", 0.1, 0.12, (sx * 0.86, 2.8, 1.52), "brass", segs=16, rot=(-math.pi / 2, 0, 0),
                    parent=root)
         k.cylinder("lens", 0.085, 0.01, (sx * 0.86, 2.925, 1.52), "glass", segs=16,
                    rot=(-math.pi / 2, 0, 0), parent=root, bevel=False)
@@ -72,7 +79,7 @@ def _cab(k, root):
         k.box("door_handle", (0.03, 0.12, 0.03), (sx * 1.085, 1.0, 1.72), "steel_worn", parent=root,
               bevel=False)
     k.box("roof_hatch", (0.6, 0.6, 0.04), (0.3, 1.25, 2.52), WORN, parent=root, bevel=0.01)
-    k.tube("exhaust", (0.98, 0.7, 1.3), (0.98, 0.7, 2.8), 0.05, "steel_worn", parent=root, segs=12)
+    fx.stack(k, root, (0.98, 0.7, 1.3), 1.5, r=0.06)
 
 
 def _bed(k, root):

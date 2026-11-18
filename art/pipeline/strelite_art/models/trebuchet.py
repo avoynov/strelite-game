@@ -37,7 +37,7 @@ FRAME_M = 14.0
 TARGET_Z = 2.2
 SPRITE_FRAME_M = 16.0
 SWEEP_M = 4.15           # rear corners of the frame turn inside this radius
-FOOTPRINT_M = 5.0        # 3x3 tiles of 4 m
+FOOTPRINT_M = 5.6        # 3x3 tiles of 4 m
 PLATFORM_Z = 0.2         # top of the turntable
 PIVOT = Vector((0.0, 0.0, 4.3))
 LONG, SHORT = 5.2, 1.6
@@ -95,10 +95,12 @@ def build(style, level=1):
     s = STYLE[level]
     root = k.empty("trebuchet")
     _platform(k, root, level, s)
+    _ammo_pile(k, root, level, s)
     turret = k.empty("turret", (0, 0, PLATFORM_Z), parent=root)
     turret["node"] = "turret"
     mp.set_reference(turret)
     _frame(k, turret, level, s)
+    _traverse(k, turret, level, s)
     _arm(k, turret, level, s)
     _windlass(k, turret, level, s)
     th, al = FIRE[RELEASE_FRAME - 1][:2]
@@ -217,7 +219,7 @@ def _tag(before, role):
 
 def ground(level):
     from ..terrain import Patch
-    return Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.7, r_bare=3.6, seed=37, ragged=0.5)
+    return Patch(r_solid=FOOTPRINT_M, r_out=FOOTPRINT_M + 0.7, r_bare=4.2, seed=37, ragged=0.5)
 
 
 # -- helpers -----------------------------------------------------------------------------
@@ -279,6 +281,34 @@ def _rock(k, parent, loc, r, seed, rounded=False):
     return k._finish(o, "stone", bevel=False, parent=parent)
 
 
+def ground_spot(r, turn_deg):
+    """A point on the ground r metres out, toward the camera turned by turn_deg (so ground
+    props sit in front of the machine on screen, where they are seen)."""
+    from ..scene import camera_vectors
+    _, back, right = camera_vectors()
+    b = Vector((back.x, back.y, 0)).normalized()
+    rr = Vector((right.x, right.y, 0)).normalized()
+    a = math.radians(turn_deg)
+    return (b * math.cos(a) + rr * math.sin(a)) * r
+
+
+def _ammo_pile(k, root, level, s):
+    """Spare rounds stacked on the ground beside the machine: three below, one on top, on a
+    plank pallet from level 2."""
+    c = ground_spot(4.75, -38)
+    r = PROJ_R
+    z0 = 0.0
+    if level >= 2:
+        for i in range(4):
+            k.beam("pallet", c + Vector((-0.75, -0.5 + i * 0.33, 0.05)), c + Vector((0.75, -0.5 + i * 0.33, 0.05)),
+                   (0.3, 0.07), s["plat"], parent=root, bevel=0.006)
+        z0 = 0.09
+    pts = [Vector((-0.33, -0.2, 0)), Vector((0.33, -0.2, 0)), Vector((0.0, 0.37, 0))]
+    for i, p in enumerate(pts):
+        _projectile(k, root, c + p + Vector((0, 0, z0 + r)), r, level, seed=10 + i)
+    _projectile(k, root, c + Vector((0, -0.01, z0 + r + 0.48)), r, level, seed=20)
+
+
 # -- static turntable ----------------------------------------------------------------------
 def _platform(k, root, level, s):
     R = 2.35
@@ -288,6 +318,22 @@ def _platform(k, root, level, s):
     if s["rim"]:
         k.torus("rim", R, 0.06, (0, 0, PLATFORM_Z * 0.55), s["rim"], parent=root, segs=64, tube_segs=8)
     k.cylinder("pivot", 0.22, 0.08, (0, 0, PLATFORM_Z), s["rim"] or "iron_forged", segs=20, parent=root)
+    if level >= 3:                                       # rack teeth round the rim for the traverse pinion
+        m = s["rim"]
+        for i in range(72):
+            a = 2 * math.pi * i / 72
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("rack_tooth", (0.08, 0.06, 0.1), d * (R + 0.08) + Vector((0, 0, PLATFORM_Z * 0.55)), m,
+                  rot=(0, 0, a), parent=root, bevel=False)
+    if level >= 4:                                       # ring rail for the rear wheels
+        RR = math.hypot(1.05, 3.8)
+        k.torus("rail", RR, 0.045, (0, 0, 0.08), "iron_forged" if level == 4 else "steel_worn", parent=root,
+                segs=128, tube_segs=6)
+        for i in range(40):
+            a = 2 * math.pi * i / 40
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("sleeper", (0.45, 0.14, 0.06), d * RR + Vector((0, 0, 0.03)), "timber_oak", rot=(0, 0, a),
+                  parent=root, bevel=0.004)
 
 
 def _plank(k, root, R, y0, y1, mat, m=5):
@@ -306,6 +352,66 @@ def _plank(k, root, R, y0, y1, mat, m=5):
     obj.rotation_euler = Matrix(((0, 0, 1), (1, 0, 0), (0, 1, 0))).to_euler()
     obj.location = (0, 0, t / 2)
     return k._finish(obj, mat, bevel=0.01, parent=root)
+
+
+# -- traverse: a new kind of mechanism per level ---------------------------------------------
+def _traverse(k, t, level, s):
+    """How the crew turns the machine: pushed on the platform (1), rollers under the tail (2),
+    a pinion with capstan bars on the rim rack (3), flanged wheels on a ring rail (4), a small
+    steam engine driving the pinion (5)."""
+    if level < 2:
+        return
+    W = s["wood"]
+    zg = -PLATFORM_Z                                     # the ground, in the turret's frame
+    for sx in (-1, 1):                                   # tail wheels under the rear of the sills
+        x, y = sx * 1.05, -3.8
+        r = 0.17
+        c = Vector((x, y, zg + r))
+        if level < 4:
+            k.cylinder("tail_roller", r, 0.26, c - Vector((0.13, 0, 0)), W if level == 2 else s["fit"], segs=18,
+                       rot=(0, math.pi / 2, 0), parent=t)
+        else:                                            # flanged rail wheel
+            k.cylinder("rail_wheel", r, 0.12, c - Vector((0.06, 0, 0)), s["fit"], segs=24,
+                       rot=(0, math.pi / 2, 0), parent=t)
+            k.cylinder("wheel_flange", r + 0.04, 0.025, c - Vector((0.08, 0, 0)), s["fit"], segs=24,
+                       rot=(0, math.pi / 2, 0), parent=t)
+        for dx in (-0.17, 0.17):
+            _beam(k, t, "roller_cheek", (x + dx, y, 0.02), (x + dx, y, c.z), (0.05, 0.22), s["fit"] if level > 2 else W)
+    if level >= 3:                                       # pinion on the rim rack, turned by capstan bars
+        R = 2.35
+        c = Vector((R + 0.27, 0.0, 0.0))
+        _beam(k, t, "pinion_arm", (2.2, 0, 0.18), (c.x, 0, 0.18), (0.2, 0.2), W)
+        k.cylinder("pinion", 0.18, 0.12, c + Vector((0, 0, -0.1)), s["fit"], segs=12, parent=t)
+        for i in range(10):
+            a = 2 * math.pi * i / 10
+            d = Vector((math.cos(a), math.sin(a), 0))
+            k.box("pinion_tooth", (0.08, 0.06, 0.12), c + d * 0.2 + Vector((0, 0, -0.04)), s["fit"], rot=(0, 0, a),
+                  parent=t, bevel=False)
+        k.tube("capstan", c + Vector((0, 0, 0.2)), c + Vector((0, 0, 0.95)), 0.08, W, parent=t, segs=12)
+        if level < 5:
+            for i in range(4):
+                a = math.pi / 4 + i * math.pi / 2
+                d = Vector((math.cos(a), math.sin(a), 0))
+                k.tube("capstan_bar", c + Vector((0, 0, 0.82)), c + Vector((0, 0, 0.82)) + d * 0.8, 0.035, W,
+                       parent=t, segs=8, bevel=False)
+        else:                                            # a small steam engine turns it
+            b = Vector((c.x + 0.05, -0.85, 0.2))
+            k.cylinder("boiler", 0.3, 1.0, b, "bronze_old", segs=28, parent=t)
+            k.cylinder("boiler_top", 0.3, 0.22, b + Vector((0, 0, 1.0)), "bronze_old", segs=28, radius_top=0.08,
+                       parent=t)
+            k.tube("chimney", b + Vector((0, 0, 1.2)), b + Vector((0, 0, 1.75)), 0.06, "iron_black", parent=t,
+                   segs=12)
+            for z in (0.2, 0.5, 0.8):
+                k.torus("boiler_band", 0.305, 0.015, b + Vector((0, 0, z)), "gold_trim", parent=t, segs=28,
+                        tube_segs=5)
+            g = b + Vector((0, 0.3, 0.7))
+            k.cylinder("gauge", 0.09, 0.03, g, "gold_trim", segs=20, rot=(-math.pi / 2, 0, 0), parent=t)
+            k.cylinder("gauge_face", 0.075, 0.01, g + Vector((0, 0.03, 0)), "paint_white", segs=20,
+                       rot=(-math.pi / 2, 0, 0), parent=t, bevel=False)
+            k.tube("steam_pipe", b + Vector((0, 0.25, 0.95)), c + Vector((0, -0.12, 0.6)), 0.035, "bronze_old",
+                   parent=t, segs=8)
+            k.cylinder("piston", 0.1, 0.45, c + Vector((0, -0.12, 0.25)), "silver", segs=16, parent=t)
+            k.box("firebox_door", (0.02, 0.24, 0.2), b + Vector((0.3, 0, 0.18)), "iron_black", parent=t, bevel=0.004)
 
 
 # -- rotating frame ------------------------------------------------------------------------

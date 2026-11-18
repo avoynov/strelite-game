@@ -36,7 +36,7 @@ BARE_STEEL = (0.56, 0.57, 0.58)
 # name: (builder, kwargs)
 OLIVE = (0.34, 0.35, 0.24)      # FS 34087 olive drab
 GREEN_4BO = (0.30, 0.37, 0.21)  # Soviet 4BO protective green
-ENEMY_GREY = (0.15, 0.16, 0.16)  # the attackers' dark grey
+ENEMY_GREY = (0.14, 0.16, 0.18)  # the attackers' slate (parallel-world faction, see models/faction.py)
 SPEC = {
     "paint_olive":   ("painted", dict(color=OLIVE, rough=0.62)),
     "paint_olive_worn": ("painted", dict(color=OLIVE, rough=0.6, wear=1.8, dust=1.3)),
@@ -78,6 +78,11 @@ SPEC = {
     "brass":         ("metal", dict(color=(0.80, 0.66, 0.34), rough=0.28, dust=0.3)),
     # --- enemy vehicles and troops: dark grey, so they read on the pale road and the meadow
     "paint_enemy":      ("painted", dict(color=ENEMY_GREY, rough=0.55, wear=0.9, dust=0.5)),
+    "paint_faction_red": ("painted", dict(color=(0.40, 0.05, 0.04), rough=0.5, wear=1.0, dust=0.5)),
+    "paint_camo":    ("painted", dict(color=GREEN_4BO, rough=0.62, wear=1.0, dust=0.8,
+                                      camo=((0.52, 0.42, 0.24), (0.06, 0.07, 0.05)))),
+    "paint_steel":   ("painted", dict(color=(0.30, 0.33, 0.35), rough=0.42, wear=0.8, dust=0.5)),
+    "paint_blue":    ("painted", dict(color=(0.08, 0.16, 0.42), rough=0.45, wear=0.6, dust=0.3)),
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
     "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
@@ -92,6 +97,10 @@ SPEC = {
                                      weather=0.1, dust=0.45, checks=0.4)),
     "timber_tarred": ("timber", dict(light=(0.50, 0.33, 0.19), dark=(0.27, 0.15, 0.07), rough=0.7,
                                      weather=0.35, dust=0.6, checks=0.7)),
+    "timber_red":    ("timber", dict(light=(0.52, 0.12, 0.08), dark=(0.30, 0.06, 0.04), rough=0.6,
+                                     weather=0.3, dust=0.5, checks=0.5)),
+    "timber_honey":  ("timber", dict(light=(0.62, 0.40, 0.18), dark=(0.38, 0.22, 0.09), rough=0.42,
+                                     weather=0.08, dust=0.35, checks=0.3)),
     "iron_black":    ("metal", dict(color=(0.06, 0.06, 0.065), rough=0.32, dust=0.4, rust=0.1)),
     "bronze_old":    ("metal", dict(color=(0.78, 0.50, 0.28), rough=0.34, dust=0.25, rust=0.0)),
     "iron_forged":   ("metal", dict(color=(0.10, 0.10, 0.10), rough=0.48, dust=0.6, rust=0.35)),
@@ -99,6 +108,11 @@ SPEC = {
     "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
+    "ember":         ("ember", {}),
+    "arc_glow":      ("arc", {}),
+    "enamel_white":  ("painted", dict(color=(0.82, 0.81, 0.77), rough=0.3, wear=0.5, dust=0.3)),
+    "porcelain":     ("plain", dict(color=(0.86, 0.84, 0.78), rough=0.15, dust=0.3)),
+    "clay":          ("plain", dict(color=(0.60, 0.34, 0.20), rough=0.8, dust=0.9)),
     "leather":       ("plain", dict(color=(0.30, 0.18, 0.10), rough=0.62, dust=0.6)),
     "steel_cable":   ("metal", dict(color=(0.70, 0.71, 0.72), rough=0.3, dust=0.2)),
 }
@@ -318,7 +332,7 @@ def _dust_mask(g, P, amount):
 
 
 def _painted(name, color, rough, wear=1.0, dust=1.0, primer=PRIMER, bare=BARE_STEEL,
-             soot=0.0):
+             soot=0.0, camo=None):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     P = g.coords()
@@ -327,7 +341,11 @@ def _painted(name, color, rough, wear=1.0, dust=1.0, primer=PRIMER, bare=BARE_ST
     # --- paint: tone differs a little per panel and in large soft patches
     tone = g.math("ADD", 0.84, g.math("MULTIPLY", g.rnd(), 0.32))
     patch = g.math("ADD", 0.82, g.math("MULTIPLY", g.noise(P, 1.3, detail=5, rough=0.6), 0.36))
-    paint = g.mix(1.0, rgb(color), g.math("MULTIPLY", tone, patch), "MULTIPLY")
+    base = rgb(color)
+    for i, cc in enumerate(camo or ()):                  # hard-edged blotches of extra colours
+        m = g.ramp(g.noise(P, 3.2 + 1.1 * i, detail=2, rough=0.5, distortion=0.3), 0.47 + 0.06 * i, 0.49 + 0.06 * i)
+        base = g.mix(m, base, rgb(cc))
+    paint = g.mix(1.0, base, g.math("MULTIPLY", tone, patch), "MULTIPLY")
 
     # --- exposed edges (convex and concave) via the Bevel node
     bev = g.node("ShaderNodeBevel", samples=4)
@@ -782,10 +800,32 @@ def _screen(name):
     return mat
 
 
+def _ember(name):
+    """Glowing coals: dark char with an orange glow that varies across the bed."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    P = g.coords()
+    hot = g.ramp(g.noise(P, 9, detail=5, rough=0.6), 0.42, 0.68)
+    bsdf = g.finish(g.mix(hot, (0.03, 0.025, 0.02, 1), (0.30, 0.08, 0.02, 1)), 0.8, 0.0)
+    bsdf.inputs["Emission Color"].default_value = (1.0, 0.38, 0.08, 1)
+    g.L.new(g.math("MULTIPLY", hot, 14.0), bsdf.inputs["Emission Strength"])
+    return mat
+
+
+def _arc(name):
+    """Charged coils and capacitor cores: dark glass with an electric blue glow."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((0.02, 0.04, 0.08, 1), 0.15)
+    bsdf.inputs["Emission Color"].default_value = (0.35, 0.65, 1.0, 1)
+    bsdf.inputs["Emission Strength"].default_value = 16.0
+    return mat
+
+
 _BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood, "timber": _timber,
              "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
              "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
-             "screen": _screen}
+             "screen": _screen, "ember": _ember, "arc": _arc}
 
 
 def build(name):

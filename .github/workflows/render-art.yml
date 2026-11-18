@@ -1,0 +1,110 @@
+name: Render art
+# Renders the style В sprites with headless Blender (pip bpy), one job per tower level,
+# projectile set and enemy, then packs them into public/art and commits back to the branch.
+on:
+  push:
+    branches: ['claude/**']
+    paths: ['art/pipeline/render-queue.json']
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: render-art-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: m
+        run: |
+          python3 - <<'EOF' >> "$GITHUB_OUTPUT"
+          import json
+          q = json.load(open("art/pipeline/render-queue.json"))
+          jobs = [{"kind": "tower", "model": m, "level": l} for m, ls in q.get("towers", {}).items() for l in ls]
+          jobs += [{"kind": "proj", "model": m, "level": 0} for m in q.get("projectiles", [])]
+          jobs += [{"kind": "enemy", "model": m, "level": 0} for m in q.get("enemies", [])]
+          print("matrix=" + json.dumps({"include": jobs}))
+          EOF
+
+  render:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.kind }} ${{ matrix.model }} ${{ matrix.level }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Blender as a Python module
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxi6 libxkbcommon0 libsm6 libxxf86vm1 libxfixes3 libxrender1 \
+            libgl1 libegl1 fonts-dejavu-core > /dev/null
+          pip install -q bpy==5.3.0 numpy pillow
+      - name: Render and pack
+        working-directory: art/pipeline
+        env:
+          KIND: ${{ matrix.kind }}
+          MODEL: ${{ matrix.model }}
+          LEVEL: ${{ matrix.level }}
+        run: |
+          set -euo pipefail
+          run() { "$@" > render.log 2>&1 || { tail -60 render.log; exit 1; }; grep -cE '^\[(render|round)' render.log || true; }
+          if [ "$KIND" = tower ]; then
+            run python3 render_sprites.py --model "$MODEL" --style photoreal --levels "$LEVEL" --dirs 32 \
+              --fire --fire-dirs 32 --fire-samples 20 --ground patch --ppm 32 --samples 32 --out ../out
+            python3 pack_atlas.py --src ../out --dst ../../public/art --models "$MODEL" --levels "$LEVEL"
+          elif [ "$KIND" = proj ]; then
+            run python3 render_projectiles.py --model "$MODEL" --out ../out
+          else
+            run python3 render_sprites.py --model "$MODEL" --style photoreal --enemy --dirs 16 --ppm 32 \
+              --samples 32 --out ../out
+            python3 pack_enemies.py --src ../out --models "$MODEL"
+          fi
+      - name: Collect the changed files
+        run: |
+          set -euo pipefail
+          F=frag/files
+          mkdir -p "$F"
+          git ls-files -mo --exclude-standard public/art | { grep -v '^public/art/towers.json$' || true; } | while read -r p; do
+            mkdir -p "$F/$(dirname "${p#public/art/}")"; cp "$p" "$F/${p#public/art/}"; done
+          cp public/art/towers.json frag/towers.json
+          printf '{"kind":"%s","model":"%s","level":%s}' "${{ matrix.kind }}" "${{ matrix.model }}" \
+            "${{ matrix.level }}" > frag/job.json
+          du -sh frag
+      - uses: actions/upload-artifact@v4
+        with:
+          name: art-${{ matrix.kind }}-${{ matrix.model }}-${{ matrix.level }}
+          path: frag
+          retention-days: 7
+
+  merge:
+    needs: render
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: art-*
+          path: frags
+      - name: Merge and commit
+        run: |
+          set -euo pipefail
+          python3 art/pipeline/ci_merge.py frags public/art
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/art
+          git commit -qm "art: rendered sprite atlases (render-art workflow)" || { echo "nothing new"; exit 0; }
+          for i in 1 2 3 4; do
+            git pull --rebase -q origin "${GITHUB_REF_NAME}" && git push -q origin "HEAD:${GITHUB_REF_NAME}" && exit 0
+            sleep $((i * 10))
+          done
+          exit 1

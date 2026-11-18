@@ -31,10 +31,13 @@ def render(model, a, out_dir):
     from strelite_art import materials_photoreal
     from strelite_art.geo import Kit
     mod = importlib.import_module(f"strelite_art.models.{model}")
-    size = int(round(a.frame_m * a.ppm / 2)) * 2
+    frame_m = getattr(mod, "ROUND_FRAME_M", a.frame_m)
+    headings = getattr(mod, "ROUND_DIRS", None)      # bolts: one frame per flight heading
+    a.frames = headings or a.frames
+    size = int(round(frame_m * a.ppm / 2)) * 2
     for level in mod.LEVELS:
         materials.clear_cache()
-        scene = stage.build_stage("photoreal", size, a.samples, frame_m=a.frame_m, ground="none",
+        scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m, ground="none",
                                   target_z=0.0, projection="ortho")
         scene.render.film_transparent = True
         scene.cycles.seed = 1
@@ -44,7 +47,10 @@ def render(model, a, out_dir):
         mod.build_round(k, spin, level)
         materials_photoreal.stamp(scene)
         for f in range(a.frames):
-            spin.rotation_euler = (2 * math.pi * f / a.frames, 0.5, 0.3)
+            if headings:        # frame f flies along game angle f * 2pi / dirs (0 = screen lower-right)
+                spin.rotation_euler = (0, 0, -2 * math.pi * f / a.frames - math.pi / 2)
+            else:
+                spin.rotation_euler = (2 * math.pi * f / a.frames, 0.5, 0.3)
             path = os.path.join(out_dir, f"L{level}_{f:02d}.png")
             scene.render.filepath = path
             if not (a.resume and os.path.exists(path)):
@@ -86,11 +92,15 @@ def pack_rounds(model, mod, a, out_dir):
     path = os.path.join(a.dst, "towers.json")
     with open(path) as fh:
         manifest = json.load(fh)
-    manifest.setdefault("projectiles", {})[model] = {
+    from pack_atlas import GAME_ID
+    manifest.setdefault("projectiles", {})[GAME_ID.get(model, model)] = {
         "sheet": f"projectiles/{model}", "levels": list(mod.LEVELS), "frames": a.frames, "fps": a.fps,
         "radiusM": getattr(mod, "PROJ_R", None),
         "animation": f"{model}_L<level>_round",
-        "note": "tumbling round, no shadow: draw a dark ellipse on the ground below it",
+        "headings": bool(getattr(mod, "ROUND_DIRS", None)),
+        "note": ("one frame per flight heading (frame = round(angle / (2pi / frames)) mod frames), "
+                 if getattr(mod, "ROUND_DIRS", None) else "tumbling round, ") +
+                "no shadow: draw a dark ellipse on the ground below it",
     }
     with open(path, "w") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
