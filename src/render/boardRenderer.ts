@@ -105,6 +105,8 @@ export class BoardRenderer {
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
   private readonly buildingViews = new Map<'hq' | 'lab', BuildingView>();
+  /** Base mode: the camera has been put on the base once. */
+  private focused = false;
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
   private readonly enemyViews = new Map<number, { view: PixiEnemyView; kind: string; gx: number; gy: number }>();
   /** Rendered one-shot animations, when the art has them. */
@@ -177,6 +179,12 @@ export class BoardRenderer {
     this.screenH = screenH;
     this.resolution = resolution;
     this.camera.configure(this.bounds, view, MAX_TILE_PX / TILE_W);
+    // The base opens on the base: closer in, the headquarters low in the view and the way the enemy comes above it.
+    if (this.game.hq && !this.focused) {
+      this.focused = true;
+      const p = project(HQ_SPOT[0] - 3, HQ_SPOT[1] - 3);
+      this.camera.focus(p.x, p.y, this.camera.minScale * 1.45);
+    }
     this.drawGround();
     this.drawMap();
     this.applyCamera();

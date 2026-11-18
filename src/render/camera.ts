@@ -39,6 +39,14 @@ export class Camera {
     this.clamp();
   }
 
+  /** Zoom to `scale` (within limits) with the world point (wx, wy) in the middle of the view, as far as the map allows. */
+  focus(wx: number, wy: number, scale: number): void {
+    this.scale = Math.min(this.maxScale, Math.max(this.minScale, scale));
+    this.x = this.view.x + this.view.w / 2 - wx * this.scale;
+    this.y = this.view.y + this.view.h / 2 - wy * this.scale;
+    this.clamp();
+  }
+
   toWorld(sx: number, sy: number): { x: number; y: number } {
     return { x: (sx - this.x) / this.scale, y: (sy - this.y) / this.scale };
   }
