@@ -21,9 +21,21 @@ import { battleTakings, researchItem } from './sim/research';
 import { BASE_MAP, baseTakings, HQ_LEVELS, LAB_LEVELS, lossSale } from './sim/base';
 import { attackStrength, defenceStrength } from './sim/strength';
 import type { BaseHud } from './ui/hud';
+import { GameAudio } from './audio/audio';
+import type { SoundName } from './audio/synth';
+import { installWay, onInstallChange, promptInstall } from './pwa/install';
+import { AUTO_STEPS, FrameWatch, qualityFor, readChoice, saveAutoStep, saveChoice, startStep, type QualityChoice } from './perf';
+import { PauseMenu } from './ui/pauseMenu';
+import type { EnemyId, TowerId } from './sim/content';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
 const MODE_KEY = 'strelite.mode';
+/** The running path or arc battle, so closing the game does not lose it. */
+const BATTLE_KEY = 'strelite.battle';
+
+/** Each gun's report. The flamethrower is a held loop instead; the railgun has its own event. */
+const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = { crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet' };
+const DEATH_SOUND: Record<EnemyId, SoundName> = { infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig' };
 
 const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
 const asMode = (v: string | null): Mode | null => MODES.find((m) => m === v) ?? null;
@@ -71,9 +83,33 @@ function startLevel(): number {
   return Math.min(Math.max(1, readNumber(levelKey())), wonLevel() + 1);
 }
 
+function readBattle(): { mode: Mode; level: number; save: unknown } | null {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BATTLE_KEY) ?? 'null') as { mode?: unknown; level?: unknown } | null;
+    const m = asMode(typeof raw?.mode === 'string' ? raw.mode : null);
+    const level = Number(raw?.level);
+    return m && level >= 1 ? { mode: m, level: Math.floor(level), save: raw } : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearBattle(): void {
+  try {
+    localStorage.removeItem(BATTLE_KEY);
+  } catch {
+    // Nothing saved anyway.
+  }
+}
+
 async function start(): Promise<void> {
   document.documentElement.lang = getLang();
   document.title = t('game.title');
+
+  const audio = new GameAudio();
+  let qualityChoice: QualityChoice = readChoice();
+  let autoStep = startStep();
+  let quality = qualityFor(qualityChoice, autoStep);
 
   const app = new Application();
   const [art, portraits] = await Promise.all([
@@ -82,11 +118,15 @@ async function start(): Promise<void> {
     app.init({
       resizeTo: window,
       background: PALETTE.background,
-      antialias: true,
+      antialias: quality.antialias,
       autoDensity: true,
-      resolution: Math.min(window.devicePixelRatio || 1, 2),
+      resolution: quality.resolution,
+      // Weak phones: let the browser pick the cheaper GPU path.
+      powerPreference: quality.antialias ? 'high-performance' : 'low-power',
     }),
   ]);
+  art?.allowSharp(quality.sharpArt);
+  app.ticker.maxFPS = quality.maxFps;
   await art?.preload();
   portraits?.preload();
   document.getElementById('board')!.appendChild(app.canvas);
@@ -134,7 +174,22 @@ async function start(): Promise<void> {
     }
     return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
   };
-  let game = newGame(startLevel());
+  // A battle left running last time picks up where it stopped (unless a level was asked for in the address).
+  const saved = params.has('level') ? null : readBattle();
+  let game = newGame(saved && saved.mode === mode ? saved.level : startLevel());
+  const resumed = !!saved && saved.mode === mode && game.restoreBattle(saved.save);
+  if (saved && !resumed) clearBattle();
+
+  /** Path and arc modes: keep the running battle, or forget it once over. */
+  const saveBattle = () => {
+    if (game.base) return;
+    const save = game.saveBattle();
+    if (!save) {
+      clearBattle();
+      return;
+    }
+    saveString(BATTLE_KEY, JSON.stringify(save));
+  };
 
   /** Base mode: write what stands into the saved base (the building levels and jobs stay the store's). */
   const saveBase = () => {
@@ -187,6 +242,7 @@ async function start(): Promise<void> {
       saveNumber(levelKey(), level);
       board.destroy();
       saveBase();
+      clearBattle();
       game = newGame(level);
       banked = null;
       baseResult = null;
@@ -205,7 +261,55 @@ async function start(): Promise<void> {
     openLevels: () => levels.open(),
     banked: () => banked ?? 0,
     base: () => (game.base ? baseHud : null),
+    pause: () => pause(),
+    done: () => audio.play('build'),
   });
+
+  // ---- pause ---------------------------------------------------------------
+
+  let paused = false;
+  const watch = new FrameWatch();
+  const pause = () => {
+    if (paused) return;
+    paused = true;
+    loop.paused = true;
+    audio.setPaused(true);
+    saveBattle();
+    pauseMenu.open();
+  };
+  const applyQuality = () => {
+    quality = qualityFor(qualityChoice, autoStep);
+    art?.allowSharp(quality.sharpArt);
+    app.ticker.maxFPS = quality.maxFps;
+    if (app.renderer.resolution !== quality.resolution) app.renderer.resize(app.screen.width, app.screen.height, quality.resolution);
+    watch.reset();
+    relayout();
+  };
+  const pauseMenu = new PauseMenu({
+    audio: () => audio.settings,
+    setAudio: (s) => audio.set(s),
+    quality: () => qualityChoice,
+    setQuality: (q) => {
+      qualityChoice = q;
+      saveChoice(q);
+      applyQuality();
+    },
+    installWay,
+    install: () => void promptInstall().then(() => pauseMenu.invalidate()),
+    openLevels: () => {
+      // The level list is a menu of its own; the battle stays paused behind it until one is chosen or it closes.
+      levels.open();
+    },
+    resume: () => {
+      paused = false;
+      loop.paused = false;
+      audio.setPaused(false);
+      watch.reset();
+      hud.update();
+    },
+  });
+  document.body.appendChild(pauseMenu.el);
+  onInstallChange(() => pauseMenu.invalidate());
 
   const levels = new LevelSelect({
     won: wonLevel,
@@ -215,9 +319,15 @@ async function start(): Promise<void> {
       mode = m;
       saveString(MODE_KEY, m);
     },
-    play: (level) => hud.restartAt(level),
+    play: (level) => {
+      hud.restartAt(level);
+      if (paused) pauseMenu.close();
+    },
     attack: () => baseStore.state.attack,
-    close: () => hud.update(),
+    close: () => {
+      if (paused) pauseMenu.open();
+      hud.update();
+    },
   });
   document.body.appendChild(levels.el);
 
@@ -231,6 +341,7 @@ async function start(): Promise<void> {
   document.body.appendChild(lab.el);
   // A finished item is announced wherever the player is; it counts from the next battle.
   let doneCount = research.state.done.length;
+  let ticks = 0;
   window.setInterval(() => {
     const done = research.state.done;
     for (const id of done.slice(doneCount)) {
@@ -251,9 +362,21 @@ async function start(): Promise<void> {
       // In peace the base is rebuilt at once with the new levels; during an attack they count from the next.
       if (game.base && game.phase === 'build' && game.wave === 0) hud.restartAt(game.level);
     }
+    // The running battle every few seconds, in case the app is killed without warning.
+    if (++ticks % 5 === 0 && !paused) saveBattle();
   }, 1000);
-  document.addEventListener('visibilitychange', saveBase);
-  window.addEventListener('pagehide', saveBase);
+  // Leaving the app pauses the battle and saves it; coming back shows the pause screen.
+  const onHide = () => {
+    saveBase();
+    if (!paused && game.phase !== 'won' && game.phase !== 'lost' && !arsenal.isOpen && !lab.isOpen && !levels.isOpen) pause();
+    else saveBattle();
+  };
+  document.addEventListener('visibilitychange', () => {
+    audio.setHidden(document.hidden);
+    if (document.hidden) onHide();
+    watch.reset();
+  });
+  window.addEventListener('pagehide', onHide);
 
   // Before the level: browse the guns; the one on screen when leaving is armed for placing.
   const arsenal = new Arsenal({
@@ -313,6 +436,7 @@ async function start(): Promise<void> {
 
   onLangChange(() => {
     document.title = t('game.title');
+    pauseMenu.invalidate();
     hud.invalidate();
     arsenal.invalidate();
     lab.invalidate();
@@ -321,7 +445,25 @@ async function start(): Promise<void> {
   });
   window.addEventListener('resize', () => requestAnimationFrame(relayout));
   relayout();
-  if (!params.has('noarsenal') && !game.base) arsenal.open();
+  if (resumed) {
+    // Back to a battle left running: it waits on the pause screen until the player is ready.
+    hud.showToast(t('toast.resumed'));
+    pause();
+  } else if (!params.has('noarsenal') && !game.base) arsenal.open();
+
+  // Every button clicks.
+  document.addEventListener('click', (ev) => {
+    if ((ev.target as HTMLElement).closest('button:not(:disabled)')) audio.play('click');
+  }, { capture: true });
+
+  /** A sound placed where it happens: panned across the screen, quieter off it. */
+  const playAt = (name: SoundName, gx: number, gy: number, gain = 1) => {
+    const p = board.gridToScreen(gx, gy);
+    const w = app.screen.width;
+    const h = app.screen.height;
+    const off = p.x < -w * 0.1 || p.x > w * 1.1 || p.y < -h * 0.1 || p.y > h * 1.1;
+    audio.play(name, Math.max(-1, Math.min(1, (p.x / w) * 2 - 1)) * 0.7, gain * (off ? 0.35 : 1));
+  };
 
   // `?debug` exposes a hook for automated browser checks.
   if (new URLSearchParams(location.search).has('debug')) {
@@ -334,6 +476,7 @@ async function start(): Promise<void> {
         arm: (def: Armed | null) => (armed = def),
         research: () => research,
         base: () => baseStore,
+        audio: () => audio,
       },
     });
   }
@@ -342,17 +485,38 @@ async function start(): Promise<void> {
     const frame = ticker.deltaMS / 1000;
     const alpha = loop.advance(frame);
     for (const ev of game.drainEvents()) {
-      if (ev.type === 'shot') board.onShot(ev.towerId, ev.projectileId);
-      else if (ev.type === 'burst') board.onBurst(ev.x, ev.y, ev.radius);
-      else if (ev.type === 'impact') board.onImpact(ev.x, ev.y);
-      else if (ev.type === 'rail') board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
+      if (ev.type === 'shot') {
+        board.onShot(ev.towerId, ev.projectileId);
+        const tw = game.towerById(ev.towerId);
+        const snd = tw && SHOT_SOUND[tw.def];
+        if (tw && snd) playAt(snd, tw.x, tw.y);
+      }
+      else if (ev.type === 'burst') {
+        board.onBurst(ev.x, ev.y, ev.radius);
+        playAt('burst', ev.x, ev.y, Math.min(1, 0.6 + ev.radius * 0.2));
+      }
+      else if (ev.type === 'impact') {
+        board.onImpact(ev.x, ev.y);
+        playAt('impact', ev.x, ev.y);
+      }
+      else if (ev.type === 'rail') {
+        board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
+        playAt('railgun', ev.x1, ev.y1);
+      }
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+        playAt(DEATH_SOUND[ev.def], ev.x, ev.y, ev.def === 'moto' ? 0.6 : 1);
       }
-      else if (ev.type === 'strike') board.onStrike(ev.kind, ev.x1, ev.y1, ev.x2, ev.y2);
+      else if (ev.type === 'leak') audio.play('leak');
+      else if (ev.type === 'strike') {
+        board.onStrike(ev.kind, ev.x1, ev.y1, ev.x2, ev.y2);
+        const def = game.enemies.find((e) => e.id === ev.enemyId)?.def;
+        playAt(ev.kind === 'ram' ? 'ram' : def === 'tank' || def === 'fortress' ? 'tankGun' : 'rifle', ev.x1, ev.y1);
+      }
       else if (ev.type === 'wrecked') {
         board.onWrecked(ev.x, ev.y, ev.size);
+        playAt('wrecked', ev.x, ev.y);
         if (ev.building === 'lab') {
           // The laboratory is gone: research stops and its building job is lost.
           const st = baseStore.state;
@@ -363,14 +527,38 @@ async function start(): Promise<void> {
         } else if (!ev.fence && !ev.building) hud.showToast(t('toast.gunWrecked'));
       }
       else if (ev.type === 'built') {
+        audio.play('build');
         const tw = game.towerById(ev.towerId);
         if (tw) hud.showToast(ev.kind === 'build' ? t('toast.built', { name: t(`tower.${tw.def}`) }) : t('toast.jobDone', { name: t(`tower.${tw.def}`), n: tw.level + 1 }));
       }
-      else if (ev.type === 'waveStart' && game.base && ev.wave === 1) saveBase();
-      else if (ev.type === 'waveClear') hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
+      else if (ev.type === 'waveStart') {
+        audio.play('waveStart');
+        if (game.base && ev.wave === 1) saveBase();
+        saveBattle();
+      }
+      else if (ev.type === 'waveClear') {
+        hud.showToast(t('toast.waveClear', { n: ev.wave, bonus: ev.bonus }));
+        // The last wave's stinger is the win fanfare instead.
+        if (ev.wave < game.totalWaves) audio.play('waveClear');
+        saveBattle();
+      }
+      else if (ev.type === 'won') audio.play('won');
+      else if (ev.type === 'lost') audio.play('lost');
     }
     // When the battle ends, the gold it earned and did not spend goes to the treasury (plus a win bonus).
+    // The flamethrowers roar while any of them pours fire.
+    let flames = 0;
+    for (const tw of game.towers) if (tw.def === 'greekfire' && tw.firing) flames++;
+    audio.setLoop('greekfire', paused || !flames ? 0 : Math.min(1, 0.55 + 0.15 * flames));
+    // Auto quality: slow frames during a wave step the graphics down, and the next start remembers it.
+    if (qualityChoice === 'auto' && !paused && game.phase === 'wave' && autoStep < AUTO_STEPS - 1 && watch.frame(frame)) {
+      autoStep++;
+      saveAutoStep(autoStep);
+      applyQuality();
+      hud.showToast(t('toast.quality'));
+    }
     if (banked === null && (game.phase === 'won' || game.phase === 'lost')) {
+      clearBattle();
       if (game.base) {
         // The base: kills already went to the treasury; the defence reward comes on top.
         const won = game.phase === 'won';
@@ -398,7 +586,7 @@ async function start(): Promise<void> {
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
     if (selection?.kind === 'building' && !(selection.what === 'hq' ? game.hq : game.lab)) selection = null;
     if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
-    board.render(alpha, selection, armed, frame * loop.speed);
+    board.render(alpha, selection, armed, paused ? 0 : frame * loop.speed);
     hud.update();
   });
 }

@@ -495,3 +495,72 @@ html, body {
 .lab-down { color: #f0b3a6; }
 .lv-base { padding: 18px 4px; display: grid; gap: 14px; justify-items: center; text-align: center; }
 .lv-base p { margin: 0; color: var(--muted); max-width: 32ch; }
+
+/* ------------------------------------------------------------------- Pause */
+
+.pause {
+  --brass: #d39a3f;
+  --display: 'Oswald', 'Arial Narrow', system-ui, sans-serif;
+  position: fixed; inset: 0; z-index: 40;
+  display: grid; place-items: end center;
+  background: rgba(6, 8, 5, 0.62);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: pm-fade 140ms ease-out;
+}
+.pause[hidden] { display: none; }
+@keyframes pm-fade { from { opacity: 0; } }
+@keyframes pm-rise { from { transform: translateY(24px); opacity: 0; } }
+.pm-card {
+  width: 100%; max-width: 440px; max-height: 100%; overflow-y: auto; touch-action: pan-y;
+  display: flex; flex-direction: column; gap: 14px;
+  padding: 18px 16px calc(16px + var(--safe-bottom));
+  border: 1px solid rgba(211, 154, 63, 0.28); border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  background:
+    radial-gradient(120% 50% at 50% 0%, rgba(211, 154, 63, 0.14), transparent 65%),
+    linear-gradient(180deg, #161c13, #0d110b);
+  box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.5);
+  animation: pm-rise 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (min-width: 720px), (min-height: 820px) {
+  .pause { place-items: center; }
+  .pm-card { border-radius: 20px; border-bottom: 1px solid rgba(211, 154, 63, 0.28); padding-bottom: 18px; }
+}
+.pm-head .lab-title { font-size: 34px; }
+.pm-resume { min-height: 54px; font: 600 19px/1 var(--display); letter-spacing: 0.08em; text-transform: uppercase; }
+.pm-resume svg, .pm-install-btn svg { width: 20px; height: 20px; fill: currentColor; }
+.pm-install-btn svg { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.pm-group { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+.pm-group h2 { margin: 0; color: var(--brass); font: 600 12px/1 var(--display); letter-spacing: 0.22em; text-transform: uppercase; }
+.pm-row { display: flex; align-items: center; justify-content: space-between; }
+.pm-toggle {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 4px 0 12px;
+  border: 1px solid var(--line); border-radius: 999px; background: rgba(255, 255, 255, 0.05);
+  color: var(--muted); font: inherit; font-weight: 700;
+}
+.pm-toggle i { position: relative; width: 44px; height: 26px; border-radius: 13px; background: #3a3f35; transition: background 140ms ease; }
+.pm-toggle i::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+  background: #d9d2bf; transition: transform 160ms ease;
+}
+.pm-toggle.on { color: var(--text); }
+.pm-toggle.on i { background: var(--primary); }
+.pm-toggle.on i::after { transform: translateX(18px); background: #fff3d6; }
+.pm-slider { display: grid; grid-template-columns: 78px 1fr 46px; align-items: center; gap: 10px; min-height: 40px; font-size: 14px; }
+.pm-slider.off { opacity: 0.45; }
+.pm-slider output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+.pm-slider input { width: 100%; height: 32px; margin: 0; accent-color: var(--primary); touch-action: none; }
+.pm-seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--line); }
+.pm-seg button {
+  min-height: 38px; border: 0; border-radius: 9px; background: transparent; color: var(--muted);
+  font: inherit; font-weight: 700;
+}
+.pm-seg button.on { background: rgba(211, 154, 63, 0.2); color: var(--text); box-shadow: inset 0 0 0 1px rgba(211, 154, 63, 0.55); }
+.pm-note { margin: 0; color: var(--muted); font-size: 12.5px; }
+.pm-install { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 14px; border: 1px solid rgba(211, 154, 63, 0.35); background: rgba(211, 154, 63, 0.07); }
+.pm-install-btn { min-height: 48px; }
+.pm-ios { margin: 4px 0 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; }
+.pm-share { width: 18px; height: 18px; vertical-align: -3px; fill: none; stroke: #4c9bff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pm-foot { display: flex; justify-content: flex-end; gap: 8px; }
+
+.chip-ico.pause-btn svg { fill: currentColor; stroke: none; }
