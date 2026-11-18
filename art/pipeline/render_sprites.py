@@ -219,20 +219,32 @@ def render_enemy(model, a):
     materials_photoreal.stamp(scene)
     out_dir = os.path.join(a.out, "enemies", a.model)
     os.makedirs(out_dir, exist_ok=True)
+    # movement animation (SOP "Movement animation"): MOVE_FRAMES frames per heading,
+    # dir_NN_FF.png; models without it render one still per heading, dir_NN.png
+    move_frames = getattr(model, "MOVE_FRAMES", 0)
     for i in range(a.dirs):
         if a.only_dir is not None and i not in a.only_dir:
             continue
         heading = 2 * math.pi * i / a.dirs
         root.rotation_euler = (0, 0, -heading - math.pi / 2)
-        scene.render.filepath = os.path.join(out_dir, f"dir_{i:02d}.png")
-        if a.resume and os.path.exists(scene.render.filepath) and os.path.getsize(scene.render.filepath) > 0:
-            continue
-        t = time.time()
-        bpy.ops.render.render(write_still=True)
-        print(f"[render] enemy {a.model} dir_{i:02d}: {time.time() - t:.1f}s", flush=True)
+        for f in range(max(move_frames, 1)):
+            if move_frames:
+                model.set_move_frame(f, scene)
+                name = f"dir_{i:02d}_{f:02d}.png"
+            else:
+                name = f"dir_{i:02d}.png"
+            scene.render.filepath = os.path.join(out_dir, name)
+            if a.resume and os.path.exists(scene.render.filepath) and os.path.getsize(scene.render.filepath) > 0:
+                continue
+            t = time.time()
+            bpy.ops.render.render(write_still=True)
+            print(f"[render] enemy {a.model} {name}: {time.time() - t:.1f}s", flush=True)
     meta = {"model": a.model, "dirs": a.dirs, "pxPerMetre": a.ppm, "frame": [size, size],
             "anchorPx": [size / 2, size / 2], "lengthM": model.LENGTH_M, "radiusM": model.RADIUS_M,
             "flying": flying, "flightHeightM": getattr(model, "FLIGHT_HEIGHT_M", None)}
+    if move_frames:
+        meta["move"] = {"frames": move_frames, "kind": model.MOVE_KIND,
+                        "cycleM": getattr(model, "MOVE_CYCLE_M", None), "fps": getattr(model, "MOVE_FPS", None)}
     with open(os.path.join(out_dir, "meta.json"), "w") as f:
         json.dump(meta, f, indent=1)
 

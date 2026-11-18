@@ -101,6 +101,7 @@ SPEC = {
     "skin_olive":    ("plain", dict(color=(0.55, 0.38, 0.27), rough=0.52, dust=0.2)),
     "skin_dark":     ("plain", dict(color=(0.33, 0.21, 0.14), rough=0.5, dust=0.2)),
     "hair":          ("plain", dict(color=(0.06, 0.045, 0.035), rough=0.7, dust=0.3)),
+    "tyre":          ("plain", dict(color=(0.05, 0.05, 0.05), rough=0.8, dust=0.55)),
     "boot_leather":  ("plain", dict(color=(0.05, 0.04, 0.034), rough=0.45, dust=0.15)),
     "glove":         ("plain", dict(color=(0.16, 0.11, 0.07), rough=0.66, dust=0.6)),
     "cloth_oxblood": ("cloth", dict(color=(0.26, 0.055, 0.045), alt=(0.21, 0.045, 0.04), dust=0.3, wrinkle=7.0)),

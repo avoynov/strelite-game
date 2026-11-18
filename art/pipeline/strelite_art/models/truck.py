@@ -19,15 +19,41 @@ G, WORN = "paint_enemy", "paint_enemy_worn"
 R_WHEEL, TRACK_X = 0.55, 0.92
 
 
+HOLES = 8
+MOVE_FRAMES = 4
+MOVE_KIND = "wheels"
+MOVE_CYCLE_M = 2 * math.pi * R_WHEEL / HOLES      # the wheel pattern repeats every 1/8 turn
+_MOTION = vehicle.Motion(MOVE_FRAMES, MOVE_CYCLE_M)
+
+
+def set_move_frame(f, scene=None):
+    _MOTION.set(f)
+
+
 def build(style, level=1):
+    global _MOTION
+    _MOTION = vehicle.Motion(MOVE_FRAMES, MOVE_CYCLE_M)
     k = Kit(style)
     root = k.empty("truck")
     mp.set_reference(root)
     for y in (2.15, -1.05, -2.35):
         for sx in (-1, 1):
-            vehicle.tyre_wheel(k, root, (sx * TRACK_X, y, R_WHEEL), R_WHEEL, 0.36, WORN)
+            vehicle.lug_wheel(k, root, _MOTION, (sx * TRACK_X, y, R_WHEEL), R_WHEEL, 0.36, WORN, holes=HOLES)
         k.tube("axle", (-0.8, y, R_WHEEL), (0.8, y, R_WHEEL), 0.06, "gunmetal", parent=root, segs=12)
+        k.lathe("diff", [(-0.2, 0.0), (-0.2, 0.12), (0.0, 0.2), (0.2, 0.12), (0.2, 0.0)], "gunmetal", segs=20,
+                loc=(0, y, R_WHEEL), parent=root)
+        for sx in (-1, 1):                                  # leaf spring pack and U-bolts
+            for i in range(4):
+                ln = 1.1 - 0.18 * i
+                k.box("leaf", (0.07, ln, 0.022), (sx * 0.48, y, R_WHEEL + 0.1 + 0.024 * i), "steel_worn",
+                      rot=(0, 0, 0), parent=root, bevel=False)
+            for dy in (-0.07, 0.07):
+                k.box("u_bolt", (0.1, 0.02, 0.2), (sx * 0.48, y + dy, R_WHEEL + 0.06), "iron_black", parent=root,
+                      bevel=False)
+    k.tube("propshaft", (0, 2.0, R_WHEEL + 0.1), (0, -1.05, R_WHEEL + 0.05), 0.045, "gunmetal", parent=root, segs=10)
+    k.tube("propshaft", (0, -1.05, R_WHEEL + 0.05), (0, -2.35, R_WHEEL + 0.05), 0.045, "gunmetal", parent=root, segs=10)
     _chassis(k, root)
+    _extras(k, root)
     _cab(k, root)
     _bed(k, root)
     # parallel-world faction marks: emblem on the tilt roof and doors, brass fittings
@@ -133,3 +159,23 @@ def _tilt(k, root, y0, y1, z_eave, half_w, rise):
     for sx in (-1, 1):                                     # lashing ropes along the bottom edge
         k.tube("rope", (sx * (half_w + 0.01), y0, z_eave - 0.45), (sx * (half_w + 0.01), y1, z_eave - 0.45),
                0.012, "rope", parent=root, segs=6, bevel=False)
+
+
+def _extras(k, root):
+    """Kit a real front-line truck carries: spare wheel, jerrycans, tools, lights, hooks."""
+    for i, y in enumerate((-0.4, -0.9, -1.4)):              # jerrycans in a rack on the bed side
+        k.box("jerrycan", (0.16, 0.36, 0.48), (1.32, y, 1.55), WORN if i % 2 else G, parent=root, bevel=0.02)
+        k.box("can_handle", (0.17, 0.12, 0.04), (1.32, y, 1.81), "steel_worn", parent=root, bevel=False)
+    k.box("can_rack", (0.05, 1.5, 0.05), (1.4, -0.9, 1.42), "iron_black", parent=root, bevel=False)
+    k.box("toolbox", (0.5, 0.9, 0.35), (-0.95, -0.4, 0.85), "paint_enemy_worn", parent=root, bevel=0.015)
+    k.tube("pick_haft", (-1.3, -2.8, 1.45), (-1.3, -1.6, 1.45), 0.02, "wood", parent=root, segs=8)
+    k.box("pick_head", (0.05, 0.05, 0.5), (-1.3, -2.75, 1.45), "iron_black", parent=root, bevel=False)
+    k.tube("shovel_haft", (-1.3, -1.4, 1.38), (-1.3, -0.2, 1.38), 0.02, "wood", parent=root, segs=8)
+    k.box("shovel_blade", (0.03, 0.28, 0.22), (-1.3, -0.1, 1.38), "steel_worn", parent=root, bevel=False)
+    for sx in (-1, 1):
+        k.box("tail_light", (0.12, 0.05, 0.08), (sx * 0.95, -3.37, 1.05), "paint_faction_red", parent=root,
+              bevel=False)
+        k.torus("tow_hook", 0.07, 0.018, (sx * 0.6, 3.32, 0.72), "iron_black", rot=(0, math.pi / 2, 0),
+                parent=root, segs=12, tube_segs=4)
+    k.lathe("steam_whistle", [(0, 0.0), (0, 0.04), (0.18, 0.035), (0.2, 0.05), (0.26, 0.0)], "brass", segs=14,
+            loc=(0.98, 0.7, 2.85), rot=(math.pi / 2, 0, 0), parent=root)
