@@ -93,6 +93,11 @@ SPEC = {
     "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
+    # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)
+    "tunic_slate":   ("cloth", dict(color=(0.27, 0.285, 0.28), alt=(0.24, 0.25, 0.245), dust=0.35, wrinkle=9.0)),
+    "breeches_dark": ("cloth", dict(color=(0.14, 0.145, 0.14), alt=(0.12, 0.125, 0.12), dust=0.5, wrinkle=9.0)),
+    "webbing_pale":  ("plain", dict(color=(0.40, 0.37, 0.29), rough=0.8, dust=0.6)),
+    "boot_sole":     ("plain", dict(color=(0.055, 0.045, 0.04), rough=0.7, dust=0.35)),
     "webbing":       ("plain", dict(color=(0.22, 0.22, 0.19), rough=0.8, dust=0.8)),
     "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2, sss=0.2)),
     "boot":          ("plain", dict(color=(0.07, 0.065, 0.06), rough=0.6, dust=1.2)),
@@ -106,7 +111,7 @@ SPEC = {
     "tyre":          ("plain", dict(color=(0.05, 0.05, 0.05), rough=0.8, dust=0.55)),
     "boot_leather":  ("plain", dict(color=(0.05, 0.04, 0.034), rough=0.45, dust=0.15)),
     "glove":         ("plain", dict(color=(0.16, 0.11, 0.07), rough=0.66, dust=0.6)),
-    "cloth_oxblood": ("cloth", dict(color=(0.26, 0.055, 0.045), alt=(0.21, 0.045, 0.04), dust=0.3, wrinkle=7.0)),
+    "cloth_oxblood": ("cloth", dict(color=(0.38, 0.07, 0.05), alt=(0.32, 0.06, 0.045), dust=0.3, wrinkle=7.0)),
     # --- siege engines: one material set per upgrade level
     "timber_raw":    ("timber", dict(light=(0.54, 0.45, 0.34), dark=(0.31, 0.24, 0.17), rough=0.85,
                                      weather=0.55, dust=0.8)),
