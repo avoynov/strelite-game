@@ -34,6 +34,8 @@ export class TowerArt {
   private readonly listeners = new Set<() => void>();
   /** Density the board currently wants; views follow it as sheets arrive. */
   density: Density = 1;
+  /** Highest density allowed: 1 on weak phones keeps the @2x sheets (4× the pixels) out of memory. */
+  private maxDensity: Density = 2;
 
   private constructor(
     readonly manifest: TowerArtManifest,
@@ -65,7 +67,14 @@ export class TowerArt {
     return () => this.listeners.delete(fn);
   }
 
+  /** Allow or forbid the sharp @2x sheets (graphics quality). */
+  allowSharp(on: boolean): void {
+    this.maxDensity = on ? 2 : 1;
+    if (!on) this.setDensity(1);
+  }
+
   setDensity(density: Density): void {
+    density = Math.min(density, this.maxDensity) as Density;
     if (density === this.density) return;
     this.density = density;
     this.listeners.forEach((fn) => fn());
@@ -130,7 +139,7 @@ export class TowerArt {
   portrait(tower: string, level: number, frame: number): GunPortrait | undefined {
     const lv = this.level(tower, level);
     if (!lv) return undefined;
-    if (!this.sheets.has(`${lv.sheet}@2x`)) void this.requestSheet(lv.sheet, 2);
+    if (this.maxDensity === 2 && !this.sheets.has(`${lv.sheet}@2x`)) void this.requestSheet(lv.sheet, 2);
     if (!this.sheets.has(`${lv.sheet}@1x`)) void this.requestSheet(lv.sheet, 1);
     const sheet = this.sheets.get(`${lv.sheet}@2x`) ?? this.sheets.get(`${lv.sheet}@1x`);
     if (!sheet) return undefined;

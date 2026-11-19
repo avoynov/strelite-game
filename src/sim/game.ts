@@ -27,6 +27,28 @@ import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
 
+const BATTLE_SAVE_VERSION = 1;
+
+/** A running path or arc battle, as saved between visits. */
+export interface BattleSave {
+  v: number;
+  mode: 'path' | 'arc' | 'siege';
+  level: number;
+  totalWaves: number;
+  lives: number;
+  wave: number;
+  phase: Phase;
+  time: number;
+  goldEarned: number;
+  money: number;
+  nextId: number;
+  spawned: number;
+  spawnState: Array<{ left: number; timer: number }>;
+  towers: Tower[];
+  enemies: Enemy[];
+  projectiles: Projectile[];
+}
+
 export interface Enemy {
   id: number;
   def: EnemyId;
@@ -177,8 +199,8 @@ export type GameEvent =
   | { type: 'fizzle'; projectileId: number; x: number; y: number }
   /** A railgun fired: everything on the segment was hit. */
   | { type: 'rail'; towerId: number; x1: number; y1: number; x2: number; y2: number }
-  | { type: 'kill'; enemyId: number; reward: number; x: number; y: number }
-  | { type: 'leak'; enemyId: number }
+  | { type: 'kill'; enemyId: number; def: EnemyId; reward: number; x: number; y: number }
+  | { type: 'leak'; enemyId: number; def: EnemyId }
   /** Siege mode: a unit shot at or rammed a gun or fence. */
   | { type: 'strike'; kind: Assault['kind']; enemyId: number; x1: number; y1: number; x2: number; y2: number }
   /** Siege mode: a gun, fence or building was destroyed. */
@@ -356,6 +378,63 @@ export class Game {
       fence.hp = Math.min(f.hp, fence.maxHp);
     }
     this.settleJobs();
+  }
+
+  /**
+   * Path and arc modes: the whole running battle as plain data, so a closed
+   * game picks up where it left off. Null in base mode (the base saves itself)
+   * and once the battle is over.
+   */
+  saveBattle(): BattleSave | null {
+    if (this.base || this.mode === 'siege' || this.phase === 'won' || this.phase === 'lost') return null;
+    const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
+    return {
+      v: BATTLE_SAVE_VERSION,
+      mode: this.mode,
+      level: this.level,
+      totalWaves: this.totalWaves,
+      lives: this.lives,
+      wave: this.wave,
+      phase: this.phase,
+      time: this.time,
+      goldEarned: this.goldEarned,
+      money: this.purse,
+      nextId: this.nextId,
+      spawned: this.spawned,
+      spawnState: copy(this.spawnState),
+      towers: copy(this.towers),
+      enemies: copy(this.enemies),
+      projectiles: copy(this.projectiles),
+    };
+  }
+
+  /** Put a saved battle back on this (fresh, same map and level) game; false when it does not fit. */
+  restoreBattle(s: unknown): boolean {
+    const b = s as Partial<BattleSave> | null;
+    if (!b || b.v !== BATTLE_SAVE_VERSION || b.mode !== this.mode || b.level !== this.level || b.totalWaves !== this.totalWaves) return false;
+    if (this.base || this.towers.length || this.wave || (b.phase !== 'build' && b.phase !== 'wave')) return false;
+    if (!Array.isArray(b.towers) || !Array.isArray(b.enemies) || !Array.isArray(b.projectiles) || !Array.isArray(b.spawnState)) return false;
+    const { grid } = this.map;
+    for (const t of b.towers) {
+      if (!(t.def in TOWERS) || !grid.inBounds(t.cx, t.cy) || !grid.inBounds(t.cx + t.size - 1, t.cy + t.size - 1)) return false;
+    }
+    if (b.enemies.some((e) => !(e.def in ENEMIES))) return false;
+    this.lives = Number(b.lives) || 0;
+    this.wave = Number(b.wave) || 0;
+    this.time = Number(b.time) || 0;
+    this.goldEarned = Number(b.goldEarned) || 0;
+    this.purse = Number(b.money) || 0;
+    this.nextId = Math.max(1, Number(b.nextId) || 1);
+    this.spawned = Number(b.spawned) || 0;
+    this.towers = b.towers;
+    for (const t of this.towers) this.markFootprint(t, t.id);
+    this.enemies = b.enemies;
+    this.projectiles = b.projectiles;
+    this.phase = b.phase;
+    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level) : null;
+    this.spawnState = b.phase === 'wave' ? b.spawnState : [];
+    this.rebuildFlow();
+    return true;
   }
 
   /** Base mode: the base as it stands now, to be saved (attack number and building jobs are the caller's). */
@@ -1139,12 +1218,12 @@ export class Game {
     e.alive = false;
     if (this.hq) {
       // In the base whatever gets through strikes the headquarters.
-      this.events.push({ type: 'leak', enemyId: e.id });
+      this.events.push({ type: 'leak', enemyId: e.id, def: e.def });
       this.hitStructure(this.hq, ENEMIES[e.def].leakDamage * BASE_RULES.leakHp);
       return;
     }
     this.lives = Math.max(0, this.lives - ENEMIES[e.def].leakDamage);
-    this.events.push({ type: 'leak', enemyId: e.id });
+    this.events.push({ type: 'leak', enemyId: e.id, def: e.def });
     if (this.lives <= 0) {
       this.phase = 'lost';
       this.events.push({ type: 'lost' });
@@ -1405,7 +1484,7 @@ export class Game {
       this.money += target.reward;
       this.goldEarned += target.reward;
       if (tower) tower.stats.kills++;
-      this.events.push({ type: 'kill', enemyId: target.id, reward: target.reward, x: target.x, y: target.y });
+      this.events.push({ type: 'kill', enemyId: target.id, def: target.def, reward: target.reward, x: target.x, y: target.y });
       this.dropUnits(target);
     }
     return r.overkill + r.blocked;
