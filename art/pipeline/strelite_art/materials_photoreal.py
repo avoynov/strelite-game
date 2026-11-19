@@ -102,6 +102,8 @@ SPEC = {
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
     # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)
     "tunic_slate":   ("cloth", dict(color=(0.27, 0.285, 0.28), alt=(0.24, 0.25, 0.245), dust=0.35, wrinkle=9.0)),
+    "tunic_olive":   ("cloth", dict(color=(0.22, 0.25, 0.09), alt=(0.19, 0.22, 0.08), dust=0.35, wrinkle=9.0)),  # defenders
+    "cloth_blue":    ("cloth", dict(color=(0.06, 0.12, 0.30), alt=(0.05, 0.10, 0.26), dust=0.3, wrinkle=7.0)),  # defender scarf
     "breeches_dark": ("cloth", dict(color=(0.14, 0.145, 0.14), alt=(0.12, 0.125, 0.12), dust=0.5, wrinkle=9.0)),
     "webbing_pale":  ("plain", dict(color=(0.40, 0.37, 0.29), rough=0.8, dust=0.6)),
     "boot_sole":     ("plain", dict(color=(0.055, 0.045, 0.04), rough=0.7, dust=0.35)),

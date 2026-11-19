@@ -33,8 +33,10 @@ def render(a):
         w_m, h_m = model.SPRITE_WH_M
         size_x = int(round(w_m * a.ppm / 2)) * 2
         size_y = int(round(h_m * a.ppm / 2)) * 2
-        for level in a.levels:
-            path = os.path.join(out_dir, f"L{level}.png")
+        for level, state in [(lv, st) for st in a.states for lv in a.levels]:
+            if state == "occupied" and name != "hq":
+                continue
+            path = os.path.join(out_dir, f"L{level}.png" if state == "normal" else f"L{level}_{state}.png")
             if a.resume and os.path.exists(path):
                 continue
             materials.clear_cache()
@@ -51,16 +53,24 @@ def render(a):
             scene.render.film_transparent = True
             scene.cycles.seed = 1
             model.build("photoreal", level)
+            if state != "normal":
+                from strelite_art import damage
+                seed = 1000 * level + sum(map(ord, name))
+                if state == "occupied":
+                    damage.occupy(scene, seed=seed)
+                damage.apply(scene, "damaged" if state == "occupied" else state, seed=seed,
+                             footprint=model.FOOTPRINT_M)
             materials_photoreal.stamp(scene)
             patch.build(scene)
             scene.render.filepath = path
             t = time.time()
             bpy.ops.render.render(write_still=True)
-            print(f"[render] building {name} L{level}: {time.time() - t:.1f}s", flush=True)
+            print(f"[render] building {name} L{level} {state}: {time.time() - t:.1f}s", flush=True)
         anchor_y = size_y - model.ANCHOR_FROM_BOTTOM_M * a.ppm
         meta = {"model": name, "pxPerMetre": a.ppm, "frame": [size_x, size_y], "anchorPx": [size_x / 2, anchor_y],
                 "tiles": model.TILES, "footprintM": model.FOOTPRINT_M, "levels": sorted(a.levels),
-                "name": model.NAMES}
+                "name": model.NAMES,
+                "states": sorted({st for st in a.states if st != "normal"} - ({"occupied"} if name != "hq" else set()))}
         with open(os.path.join(out_dir, "meta.json"), "w") as f:
             json.dump(meta, f, indent=1)
 
@@ -150,6 +160,7 @@ if __name__ == "__main__":
     ap.add_argument("--samples", type=int, default=32)
     ap.add_argument("--ppm", type=float, default=32.0)
     ap.add_argument("--resume", action="store_true")
+    ap.add_argument("--states", nargs="+", default=["normal"], help="normal damaged rubble occupied (hq only)")
     ap.add_argument("--out", default=os.path.join(HERE, "..", "out"))
     ap.add_argument("--dst", default=os.path.join(HERE, "..", "..", "public", "art"))
     ap.add_argument("--pack", action="store_true")

@@ -11227,6 +11227,19 @@
    "blend": "add",
    "lengthM": 14.0,
    "note": "shot line along +x from the muzzle: rotate to the target, scale x to the distance; play once"
+  },
+  "smoke_plume": {
+   "sheet": "effects/smoke_plume",
+   "frames": "smoke_plume",
+   "count": 16,
+   "fps": 12,
+   "anchor": [
+    0.32,
+    0.97
+   ],
+   "blend": "normal",
+   "loop": true,
+   "note": "dark smoke column over a damaged building or gun; loop. Pair with fire_burn at the breach; anchor = the base of the column"
   }
  },
  "projectiles": {
