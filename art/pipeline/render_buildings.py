@@ -75,55 +75,71 @@ def render(a):
             json.dump(meta, f, indent=1)
 
 
-def pack(a):
+def _atlas(a, d, meta, items, sheet_name):
+    """Pack (frame name, file) items into buildings/<sheet_name>@1x|@2x."""
     from PIL import Image
 
     from pack_atlas import bbox, load_premultiplied, pack as pack_rects, to_image
+    for tag, ppm_out in (("@2x", 32.0), ("@1x", 16.0)):
+        scale = ppm_out / meta["pxPerMetre"]
+        frames = [load_premultiplied(os.path.join(d, fn), scale) for _, fn in items]
+        H, W = frames[0].shape[:2]
+        boxes = [bbox(pm) for pm in frames]
+        pos, AW, AH = pack_rects([(b[2] - b[0], b[3] - b[1]) for b in boxes])
+        atlas = Image.new("RGBA", (AW, AH), (0, 0, 0, 0))
+        ay = meta["anchorPx"][1] / meta["frame"][1]
+        sheet = {"frames": {}}
+        for (fname, _), pm, b, (x, y) in zip(items, frames, boxes, pos):
+            w, h = b[2] - b[0], b[3] - b[1]
+            atlas.paste(to_image(pm[b[1]:b[3], b[0]:b[2]]), (x, y))
+            sheet["frames"][fname] = {
+                "frame": {"x": x, "y": y, "w": w, "h": h}, "rotated": False, "trimmed": True,
+                "spriteSourceSize": {"x": b[0], "y": b[1], "w": w, "h": h},
+                "sourceSize": {"w": W, "h": H}, "anchor": {"x": 0.5, "y": round(ay, 5)}}
+        img = f"{sheet_name}{tag}.webp"
+        atlas.save(os.path.join(a.dst, "buildings", img), quality=92, method=6, alpha_quality=100)
+        sheet["meta"] = {"app": "strelite art pipeline", "image": img, "format": "RGBA8888",
+                         "size": {"w": AW, "h": AH}, "scale": "2" if tag == "@2x" else "1"}
+        with open(os.path.join(a.dst, "buildings", f"{sheet_name}{tag}.json"), "w") as f:
+            json.dump(sheet, f, separators=(",", ":"))
+        print(f"[pack] buildings {sheet_name}{tag}: {AW}x{AH}", flush=True)
 
+
+def pack(a):
     os.makedirs(os.path.join(a.dst, "buildings"), exist_ok=True)
-    entry = {}
+    path = os.path.join(a.dst, "towers.json")
+    with open(path) as f:
+        manifest = json.load(f)
+    entries = manifest.setdefault("buildings", {})
     for name in a.models:
         d = os.path.join(a.out, "buildings", name)
         with open(os.path.join(d, "meta.json")) as f:
             meta = json.load(f)
         levels = meta["levels"]
-        for tag, ppm_out in (("@2x", 32.0), ("@1x", 16.0)):
-            scale = ppm_out / meta["pxPerMetre"]
-            frames = [load_premultiplied(os.path.join(d, f"L{lv}.png"), scale) for lv in levels]
-            H, W = frames[0].shape[:2]
-            boxes = [bbox(pm) for pm in frames]
-            pos, AW, AH = pack_rects([(b[2] - b[0], b[3] - b[1]) for b in boxes])
-            atlas = Image.new("RGBA", (AW, AH), (0, 0, 0, 0))
-            ay = meta["anchorPx"][1] / meta["frame"][1]
-            sheet = {"frames": {}}
-            for lv, pm, b, (x, y) in zip(levels, frames, boxes, pos):
-                w, h = b[2] - b[0], b[3] - b[1]
-                atlas.paste(to_image(pm[b[1]:b[3], b[0]:b[2]]), (x, y))
-                sheet["frames"][f"{name}_L{lv}"] = {
-                    "frame": {"x": x, "y": y, "w": w, "h": h}, "rotated": False, "trimmed": True,
-                    "spriteSourceSize": {"x": b[0], "y": b[1], "w": w, "h": h},
-                    "sourceSize": {"w": W, "h": H}, "anchor": {"x": 0.5, "y": round(ay, 5)}}
-            img = f"{name}{tag}.webp"
-            atlas.save(os.path.join(a.dst, "buildings", img), quality=92, method=6, alpha_quality=100)
-            sheet["meta"] = {"app": "strelite art pipeline", "image": img, "format": "RGBA8888",
-                             "size": {"w": AW, "h": AH}, "scale": "2" if tag == "@2x" else "1"}
-            with open(os.path.join(a.dst, "buildings", f"{name}{tag}.json"), "w") as f:
-                json.dump(sheet, f, separators=(",", ":"))
-            print(f"[pack] buildings {name}{tag}: {AW}x{AH}", flush=True)
-        entry[name] = {"name": meta["name"], "sheet": f"buildings/{name}",
-                       "levels": [f"{name}_L{lv}" for lv in levels], "tiles": meta["tiles"],
-                       "footprintM": meta["footprintM"],
-                       "frameM": [round(meta["frame"][0] / meta["pxPerMetre"], 3),
-                                  round(meta["frame"][1] / meta["pxPerMetre"], 3)]}
-    path = os.path.join(a.dst, "towers.json")
-    with open(path) as f:
-        manifest = json.load(f)
-    manifest.setdefault("buildings", {}).update(entry)
+        entry = entries.get(name, {})
+        if os.path.exists(os.path.join(d, f"L{levels[0]}.png")):
+            _atlas(a, d, meta, [(f"{name}_L{lv}", f"L{lv}.png") for lv in levels], name)
+            entry.update({"name": meta["name"], "sheet": f"buildings/{name}",
+                          "levels": [f"{name}_L{lv}" for lv in levels], "tiles": meta["tiles"],
+                          "footprintM": meta["footprintM"],
+                          "frameM": [round(meta["frame"][0] / meta["pxPerMetre"], 3),
+                                     round(meta["frame"][1] / meta["pxPerMetre"], 3)]})
+        states = [st for st in ("damaged", "rubble", "occupied")
+                  if all(os.path.exists(os.path.join(d, f"L{lv}_{st}.png")) for lv in levels)]
+        if states:
+            _atlas(a, d, meta, [(f"{name}_L{lv}_{st}", f"L{lv}_{st}.png") for st in states for lv in levels],
+                   f"{name}_states")
+            entry["statesSheet"] = f"buildings/{name}_states"
+            entry["states"] = {st: [f"{name}_L{lv}_{st}" for lv in levels] for st in states}
+        entries[name] = entry
     manifest["buildingsNote"] = (
         "buildings/<id>@1x|@2x.json, frame <id>_L<n> for level n (1-based; the game's level index 0 = L1). "
         "Anchor = ground point of the building's centre (the middle of its 2x2 tiles); the frame is taller "
         "than wide, so anchor.y is below the middle. One static frame per level; draw in the normal depth "
-        "sort with the guns.")
+        "sort with the guns. Damage: buildings/<id>_states@1x|@2x holds states.damaged[n-1] (below half "
+        "health: a breach in the front-right corner), states.rubble[n-1] (destroyed) and, for hq only, "
+        "states.occupied[n-1] (taken by the Iron Concord); same frame size and anchor as the level frames. "
+        "Put effects fire_burn + smoke_plume on damaged ones.")
     with open(path, "w") as f:
         json.dump(manifest, f, indent=1, ensure_ascii=False)
         f.write("\n")
