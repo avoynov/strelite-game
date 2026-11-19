@@ -1,6 +1,6 @@
 {
  "version": 1,
- "about": "Clean gun portraits for menus: gun only, transparent, own shadow. Cell i aims at game angle i * 2*pi/directions (same convention as towers.json). Made by art/pipeline/render_portraits.sh.",
+ "about": "Clean gun portraits for menus: gun only, transparent, no ground and no cast shadow. Cell i aims at game angle i * 2*pi/directions (same convention as towers.json). Made by art/pipeline/render_portraits.sh.",
  "directions": 32,
  "pxPerMetre": 44.0,
  "guns": {
@@ -10,51 +10,51 @@
      "level": 1,
      "image": "portraits/howitzer_L1.webp",
      "cell": [
-      556,
-      324
+      400,
+      301
      ],
      "cols": 4,
      "size": [
-      2224,
-      2592
+      1600,
+      2408
      ],
      "anchor": [
-      226.0,
-      230.0
+      200.0,
+      208.0
      ]
     },
     {
      "level": 2,
      "image": "portraits/howitzer_L2.webp",
      "cell": [
-      556,
-      324
+      400,
+      302
      ],
      "cols": 4,
      "size": [
-      2224,
-      2592
+      1600,
+      2416
      ],
      "anchor": [
-      226.0,
-      230.0
+      200.0,
+      212.0
      ]
     },
     {
      "level": 3,
      "image": "portraits/howitzer_L3.webp",
      "cell": [
-      602,
-      431
+      453,
+      323
      ],
      "cols": 4,
      "size": [
-      2408,
-      3448
+      1812,
+      2584
      ],
      "anchor": [
-      272.0,
-      330.0
+      226.0,
+      233.0
      ]
     },
     {
@@ -99,13 +99,13 @@
      "level": 1,
      "image": "portraits/zis3_L1.webp",
      "cell": [
-      406,
-      219
+      348,
+      214
      ],
      "cols": 4,
      "size": [
-      1624,
-      1752
+      1392,
+      1712
      ],
      "anchor": [
       174.0,
@@ -116,34 +116,34 @@
      "level": 2,
      "image": "portraits/zis3_L2.webp",
      "cell": [
-      406,
-      219
+      348,
+      214
      ],
      "cols": 4,
      "size": [
-      1624,
-      1752
+      1392,
+      1712
      ],
      "anchor": [
       174.0,
-      147.0
+      149.0
      ]
     },
     {
      "level": 3,
      "image": "portraits/zis3_L3.webp",
      "cell": [
-      383,
-      204
+      348,
+      208
      ],
      "cols": 4,
      "size": [
-      1532,
-      1632
+      1392,
+      1664
      ],
      "anchor": [
-      173.0,
-      126.0
+      174.0,
+      149.0
      ]
     },
     {
