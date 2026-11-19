@@ -25,16 +25,22 @@ def merge_levels(known, new):
     return out
 
 
-def merge_portraits(frag_path, path):
-    """portraits.json: each portrait job adds the levels it rendered."""
+def merge_portraits(frag_path, path, level, model):
+    """portraits.json: each portrait job adds only the level it rendered (its fragment also
+    carries the older entries it started from, which must not overwrite fresher ones)."""
+    from pack_atlas import GAME_ID as TID
+    gid = TID.get(model, model)
     with open(frag_path) as f:
         frag = json.load(f)
+    frag["guns"] = {gid: {"levels": [lv for lv in frag["guns"].get(gid, {}).get("levels", [])
+                                     if lv["level"] == level]}}
     if os.path.exists(path):
         with open(path) as f:
             manifest = json.load(f)
     else:
         manifest = {k: v for k, v in frag.items() if k != "guns"}
         manifest["guns"] = {}
+    manifest["about"] = frag.get("about", manifest.get("about"))
     for gid, g in frag.get("guns", {}).items():
         manifest["guns"][gid] = merge_levels(manifest["guns"].get(gid, {"levels": []}), g)
     with open(path, "w") as f:
@@ -57,7 +63,8 @@ def main(frags, dst):
         if os.path.isdir(files):
             shutil.copytree(files, dst, dirs_exist_ok=True)
         if job["kind"] == "portrait":
-            merge_portraits(os.path.join(d, "portraits.json"), os.path.join(dst, "portraits.json"))
+            merge_portraits(os.path.join(d, "portraits.json"), os.path.join(dst, "portraits.json"),
+                            job["level"], job["model"])
             print(f"[merge] {job}")
             continue
         from pack_atlas import GAME_ID as TID
