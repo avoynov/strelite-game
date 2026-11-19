@@ -334,3 +334,56 @@ def belt_links(k, parent, motion, x, path, total, n, width, mat, thick=0.06, hor
         objs.append((e, i * step))
     motion.links.append((placed, objs))
     return step
+
+
+def ring_lathe(k, name, profile, mat, segs=28, loc=(0, 0, 0), rot=(0, 0, 0), parent=None):
+    """A lathe whose profile is a closed loop (a tyre, a rim, a hoop): no end caps, the
+    last ring joined back to the first, so the middle stays open."""
+    import bmesh
+    obj = k.lathe(name, profile, mat, segs=segs, loc=loc, rot=rot, parent=parent)
+    n = len(profile) * segs
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bm.verts.ensure_lookup_table()
+    bmesh.ops.delete(bm, geom=[bm.verts[n], bm.verts[n + 1]], context="VERTS")
+    bm.verts.ensure_lookup_table()
+    last = n - segs
+    for i in range(segs):
+        j = (i + 1) % segs
+        bm.faces.new((bm.verts[last + i], bm.verts[last + j], bm.verts[j], bm.verts[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    return obj
+
+
+def spoke_wheel(k, parent, motion, loc, r, width, rim_mat, spokes=36, knobs=24, tyre="tyre"):
+    """Motorcycle wheel: knobbly tyre on a painted rim, crossed wire spokes laced to a
+    drum-brake hub. Pattern repeats every 2*pi/(spokes/2) and 2*pi/(knobs/2)."""
+    w = k.empty("wheel", loc, parent=parent)
+    h = width / 2
+    ring_lathe(k, "tyre", [(-h * 0.8, r * 0.76), (-h - 0.006, r * 0.86), (-h * 0.7, r * 0.97), (h * 0.7, r * 0.97),
+                           (h + 0.006, r * 0.86), (h * 0.8, r * 0.76)], tyre, segs=48, rot=AXLE_X, parent=w)
+    for i in range(knobs):
+        a = 2 * math.pi * i / knobs
+        off = (h * 0.32) * (1 if i % 2 else -1)
+        k.box("knob", (h * 0.9, 0.04, 0.02), (off, r * 0.965 * math.cos(a), r * 0.965 * math.sin(a)), tyre,
+              rot=(a - math.pi / 2, 0, 0), parent=w, bevel=0.006)
+    ring_lathe(k, "rim", [(-0.022, r * 0.72), (-0.024, r * 0.78), (0.024, r * 0.78), (0.022, r * 0.72)], rim_mat,
+               segs=48, rot=AXLE_X, parent=w)
+    k.cylinder("hub", 0.075, 0.13, (-0.065, 0, 0), "gunmetal", segs=20, rot=(0, math.pi / 2, 0), parent=w,
+               bevel=0.01)
+    for sd in (-1, 1):
+        k.cylinder("hub_flange", 0.085, 0.012, (sd * 0.05 - 0.006, 0, 0), "steel_worn", segs=20,
+                   rot=(0, math.pi / 2, 0), parent=w, bevel=False)
+    for i in range(spokes):
+        a = 2 * math.pi * i / spokes
+        sd = 1 if i % 2 else -1
+        a0 = a + sd * 0.45
+        k.tube("spoke", (sd * 0.05, 0.08 * math.cos(a0), 0.08 * math.sin(a0)),
+               (sd * 0.01, r * 0.72 * math.cos(a), r * 0.72 * math.sin(a)), 0.0035, "steel_worn", parent=w, segs=4,
+               bevel=False)
+    motion.wheel(w, r)
+    return w

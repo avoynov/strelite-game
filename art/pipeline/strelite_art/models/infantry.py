@@ -221,7 +221,7 @@ def _ribbon(k, p, name, pts, nrms, width, thick, mat):
     return obj
 
 
-def _gear(k, p, role, front, back, bvh):
+def _gear(k, p, role, front, back, bvh, pack=True):
     s = p.s
     J = p.J
     waist = J("spine-3").z + 0.01 * s
@@ -317,6 +317,12 @@ def _gear(k, p, role, front, back, bvh):
         tail.rotation_euler.rotate_axis("Y", ang)
         p.attach(tail, "DEF-spine.003")
     # --- pack with a blanket roll, mess tin and entrenching tool
+    if pack:
+        _pack(k, p, role, back, zc, s)
+    _hips(k, p, bvh, waist, s, J)
+
+
+def _pack(k, p, role, back, zc, s):
     hb, _ = back(0.0, zc - 0.25 * s)
     pk = k.empty("pack", (0, hb.y - 0.07, zc - 0.25 * s), parent=p.g)
     k.box("pack_body", (0.3 * s, 0.13, 0.31 * s), (0, 0, 0), "canvas", parent=pk, bevel=0.035)
@@ -340,6 +346,9 @@ def _gear(k, p, role, front, back, bvh):
     if role == "nco":                                # oxblood pennant on a brass mast from the pack
         faction.pennant(k, pk, (-0.12 * s, -0.04, 0.12 * s), h=0.75 * s, w=0.32 * s)
     p.attach(pk, "DEF-spine.003")
+
+
+def _hips(k, p, bvh, waist, s, J):
     # --- canteen and bayonet on the left hip (person's left is -X)
     hl, nl = p.hit(bvh, (-1.0, -0.02, waist - 0.12 * s), (1, 0, 0))
     cn = k.empty("canteen", hl + Vector((-0.045, -0.02, 0.0)), parent=p.g)

@@ -469,16 +469,22 @@ class Person:
         _, i, _ = kd.find(self.to_arm(p_person))
         return self._dom[i][0]
 
-    def skin_near(self, obj, k=4):
+    ARMS = ("DEF-upper_arm", "DEF-forearm", "DEF-hand", "DEF-f_", "DEF-thumb", "DEF-palm")
+
+    def skin_near(self, obj, k=4, exclude=ARMS):
         """Weights for a part lying on the body: blended from the nearest body vertices,
-        so straps, belt and collar bend with the cloth under them."""
+        so straps, belt and collar bend with the cloth under them. Body vertices moved
+        mainly by `exclude` bones are skipped (a belt must not follow the hands that
+        hang beside it in the rest pose)."""
         kd = self._kd()
         bpy.context.view_layer.update()
         M = self.rig.matrix_world.inverted() @ obj.matrix_world
         acc = {}
         for v in obj.data.vertices:
             pa = M @ v.co
-            near = kd.find_n(pa, k)
+            near = [c for c in kd.find_n(pa, k * 6) if not self._dom[c[1]][0].startswith(exclude)][:k] \
+                if exclude else []
+            near = near or kd.find_n(pa, k)
             tot = 0.0
             ws = {}
             for co, i, d in near:
@@ -918,31 +924,84 @@ class Runner:
     def stage_hands(self, grips):
         """grips: {"L"/"R": (point, finger_dir, thumb_dir)} in armature rest space, carried by
         the chest; hand_ik is set so the palm closes round each point."""
-        rig = self.p.rig
+        close_hands(self.p, grips, carry="DEF-spine.003")
+
+
+def close_hands(person, grips, carry=None):
+    """Set hand_ik so each palm closes round a grip {"L"/"R": (point, finger_dir,
+    thumb_dir)} given in armature rest space; `carry` is a bone that carries the grips
+    (the chest for a rifle), None for grips fixed to the parent (handlebars)."""
+    rig = person.rig
+    B = rig.pose.bones
+    if carry:
+        cb = B[carry]
+        Mc = cb.matrix @ cb.bone.matrix_local.inverted()
+    else:
+        Mc = Matrix.Identity(4)
+    for sd, (pt, fy, fz) in grips.items():
+        P = Mc @ Vector(pt)
+        y = (Mc.to_3x3() @ Vector(fy)).normalized()
+        z = (Mc.to_3x3() @ Vector(fz))
+        z = (z - y * z.dot(y)).normalized()
+        x = y.cross(z)
+        volar = x if sd == "L" else -x
+        wrist = P - y * 0.075 * person.s - volar * 0.028 * person.s
+        F = Matrix((x, y, z)).transposed().to_4x4()
+        F.translation = wrist
+        hand_rest = rig.data.bones[f"ORG-hand.{sd}"].matrix_local
+        ik = B[f"hand_ik.{sd}"]
+        ik.matrix = F @ hand_rest.inverted() @ ik.bone.matrix_local
+        for n, a in (("f_index", (1.25, 1.35, 0.8)), ("f_middle", (1.35, 1.4, 0.8)),
+                     ("f_ring", (1.4, 1.4, 0.8)), ("f_pinky", (1.45, 1.35, 0.8))):
+            for j, ang in enumerate(a):
+                fb = B[f"{n}.0{j + 1}.{sd}"]
+                fb.rotation_quaternion = _q_local(fb, Matrix.Rotation(ang, 3, fb.bone.x_axis))
+        for j, ang in enumerate((0.25, 0.5, 0.45)):
+            tb = B[f"thumb.0{j + 1}.{sd}"]
+            tb.rotation_quaternion = _q_local(tb, Matrix.Rotation(ang, 3, tb.bone.x_axis))
+
+
+class Rider:
+    """Seated on a machine (motorcycle, horse, cart): the pelvis on the saddle, the feet
+    on the pegs, the hands on the bars, all on the Rigify IK controls. A still pose;
+    the machine's wheels carry the movement. Points are in person space (front +Y)."""
+
+    def __init__(self, person, seat, pegs, bars, lean=0.55, chest=0.1, toe_out=0.12, foot_pitch=0.1):
+        self.p, self.seat, self.pegs, self.bars = person, Vector(seat), pegs, bars
+        self.lean, self.chest, self.toe_out, self.foot_pitch = lean, chest, toe_out, foot_pitch
+
+    def _a(self, v):
+        """Person-space point -> armature space (the rig stands `lift` up on its soles)."""
+        return self.p.to_arm(Vector(v) - Vector((0, 0, self.p.rig.location.z)))
+
+    def pose(self):
+        p, rig = self.p, self.p.rig
         B = rig.pose.bones
-        chest = B["DEF-spine.003"]
-        Mc = chest.matrix @ chest.bone.matrix_local.inverted()
-        for sd, (pt, fy, fz) in grips.items():
-            P = Mc @ Vector(pt)
-            y = (Mc.to_3x3() @ Vector(fy)).normalized()
-            z = (Mc.to_3x3() @ Vector(fz))
-            z = (z - y * z.dot(y)).normalized()
-            x = y.cross(z)
-            volar = x if sd == "L" else -x
-            wrist = P - y * 0.075 * self.p.s - volar * 0.028 * self.p.s
-            F = Matrix((x, y, z)).transposed().to_4x4()
-            F.translation = wrist
-            hand_rest = rig.data.bones[f"ORG-hand.{sd}"].matrix_local
-            ik = B[f"hand_ik.{sd}"]
-            ik.matrix = F @ hand_rest.inverted() @ ik.bone.matrix_local
-            for n, a in (("f_index", (1.25, 1.35, 0.8)), ("f_middle", (1.35, 1.4, 0.8)),
-                         ("f_ring", (1.4, 1.4, 0.8)), ("f_pinky", (1.45, 1.35, 0.8))):
-                for j, ang in enumerate(a):
-                    fb = B[f"{n}.0{j + 1}.{sd}"]
-                    fb.rotation_quaternion = _q_local(fb, Matrix.Rotation(ang, 3, fb.bone.x_axis))
-            for j, ang in enumerate((0.25, 0.5, 0.45)):
-                tb = B[f"thumb.0{j + 1}.{sd}"]
-                tb.rotation_quaternion = _q_local(tb, Matrix.Rotation(ang, 3, tb.bone.x_axis))
+        L = rig.data.bones
+        for pb in B:
+            if pb.name in ("torso", "hips", "chest", "head", "neck") or pb.name.startswith(
+                    ("foot_ik", "toe_ik", "hand_ik", "f_", "thumb")):
+                pb.rotation_mode = "QUATERNION"
+                pb.location = (0, 0, 0)
+                pb.rotation_quaternion = (1, 0, 0, 0)
+        tor = B["torso"]
+        M = tor.bone.matrix_local.to_3x3()
+        tor.rotation_quaternion = _q_local(tor, Matrix.Rotation(self.lean, 3, "X"))
+        B["chest"].rotation_quaternion = _q_local(B["chest"], Matrix.Rotation(self.chest, 3, "X"))
+        B["head"].rotation_quaternion = _q_local(B["head"], Matrix.Rotation(-0.85 * (self.lean + self.chest), 3, "X"))
+        bpy.context.view_layer.update()
+        pelvis = 0.5 * (B["ORG-thigh.L"].head + B["ORG-thigh.R"].head)
+        tor.location = M.inverted() @ (self._a(self.seat) - pelvis)
+        for sd in ("L", "R"):
+            sx = 1 if sd == "L" else -1
+            pb = B[f"foot_ik.{sd}"]
+            Mr = pb.bone.matrix_local.to_3x3()
+            pb.location = Mr.inverted() @ (self._a(self.pegs[sd]) - L[f"foot_ik.{sd}"].head_local)
+            pb.rotation_quaternion = _q_local(pb, Matrix.Rotation(self.foot_pitch, 3, "X") @
+                                              Matrix.Rotation(sx * self.toe_out, 3, "Z"))
+        bpy.context.view_layer.update()
+        close_hands(p, {sd: (self._a(pt), p.to_arm(fy), p.to_arm(fz)) for sd, (pt, fy, fz) in self.bars.items()})
+        bpy.context.view_layer.update()
 
 
 def pose_group(runners, phases, grips=None):
