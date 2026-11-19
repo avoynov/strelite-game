@@ -178,7 +178,76 @@ def lug_wheel(k, parent, motion, loc, r, width, hub_mat, holes=8, lugs=24, tyre=
             b = a - math.pi / holes
             k.cylinder("lug_nut", 0.018, 0.03, (sx * (h + 0.06), r * 0.21 * math.cos(b), r * 0.21 * math.sin(b)),
                        "steel_worn", segs=6, rot=(0, math.pi / 2, 0), parent=w, bevel=False)
-        k.cylinder("hub_cap", r * 0.13, 0.05, (sx * (h + 0.08), 0, 0), "brass", segs=16, rot=(0, math.pi / 2, 0),
+        k.cylinder("hub_cap", r * 0.13, 0.05, (sx * (h + 0.08), 0, 0), "gunmetal", segs=16, rot=(0, math.pi / 2, 0),
                    parent=w, bevel=0.006)
+        k.cylinder("hub_nut", r * 0.055, 0.02, (sx * (h + 0.115), 0, 0), "brass", segs=12, rot=(0, math.pi / 2, 0),
+                   parent=w, bevel=False)
     motion.wheel(w, r)
     return w
+
+
+def sheet(k, name, path_yz, x, width, mat, parent, lip=0.06, thick=0.012, segs=10, outward=1):
+    """Pressed sheet-metal wing (mudguard): a strip of `width` across X centred at x,
+    following a (y, z) path; the outer edge (side `outward`) turns down by `lip`."""
+    import bpy
+    pts = [Vector((0.0, y, z)) for y, z in path_yz]
+    verts, faces = [], []
+    n = len(pts)
+    for i, p in enumerate(pts):
+        t = (pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]).normalized()
+        up = Vector((1, 0, 0)).cross(t).normalized()          # surface normal (outward of the curve)
+        if up.z < 0 and abs(t.z) < 0.9:
+            up = -up
+        for j in range(segs + 1):
+            u = j / segs                                       # 0 inner edge .. 1 outer edge
+            xx = x + outward * (u - 0.5) * width
+            drop = lip * max(0.0, (u - 0.8) / 0.2) ** 2
+            verts.append(p + Vector((xx, 0, 0)) - up * drop)
+    for i in range(n - 1):
+        for j in range(segs):
+            a = i * (segs + 1) + j
+            faces.append((a, a + 1, a + segs + 2, a + segs + 1))
+    obj = k.mesh(name, [tuple(v) for v in verts], faces)
+    k._finish(obj, mat, bevel=False, parent=parent)
+    m = obj.modifiers.new("Solidify", "SOLIDIFY")
+    m.thickness = thick
+    m.offset = -1.0
+    for p in obj.data.polygons:
+        p.use_smooth = True
+    return obj
+
+
+def arc_yz(cy, cz, r, a0, a1, n):
+    """Points of an arc in the Y-Z plane, angles in degrees from +Y toward +Z."""
+    return [(cy + r * math.cos(math.radians(a0 + (a1 - a0) * i / (n - 1))),
+             cz + r * math.sin(math.radians(a0 + (a1 - a0) * i / (n - 1)))) for i in range(n)]
+
+
+def hull(k, name, sections, mat, parent, bevel=0.012):
+    """Faceted armour hull lofted through cross-sections. `sections`: list of
+    (y, half_profile) from rear to front; half_profile is [(x, z), ...] from the bottom
+    centre (x = 0) round the right side to the roof centre (x = 0), the same number of
+    points in every section. Flat plates, closed ends."""
+    rings = []
+    for y, half in sections:
+        right = [(x, z) for x, z in half]
+        left = [(-x, z) for x, z in reversed(half[1:-1])]
+        rings.append([(x, y, z) for x, z in right + left])
+    n = len(rings[0])
+    verts = [v for r in rings for v in r]
+    faces = []
+    for i in range(len(rings) - 1):
+        for j in range(n):
+            jj = (j + 1) % n
+            faces.append((i * n + j, i * n + jj, (i + 1) * n + jj, (i + 1) * n + j))
+    faces.append(tuple(reversed(range(n))))
+    last = (len(rings) - 1) * n
+    faces.append(tuple(range(last, last + n)))
+    obj = k.mesh(name, verts, faces)
+    import bmesh
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.to_mesh(obj.data)
+    bm.free()
+    return k._finish(obj, mat, bevel=bevel, parent=parent)
