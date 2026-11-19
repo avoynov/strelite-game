@@ -1,8 +1,9 @@
 import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type Texture } from 'pixi.js';
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
-import type { Building, Fence, Game, Tower } from '../sim/game';
-import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT } from '../sim/base';
-import { BuildingView } from './buildingView';
+import { isWreck, type Building, type Fence, type Game, type Tower } from '../sim/game';
+import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT, type BuildingKind } from '../sim/base';
+import { t as tr } from '../i18n';
+import { BuildingView, type BuildingState } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
 import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
@@ -23,8 +24,8 @@ export type Selection =
   | { kind: 'tower'; id: number }
   /** Siege mode: an existing fence, by id. */
   | { kind: 'fence'; id: number }
-  /** Base mode: the headquarters or the laboratory. */
-  | { kind: 'building'; what: 'hq' | 'lab' }
+  /** Base mode: one of the base's buildings. */
+  | { kind: 'building'; what: BuildingKind }
   /** A gun about to be built, footprint's top-left cell at (cx, cy). */
   | { kind: 'place'; def: TowerId; cx: number; cy: number };
 
@@ -111,7 +112,11 @@ export class BoardRenderer {
   /** Siege mode: enemy shots at guns and fences, fading out. */
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
-  private readonly buildingViews = new Map<'hq' | 'lab', BuildingView>();
+  private readonly buildingViews = new Map<BuildingKind, BuildingView>();
+  /** The selected building's name, under it (like Clash of Clans: only while it is selected). */
+  private readonly label = new Text({ text: '', style: { fontFamily: 'system-ui, sans-serif', fontSize: 14, fontWeight: '700', fill: 0xffffff, stroke: { color: 0x000000, width: 4 }, align: 'center' } });
+  /** The raid that provokes an attack: friendly riders. */
+  private readonly raiderViews: PixiEnemyView[] = [];
   /** Base mode: the camera has been put on the base once. */
   private focused = false;
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
@@ -141,7 +146,8 @@ export class BoardRenderer {
   ) {
     this.objects.sortableChildren = true;
     this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots, this.rounds);
-    this.root.addChild(this.world, this.floats);
+    this.root.addChild(this.world, this.floats, this.label);
+    this.label.visible = false;
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
     this.effects = art ? new Effects(art, this.objects, this.artScale()) : null;
@@ -447,7 +453,11 @@ export class BoardRenderer {
   }
 
   /** Siege mode: a unit fired at or rammed a gun or fence. */
-  onStrike(kind: 'shoot' | 'ram', x1: number, y1: number, x2: number, y2: number): void {
+  onStrike(kind: 'shoot' | 'ram' | 'bomb' | 'blast', x1: number, y1: number, x2: number, y2: number): void {
+    if (kind === 'bomb') {
+      this.onBurst(x2, y2, 0.7);
+      return;
+    }
     if (kind === 'shoot') this.strikes.push({ x1, y1, x2, y2, age: 0 });
     // A ram lands where the vehicle meets the wall.
     const ix = kind === 'ram' ? (x1 + x2) / 2 : x2;
@@ -490,23 +500,51 @@ export class BoardRenderer {
     }
   }
 
-  /** Base mode: the headquarters and the laboratory (gone once destroyed). */
+  /** Base mode: every building, in its state (whole, hit hard, in ruins, held by the enemy). */
   private syncBuildings(): void {
-    for (const b of [this.game.hq, this.game.lab] as const) {
-      if (!b) continue;
+    const occupied = !!this.game.base?.state.occupied;
+    for (const b of this.game.buildings) {
       let view = this.buildingViews.get(b.kind);
       if (!view) {
         view = new BuildingView(b.kind, b.x, b.y, this.art, this.artScale());
         this.objects.addChild(view.node);
         this.buildingViews.set(b.kind, view);
       }
-      view.update(b.level);
+      const state: BuildingState = b.kind === 'hq' && occupied && b.hp <= 0 ? 'occupied' : b.hp <= 0 ? 'rubble' : b.hp < b.maxHp / 2 ? 'damaged' : 'ok';
+      view.update(b.level, state);
     }
-    for (const [kind, view] of this.buildingViews) {
-      if ((kind === 'hq' ? this.game.hq : this.game.lab) !== null) continue;
-      view.destroy();
-      this.buildingViews.delete(kind);
-    }
+  }
+
+  /** The raiding party, while it rides: the defenders' riders (the bikers' art, in the player's colours until their own arrives). */
+  private syncRaid(): void {
+    const riders = this.game.raiders();
+    while (this.raiderViews.length > riders.length) this.raiderViews.pop()!.destroy();
+    riders.forEach((r, i) => {
+      let view = this.raiderViews[i];
+      if (!view) {
+        const def = this.art?.manifest.enemies?.moto;
+        view = this.art && def ? new SpriteEnemyView(this.art, def, 'moto', this.artScale(), METRES_PER_TILE) : new PlaceholderEnemyView('moto', ENEMIES.moto.radius);
+        view.node.tint = 0x9fc4ff;
+        this.objects.addChild(view.node);
+        this.raiderViews[i] = view;
+      }
+      view.place(r.x, r.y);
+      view.setHeading(r.heading);
+      view.setHealth(1);
+    });
+  }
+
+  /** The selected building's name under it, in screen space so it stays crisp. */
+  private placeLabel(selection: Selection | null): void {
+    const b = selection?.kind === 'building' ? this.game.building(selection.what) : null;
+    this.label.visible = !!b;
+    if (!b) return;
+    const name = tr(`building.${b.kind}`);
+    if (this.label.text !== name) this.label.text = name;
+    // Just below the building's front corner.
+    const p = this.gridToScreen(b.cx + b.size, b.cy + b.size);
+    this.label.anchor.set(0.5, 0);
+    this.label.position.set(Math.round(p.x), Math.round(p.y + 4));
   }
 
   /** Siege mode: health bars over damaged guns and fences, and enemy shots; in the base, the builders' progress. */
@@ -515,9 +553,13 @@ export class BoardRenderer {
     const speed = this.game.base?.speed ?? 1;
     for (const t of this.game.towers) {
       const view = this.towerViews.get(t.id)?.view;
-      if (view) view.node.alpha = t.job?.kind === 'build' ? 0.45 : 1;
+      if (view) {
+        view.node.alpha = t.job?.kind === 'build' ? 0.45 : isWreck(t) ? 0.85 : 1;
+        // A wreck: burnt dark until the art's wreck frames arrive.
+        view.node.tint = isWreck(t) ? 0x4a4440 : 0xffffff;
+      }
       if (!t.job) continue;
-      const total = (gunJobSeconds(t.def, t.job.kind === 'build' ? 0 : t.level + 1) * 1000) / speed;
+      const total = (gunJobSeconds(t.def, t.job.kind === 'build' ? 0 : t.job.kind === 'repair' ? t.level : t.level + 1) * 1000) / speed;
       const f = Math.min(1, Math.max(0, 1 - (t.job.endsAt - now) / total));
       const w = Math.max(26, 14 * t.size);
       const x = isoX(t.x, t.y);
@@ -534,10 +576,9 @@ export class BoardRenderer {
       g.rect(x - w / 2 - 1, y - 1, w + 2, 6).fill({ color: 0x000000, alpha: 0.6 });
       g.rect(x - w / 2, y, w * f, 4).fill(f > 0.5 ? 0x7bd36a : f > 0.25 ? 0xe6c14a : 0xe0624f);
     };
-    for (const t of this.game.towers) bar(t, t.size, 0.35 * t.size + 0.4);
+    for (const t of this.game.towers) if (!isWreck(t)) bar(t, t.size, 0.35 * t.size + 0.4);
     for (const f of this.game.fences) bar(f, 1, FENCE_HEIGHT[Math.min(f.level, 2)]! * 1.2 + 0.1);
-    if (this.game.hq) bar(this.game.hq, 3, 1.4 + 0.18 * this.game.hq.level);
-    if (this.game.lab) bar(this.game.lab, 3, 1.1);
+    for (const b of this.game.buildings) if (b.hp > 0) bar(b, 3, b.kind === 'hq' ? 1.4 + 0.18 * b.level : 1.1);
     this.strikes = this.strikes.filter((s) => {
       s.age += dt;
       const k = s.age / STRIKE_LIFE;
@@ -573,7 +614,7 @@ export class BoardRenderer {
       }
       entry.view.setAim(t.aim);
       entry.view.setFiring(t.firing);
-      entry.view.update(dt);
+      entry.view.update(isWreck(t) ? 0 : dt);
     }
     for (const [id, entry] of this.towerViews) {
       if (seen.has(id)) continue;
@@ -612,7 +653,7 @@ export class BoardRenderer {
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0, game.hq?.level, !!game.lab]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0, game.hq?.level, game.buildings.map((b) => b.hp > 0)]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
@@ -655,7 +696,7 @@ export class BoardRenderer {
     };
 
     if (selection?.kind === 'building') {
-      const b = selection.what === 'hq' ? game.hq : game.lab;
+      const b = game.building(selection.what);
       if (b) o.poly(diamond(b.cx, b.cy, b.cx + b.size, b.cy + b.size)).stroke({ width: 2.5, color: PALETTE.range, alpha: 0.9 });
     }
 
@@ -854,6 +895,8 @@ export class BoardRenderer {
     this.syncFences();
     if (this.game.hq) this.syncBuildings();
     this.syncEnemies(alpha);
+    this.syncRaid();
+    this.placeLabel(selection);
     this.drawOverlay(selection, armed);
     this.drawShots(alpha, dtSeconds);
     this.effects?.update(dtSeconds);

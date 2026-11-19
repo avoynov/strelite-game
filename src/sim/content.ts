@@ -86,8 +86,8 @@ export interface EnemyDef {
   baseReward: number;
   /** Flies straight to the goal, over everything; only some guns can hit it. */
   air?: boolean;
-  /** Surges and brakes at random, so guns that lead their target often miss. */
-  swerve?: number;
+  /** Weaves from side to side across its way, this many tiles each side, so guns that lead their target often miss. */
+  weave?: number;
   /** Units it drops when destroyed. */
   dropsOnDeath?: { enemy: string; count: number };
   /** First map level on which it attacks. */
@@ -108,7 +108,8 @@ export interface EnemyDef {
  * (the square root of how far its wave raised it).
  */
 export interface Assault {
-  kind: 'shoot' | 'ram';
+  /** `bomb`: a flyer drops bombs on what is under it. `blast`: sappers blow up their charge (and themselves) by it. */
+  kind: 'shoot' | 'ram' | 'bomb' | 'blast';
   damage: number;
   /** Seconds between blows. */
   interval: number;
@@ -228,7 +229,7 @@ export const TOWER_IDS = Object.keys(TOWERS) as TowerId[];
 /** The doc's enemy roster: health and armour spread wide so both overkill and armour bite. */
 export const ENEMIES = {
   infantry: { id: 'infantry', baseHp: 20, armor: 0, speed: 1.0, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 1, assault: { kind: 'shoot', damage: 2, interval: 1, range: 2 }, detour: 8 },
-  moto: { id: 'moto', baseHp: 40, armor: 0, speed: 2.2, leakDamage: 1, radius: 0.35, baseReward: 2, swerve: 0.8, unlockLevel: 2 },
+  moto: { id: 'moto', baseHp: 40, armor: 0, speed: 2.2, leakDamage: 1, radius: 0.35, baseReward: 2, weave: 0.7, unlockLevel: 2 },
   drone: { id: 'drone', baseHp: 45, armor: 0, speed: 1.8, leakDamage: 1, radius: 1.0, baseReward: 3, air: true, unlockLevel: 3 },
   truck: { id: 'truck', baseHp: 130, armor: 3, speed: 1.6, leakDamage: 2, radius: 0.7, baseReward: 4, unlockLevel: 1 },
   apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.95, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
@@ -255,6 +256,37 @@ export const FENCE_LEVELS = [
   { cost: 20, hp: 400 },
   { cost: 40, hp: 1000 },
 ] as const;
+
+/** What a unit goes for in the player's base. */
+export type BaseGoal = 'nearest' | 'treasury' | 'gun' | 'fence' | 'hq';
+
+export interface BaseRole {
+  goal: BaseGoal;
+  /** How it strikes in the base (units that only pass by elsewhere get one here). */
+  assault: Assault;
+  /** As EnemyDef.detour. */
+  detour: number;
+  /** `blast` only: tiles round the charge it damages. */
+  splash?: number;
+}
+
+/**
+ * The base: every enemy goes for something. Infantry the nearest thing,
+ * bikers plunder the treasury, airships bomb the guns over the fences, trucks
+ * carry sappers who blow up the fences, armour hunts the guns and the fortress
+ * makes for the headquarters. With its goal gone a unit makes for the nearest
+ * building or gun.
+ */
+export const BASE_ROLES: Record<EnemyId, BaseRole> = {
+  infantry: { goal: 'nearest', assault: { kind: 'shoot', damage: 1, interval: 1, range: 1.8 }, detour: ENEMIES.infantry.detour },
+  moto: { goal: 'treasury', assault: { kind: 'shoot', damage: 4, interval: 0.8, range: 1.2 }, detour: 24 },
+  drone: { goal: 'gun', assault: { kind: 'bomb', damage: 28, interval: 2.4, range: 0.6 }, detour: 0 },
+  truck: { goal: 'fence', assault: { kind: 'blast', damage: 260, interval: 1, range: 0.3 }, detour: 0, splash: 1.6 },
+  // Armour hunting guns hits softer than armour shooting them in passing: it gets to every one of them.
+  apc: { goal: 'gun', assault: { kind: 'ram', damage: 18, interval: 2, range: 0.4 }, detour: ENEMIES.apc.detour },
+  tank: { goal: 'gun', assault: { kind: 'shoot', damage: 12, interval: 2.5, range: 3 }, detour: ENEMIES.tank.detour },
+  fortress: { goal: 'hq', assault: ENEMIES.fortress.assault, detour: ENEMIES.fortress.detour },
+};
 
 /** Siege mode: a unit with no assault stuck at a wall leans on it this hard (per second), so no wave can stall. */
 export const PUSH_DPS = 2;

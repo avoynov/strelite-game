@@ -142,6 +142,8 @@ export interface BuildingArtDef {
   sheet: string;
   levels: string[];
   tiles: number;
+  /** Per level, like `levels`: hit hard (below half health), in ruins, and (headquarters) held by the enemy. */
+  states?: { sheet: string; damaged?: string[]; rubble?: string[]; occupied?: string[] };
 }
 
 /**
@@ -203,8 +205,8 @@ export interface TowerArtManifest {
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
   enemies?: Record<string, EnemyArtDef>;
-  /** The base's headquarters and laboratory. */
-  buildings?: Partial<Record<'hq' | 'lab', BuildingArtDef>>;
+  /** The base's buildings. */
+  buildings?: Partial<Record<'hq' | 'lab' | 'muster' | 'arsenal' | 'treasury', BuildingArtDef>>;
   /** Rounds seen in flight (bolts, stones), by gun id. */
   projectiles?: Record<string, ProjectileArtDef>;
   effects?: Record<string, EffectArtDef>;

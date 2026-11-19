@@ -61,7 +61,7 @@ describe('research', () => {
 
   it('repairs a broken save', () => {
     expect(sanitize(null)).toEqual(newResearch());
-    expect(sanitize({ gold: -5, done: ['gun.howitzer', 'nope', 'gun.howitzer'], active: { id: 'gun.howitzer', endsAt: 1 } })).toEqual({ gold: 0, done: ['gun.howitzer'], active: [], pausedAt: null });
+    expect(sanitize({ gold: -5, done: ['gun.howitzer', 'nope', 'gun.howitzer'], active: { id: 'gun.howitzer', endsAt: 1 } })).toEqual({ gold: 0, done: ['gun.howitzer'], active: [], pausedAt: null, halfPrice: [] });
     // An older save with one running item keeps it.
     expect(sanitize({ gold: 1, done: [], active: { id: 'gun.howitzer', endsAt: 5 } }).active).toEqual([{ id: 'gun.howitzer', endsAt: 5 }]);
   });

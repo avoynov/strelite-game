@@ -200,7 +200,7 @@ describe('enemies', () => {
     for (const e of dropped) expect(Math.hypot(e.x - apcAt.x, e.y - apcAt.y)).toBeLessThan(1.5);
   });
 
-  it('riders surge and brake, so lobbed shells miss them far more than steady trucks', () => {
+  it('riders weave across the road at a steady speed, so lobbed shells miss them far more than steady trucks', () => {
     const missRate = (enemy: EnemyId) => {
       const g = scenario([{ enemy, count: 30, hp: 1e6, interval: 2.5 }]);
       buildNear(g, 'trebuchet', 14, 8);
@@ -211,8 +211,10 @@ describe('enemies', () => {
       expect(bursts).toBeGreaterThan(5);
       return 1 - Math.min(1, hits / bursts);
     };
-    expect(missRate('truck')).toBeLessThan(0.1);
-    expect(missRate('moto')).toBeGreaterThan(0.3);
+    const truck = missRate('truck');
+    const moto = missRate('moto');
+    expect(truck).toBeLessThan(0.05);
+    expect(moto).toBeGreaterThan(truck + 0.1);
   });
 });
 
