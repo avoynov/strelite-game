@@ -9,6 +9,7 @@ import {
   fireSheet,
   frameForAim,
   frameName,
+  moveFrameName,
   releaseDelay,
   spriteScale,
   stickyFrameForAim,
@@ -158,5 +159,35 @@ describe('fire animation timing', () => {
     expect(fireFrameAt(fire, 0.49, 0.5)).toBe(16);
     expect(fireFrameAt(fire, 0.51, 0.5)).toBe(0);
     expect(releaseDelay(fire, 0.5)).toBeCloseTo(5 / 32);
+  });
+});
+
+describe('movement loops', () => {
+  const walk = { frames: 12, cycleM: 1.85, names: 'infantry_DD_FF' };
+  const props = { frames: 4, fps: 20, names: 'airship_DD_FF' };
+
+  it('steps by distance travelled', () => {
+    expect(moveFrameName(walk, 3, 0, 0, 0)).toBe('infantry_03_00');
+    expect(moveFrameName(walk, 3, 1.85 / 2, 99, 0)).toBe('infantry_03_06');
+    expect(moveFrameName(walk, 15, 1.85, 0, 0)).toBe('infantry_15_00');
+    expect(moveFrameName(walk, 0, 0, 0, 0.5)).toBe('infantry_00_06');
+  });
+
+  it('turns propellers by time', () => {
+    expect(moveFrameName(props, 7, 0, 0, 0)).toBe('airship_07_00');
+    expect(moveFrameName(props, 7, 50, 0.05, 0)).toBe('airship_07_01');
+    expect(moveFrameName(props, 7, 0, 0.2, 0)).toBe('airship_07_00');
+  });
+
+  it('has every movement frame the manifest names', () => {
+    const m = JSON.parse(readFileSync(join(ART, 'towers.json'), 'utf8')) as TowerArtManifest;
+    for (const e of Object.values(m.enemies ?? {})) {
+      if (!e.move) continue;
+      const frames = (JSON.parse(readFileSync(join(ART, `${e.sheet}@1x.json`), 'utf8')) as { frames: Record<string, unknown> }).frames;
+      for (let d = 0; d < e.directions; d++) {
+        expect(frames[frameName(e.frames, d)]).toBeTruthy();
+        for (let f = 0; f < e.move.frames; f++) expect(frames[moveFrameName(e.move, d, (f + 0.5) * (e.move.cycleM ?? 0), (f + 0.5) / (e.move.fps ?? 1), 0)]).toBeTruthy();
+      }
+    }
   });
 });
