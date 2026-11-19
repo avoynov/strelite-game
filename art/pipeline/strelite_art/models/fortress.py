@@ -30,7 +30,7 @@ from ..geo import Kit
 from . import faction as fx
 from . import vehicle
 
-SPRITE_FRAME_M = 21.0
+SPRITE_FRAME_M = 30.0   # the twin barrels throw a long shadow to the right
 LENGTH_M = 17.3           # gun tips to the rear plate
 RADIUS_M = 7.5
 G, WORN, TRACK = "paint_enemy", "paint_enemy_worn", "track_steel"
@@ -40,7 +40,7 @@ TRACKS_X = (-3.45, -1.95, 1.95, 3.45)
 PLAN = vehicle.TrackPlan(road_y=tuple(5.4 - 1.8 * i for i in range(7)), idler_yz=(6.55, 0.78),
                          sprocket_yz=(-6.55, 0.85), n_road=15, n_idler=13, n_sprocket=12, pitch=0.24, thick=0.09,
                          grouser=0.035)
-MOVE_FRAMES = 4
+MOVE_FRAMES = 3           # 3 x 16 frames keep the boss sheet under 4096 px at @2x
 MOVE_KIND = "tracks"
 MOVE_CYCLE_M = PLAN.step
 _MOTION = vehicle.Motion(MOVE_FRAMES, MOVE_CYCLE_M)

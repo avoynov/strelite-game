@@ -21,7 +21,7 @@ from ..geo import Kit
 from . import faction as fx
 from . import vehicle
 
-SPRITE_FRAME_M = 10.0
+SPRITE_FRAME_M = 13.0
 LENGTH_M = 7.6
 RADIUS_M = 3.8
 G, WORN = "paint_enemy", "paint_enemy_worn"

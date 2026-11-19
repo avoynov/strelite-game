@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 
+import numpy as np
 from PIL import Image
 
 from pack_atlas import bbox, load_premultiplied, pack, to_image
@@ -30,6 +31,20 @@ NAMES = {
 # Model name -> the game's enemy id (src/sim/content.ts): the bikers are "moto", and the
 # armoured airship is the game's air unit "drone" (it replaced the drone model).
 GAME_ID = {"bikers": "moto", "airship": "drone"}
+HAZE = 12 / 255   # alpha under this is shadow-catcher haze: dropped
+SOLID = 32 / 255  # the trim box is set by alpha at or over this ...
+MARGIN = 8        # ... grown by this many pixels at @2x for the soft shadow edge
+
+
+def trim_haze(pm, margin):
+    """Drop the haze, and everything outside the unit and its shadow (the box of alpha at or
+    over SOLID, grown by margin), so frames trim tight even where noise in the haze passes HAZE."""
+    a = pm[..., 3]
+    ys, xs = np.where(a >= SOLID)
+    keep = np.zeros(a.shape, bool)
+    if len(xs):
+        keep[max(0, ys.min() - margin):ys.max() + 1 + margin, max(0, xs.min() - margin):xs.max() + 1 + margin] = True
+    pm[~keep | (a < HAZE)] = 0
 
 
 def pack_model(src, dst, model):
@@ -45,6 +60,8 @@ def pack_model(src, dst, model):
     os.makedirs(os.path.join(dst, "enemies"), exist_ok=True)
     for tag, scale in (("@2x", 1.0), ("@1x", 0.5)):
         frames = [load_premultiplied(os.path.join(d, fn), scale) for _, fn in items]
+        for pm in frames:  # the shadow catcher leaves a faint, noisy haze over the whole frame
+            trim_haze(pm, max(1, round(MARGIN * scale)))
         H, W = frames[0].shape[:2]
         boxes = [bbox(pm) for pm in frames]
         sizes = [(b[2] - b[0], b[3] - b[1]) for b in boxes]
@@ -75,7 +92,7 @@ def pack_model(src, dst, model):
         print(f"[pack] {model}{tag}: atlas {AW}x{AH}, {kb:.0f} kB, {AW * AH * 4 / 2**20:.1f} MB GPU", flush=True)
     return {
         "name": NAMES.get(model, {"bg": model, "en": model}),
-        "placeholder": True,
+        "placeholder": False,
         "sheet": f"enemies/{model}",
         "frames": model,
         "directions": n,

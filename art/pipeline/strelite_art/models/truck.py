@@ -29,7 +29,7 @@ from . import faction as fx
 from . import vehicle
 from .vehicle import arc_yz
 
-SPRITE_FRAME_M = 8.6
+SPRITE_FRAME_M = 13.0
 LENGTH_M = 6.7
 RADIUS_M = 3.3
 G, WORN = "paint_enemy", "paint_enemy_worn"
