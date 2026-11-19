@@ -126,6 +126,7 @@ A model is a Python module that builds the object from `Kit` primitives at real 
 5. **Add mechanism per level** as separate helper functions (`_hydraulics`, `_rammer`, `_windlass`, `_steam_crane`) gated by `if level >= n`.
 6. **Add the traverse base and the ammo pile** (section 7).
 7. **Add heraldry and accents** last: defender emblem on guns, faction kit on enemies.
+8. **People** (crews, infantry, riders) come from `mhuman` (section 5a); **movement** for every enemy (section 5b).
 
 **The `Kit` API** (`strelite_art/geo.py`; every call takes `name`, a material name and `parent=`)
 
@@ -184,9 +185,60 @@ def build_round(k, parent, level): ...  # only if it throws a visible round (bol
 - Fire animation: 6 to 16 frames. `RELEASE_FRAME` is when the round leaves (muzzle point), `RELOAD_FROM` is where the reload part starts, `LOOP = True` for continuous weapons (самострел 6 frames at 24 fps, greek fire pump). Motion blur is added by the renderer.
 - `materials_photoreal.stamp(scene)` runs after `build()`, with the gun at yaw 0 and at rest. Never build after stamping.
 
-**Enemy contract**: `SPRITE_FRAME_M`, `LENGTH_M`, `RADIUS_M` (match the game's radius × 4 within 0.6 m), optional `FLYING = True` and `FLIGHT_HEIGHT_M`; `build(style, level=1)` returns `(root, root)`, the unit facing +Y. Groups (infantry squad, bikers) are one sprite with members placed by a table (`SQUAD`, `GROUP`).
+**Enemy contract**: `SPRITE_FRAME_M`, `LENGTH_M`, `RADIUS_M` (match the game's radius × 4 within 0.6 m), optional `FLYING = True` and `FLIGHT_HEIGHT_M`; `build(style, level=1)` returns `(root, root)`, the unit facing +Y. Groups (infantry squad, bikers) are one sprite with members placed by a table (`SQUAD`, `GROUP`). Every enemy also declares its movement (`MOVE_FRAMES`, `MOVE_KIND`, `MOVE_CYCLE_M` or `MOVE_FPS`, `set_move_frame`, section 5b); people are built with `mhuman` (section 5a).
 
 **Structure contract** (walls and any tile-assembled piece, see `fences.py`): `build(material, piece)`, pieces anchored at the tile centre on the ground, patterns that repeat with a period dividing 2 m so neighbours join without a seam.
+
+## 5a. Human figures
+
+Every person in the game (infantry, riders, drivers, commanders in hatches, crews) is built with `strelite_art/mhuman.py`: a real human body on Blender's Rigify Human meta-rig. Never loose tubes and eggs, and no longer the procedural lofts of `human.py` (rejected twice: "toy soldiers", then "can be better"). This is the standard game pipeline (AAA and indie alike): a proper base mesh, a standard rig, automatic skin weights, clothes and gear on top, posed by controls, rendered to sprites.
+
+**Body**: the MakeHuman hm08 base mesh (CC0, committed in `art/pipeline/assets/makehuman`, see its README), about 13 000 quads with a real face, hands and feet. `mh.Body(height, ancestry={...}, muscle, weight, height)` morphs it with MakeHuman's own targets (ancestry mix, muscle, weight, height, ideal proportions), then scales it to the exact height. Vary build and ancestry inside a group; muscle stays near average (0.5), or the uniform reads as a wetsuit.
+
+**Skeleton**: `mh.build_rig(body)` creates the Rigify Human meta-rig (face and breast bones removed), fits every bone to the MakeHuman joint centres of that very body (rolls: Z toward the inside of the bend for arms and legs, palm-ward for fingers, as the meta-rig), and generates the Rigify control rig (IK and FK limbs, spine, fingers). About 0.3 s per man.
+
+**Skin**: Blender's automatic weights (`ARMATURE_AUTO`, bone heat) bind the body to the DEF bones. About 3 s per man.
+
+**Clothes**: shells grown out of the body itself (`Person.shell`): the same vertices pushed out along the normals, Taubin-smoothed so cloth hides anatomy, cut clean along planes at hems, cuffs, collar and boot tops (no quad-step edges). They carry the body's weights, so they never cut through it; the skin they cover is removed. `mh.field_uniform`: tunic with a short skirt below the belt, breeches, boot shafts, gauntlet gloves, cropped hair, eyebrows. Boot feet are a boot-last loft (rounded toe box, high instep, sole and heel), never the body's foot (toes show through).
+
+**Value hierarchy** (readability at 2 to 4 px faces): lighter tunic (`tunic_slate`) over darker breeches (`breeches_dark`) and black boots; one saturated accent at chest level (the oxblood neckerchief and its tails); pale webbing so the straps read.
+
+**Gear**: Kit parts built in the person's space (`Person.g`: front +Y, right +X), placed on the clothed surface with rays (`Person.surface`, `Person.hit`), so they sit on this body. Rigid parts ride on one DEF bone (`attach`, `bone_at` picks the bone under the part). Parts lying on the body (belt, Y-straps, scarf, boot feet) take blended weights from the nearest body vertices (`skin_near`) and bend with the cloth. Helmet fitted to the measured skull and worn tipped back so the face shows.
+
+**Hands on things**: `hand_ik` targets on grip frames carried by the chest bone (finger direction and thumb direction per hand); fingers closed with the Rigify finger controls. Check the reach (IK stretch is off).
+
+**Seated people** (riders, drivers, crews): `mh.Rider(person, seat, pegs, bars, lean, chest).pose()` puts the pelvis on the saddle (the torso control is moved after the lean so the hip joints land exactly on the seat point), the boots on the pegs (foot IK) and the hands on fixed grips (`mh.close_hands(person, grips, carry=None)`; a rifle uses `carry="DEF-spine.003"`). All points in the person's space, which is the machine's space when the person is parented to it. Kit and gear are the infantry's (`infantry._helmet`, `infantry._gear(pack=False)`); a slung carbine lies low and flat across the back.
+
+**Faces**: eyes from the MakeHuman helpers (white, dark iris), eyebrows and moustache are thin hair shells, skin materials have subsurface scattering (`sss`).
+
+**Review gate for people**: one man close up (300 px per metre, two members side by side on the field ground), a GIF of one man running, a GIF of the whole group at 2x, and old vs new at the game's real size. Then the full render.
+
+## 5b. Movement animation
+
+Every enemy moves visibly: people walk or run, wheels roll, tracks run, propellers turn. One format for all of them.
+
+**Model contract** (beside the enemy contract):
+```python
+MOVE_FRAMES = 12          # frames per loop (people 12, wheels 4, tracks 4, propellers 4)
+MOVE_KIND = "walk"        # walk | wheels | tracks | props
+MOVE_CYCLE_M = 2.6        # metres travelled per loop (distance-driven), or
+MOVE_FPS = None           # frames per second (time-driven, e.g. propellers)
+def set_move_frame(f, scene=None): ...   # pose frame f of the loop
+```
+- People: `mh.Runner(person, cycle_m)` poses the Rigify controls per frame: feet on IK along a planted path (the stance foot moves back exactly `cycle_m` per cycle, so it never slides at any game speed), heel-off and toe roll, swing with heel kick and knee drive; hips bob (heights solved from what the legs can reach), lean, turn with the legs, sway over the stance foot; the chest counter-turns; the head keeps the eyes on the way ahead. `mh.pose_group` poses a whole squad with two scene updates per frame. Infantry: `MOVE_CYCLE_M = 1.85`, stance 37.5% of the cycle.
+- Vehicles: one `vehicle.Motion(frames, cycle_m)` per model. Register wheels (`lug_wheel`, `motion.wheel(node, r)`), tracks (`track_links`, links that run along the belt path) and propellers (`motion.prop`). Pick the cycle so the last frame wraps exactly onto the first: a wheel turns by a whole number of its pattern repeats (8 rim holes: `cycle = 2*pi*r/8`), a track moves a whole number of links, a propeller turns one blade spacing.
+- Tracked vehicles: `vehicle.TrackPlan(road_y, idler_yz, sprocket_yz, n_road, n_idler, n_sprocket, pitch)` lays a belt of separate links (shoe, grouser outside, guide horn inside, pin) round the idler, the road wheels and the sprocket (`vehicle.belt`: tangents and arcs; the top run rests on the road wheels when they stand higher than the sprocket and idler). It solves the link step so the belt closes on a whole number of links, and sizes every wheel from that step (radius = bolts or teeth × step / 2π), so one cycle of one link turns each wheel by exactly one pattern repeat. `PLAN.build(k, root, motion, x, width, ...)` makes wheels, links and suspension arms for one track; `MOVE_CYCLE_M = PLAN.step`. Used by `tank.py` (0.58 m tracks) and `fortress.py` (four 1.0 m tracks).
+- Wire wheels (`vehicle.spoke_wheel`): 36 crossed spokes and 24 knobs repeat every 1/6 turn; `cycle = 2*pi*r/6`. Rings with an open middle (tyres, rims, bands) use `vehicle.ring_lathe` (no end caps).
+- Propellers (`motion.prop(node, axis=1, symmetry=4)`) are time-driven: `MOVE_CYCLE_M = None`, `MOVE_FPS = 20`.
+- Faceted armour (`vehicle.hull(k, name, sections, mat, parent)`): flat plates lofted through half cross-sections from the belly centre round to the roof centre; the same number of points in every section. Turrets and casemates too; a painted band round a faceted turret is another `hull` slab 2 cm proud.
+- Parts laid on a sloped side are rotated about Y by `-sx * tilt` (sx = +1 on the right): the plate's up axis then leans inward with the side.
+- No motion blur for movement frames (the frames are short steps; blur is only for firing).
+
+**Render**: `render_sprites.py --enemy` renders `dir_NN_FF.png` (16 headings × MOVE_FRAMES) when the model has `MOVE_FRAMES`, else `dir_NN.png`. Quick looks: `tools/figure_test.py --model M --frames 0 1 2 ... --dir D`.
+
+**Pack and manifest**: `pack_enemies.py` writes frames `<model>_NN_FF`, keeps `<model>_NN` (= frame 00) so the still still works, adds animations `<model>_NN_move`, and writes `enemies.<id>.move = {frames, kind, cycleM, fps, names: "<model>_DD_FF", animation: "<model>_DD_move"}`.
+
+**How the game reads it**: distance-driven (`cycleM` set): `frame = floor((distanceTravelled / cycleM + phase) * frames) mod frames`; time-driven (`fps` set): `frame = floor(t * fps + phase * frames) mod frames`. `phase` is a random 0..1 per unit so units never move in step. A standing unit shows frame 00. Atlas size: keep each enemy sheet at or under 4096 px at @2x; fewer frames for big vehicles.
 
 ## 6. Material library
 
@@ -379,7 +431,10 @@ Start every new object by copying the closest existing model and keeping its str
 
 - [ ] Game id and radius agreed; `RADIUS_M` within 0.6 m of radius × 4.
 - [ ] Faction look: `paint_enemy` / `paint_enemy_worn`, oxblood bands, brass, emblem on visible faces, one or two of lamp, gauge, stack, pennant.
-- [ ] `SPRITE_FRAME_M` fits the longest axis plus shadow at every heading; `FLYING` and `FLIGHT_HEIGHT_M` for flyers.
+- [ ] `SPRITE_FRAME_M` fits the longest axis plus shadow at every heading (edge check, section 13); `FLYING` and `FLIGHT_HEIGHT_M` for flyers.
+- [ ] People on `mhuman` (section 5a), never loose primitives; riders with `mh.Rider`.
+- [ ] Movement (section 5b): frames that wrap exactly; GIF of the movement approved.
+- [ ] Atlas at or under 4096 px at @2x: frames × trimmed frame area × 1.15 ≤ 16.7 Mpx (the boss uses 3 movement frames).
 - [ ] Test at two headings next to an existing enemy, approved.
 - [ ] `pack_enemies.NAMES`, `GAME_ID`; queued; tests; handoff.
 
@@ -391,6 +446,8 @@ Start every new object by copying the closest existing model and keeping its str
 - [ ] Pieces anchored at the tile centre; patterns repeat with a period dividing 2 m.
 - [ ] `--review` sheet with a run, a corner and a T, approved.
 - [ ] Packed at 32 / 16 px per metre with `frameM` in the manifest; draw-order note for the game.
+
+**New building (base)** — `models/building.py` is the construction kit (masonry block by block with openings cut, log and plank walls, gable roofs of real shingles on a boarded deck, windows, doors, flag mast, crates, barrels). `render_buildings.py` renders one static frame per level (`SPRITE_WH_M`, `ANCHOR_FROM_BOTTOM_M`, own soil patch), `--review` makes the level sheet, `--pack` writes `buildings/<id>@1x|@2x`, frames `<id>_L<n>`, manifest key `buildings`. Doors and emblems face -Y and +X (the faces the camera sees). Each level: new material and one new machine; the silhouette stays.
 
 **New ground** — `render_ground.py --kind ... --name ...`: seamless in both screen directions, same pixels per metre, calm enough that units read on top of it.
 
@@ -413,6 +470,14 @@ Start every new object by copying the closest existing model and keeping its str
 | PIL float frames turn to noise | `Image.fromarray(..., "F")` with float64 | Convert to float32 first |
 | Test fails on a size that the game sets | Game numbers behind the art | One PR comment, ask the gameplay thread to change the number; the user decides real conflicts |
 | Pushing a workflow file blocked | Auto mode needs explicit user approval for CI changes | Ask the user to approve the exact action and branch in the thread |
+| Soldiers read as toys ("can be better") | Bodies from tubes and lofts | MakeHuman body on the Rigify Human meta-rig, clothes grown from the body (section 5a) |
+| A belt or strap stretches toward the hand when an arm moves | Its weights came from hand vertices hanging beside it in the rest pose | `skin_near` skips arm-dominated body vertices (default) |
+| Wire wheels look like solid discs | `k.lathe` caps both ends of the profile | `vehicle.ring_lathe` for tyres, rims and bands |
+| A door or band on a sloped side sticks out at the top | Rotated about Y by `+sx * tilt` | `-sx * tilt`: the plate's up axis must lean in with the side |
+| Enemy frames do not trim, atlas far too big | The shadow catcher leaves a faint, noisy alpha haze over the whole frame | `pack_enemies.trim_haze`: drops alpha under 12/255 (`HAZE`) and everything outside the box of alpha 32/255 and over (`SOLID`) grown by 8 px |
+| Shadow cut off straight at the frame edge | `SPRITE_FRAME_M` too small for the long low-sun shadow (barrels, masts, tarp bodies) | Render all 16 headings at 2 samples and check that no alpha 32/255 or over touches the outer 2 px; frames are trimmed, so a larger frame costs only render time (fortress 30 m, truck and APC 13 m) |
+| Track links jump at the loop | Belt length not a whole number of links, or wheels not sized from the step | `vehicle.TrackPlan` solves the step and sizes the wheels |
+| Slung rifle points forward over a leaning rider | Rifle slung muzzle up while the torso leans 0.5 rad | Sling it low and flat across the back |
 
 **Working habits that kept quality high**
 
