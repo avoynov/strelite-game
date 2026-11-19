@@ -1,6 +1,6 @@
 {
  "version": 1,
- "about": "Clean gun portraits for menus: gun only, transparent, own shadow. Cell i aims at game angle i * 2*pi/directions (same convention as towers.json). Made by art/pipeline/render_portraits.sh.",
+ "about": "Clean gun portraits for menus: gun only, transparent, no ground and no cast shadow. Cell i aims at game angle i * 2*pi/directions (same convention as towers.json). Made by art/pipeline/render_portraits.sh.",
  "directions": 32,
  "pxPerMetre": 44.0,
  "guns": {
@@ -10,51 +10,85 @@
      "level": 1,
      "image": "portraits/howitzer_L1.webp",
      "cell": [
-      556,
-      324
+      400,
+      301
      ],
      "cols": 4,
      "size": [
-      2224,
-      2592
+      1600,
+      2408
      ],
      "anchor": [
-      226.0,
-      230.0
+      200.0,
+      208.0
      ]
     },
     {
      "level": 2,
      "image": "portraits/howitzer_L2.webp",
      "cell": [
-      556,
-      324
+      400,
+      302
      ],
      "cols": 4,
      "size": [
-      2224,
-      2592
+      1600,
+      2416
      ],
      "anchor": [
-      226.0,
-      230.0
+      200.0,
+      212.0
      ]
     },
     {
      "level": 3,
      "image": "portraits/howitzer_L3.webp",
      "cell": [
-      602,
-      431
+      453,
+      323
      ],
      "cols": 4,
      "size": [
-      2408,
-      3448
+      1812,
+      2584
+     ],
+     "anchor": [
+      226.0,
+      233.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/howitzer_L4.webp",
+     "cell": [
+      544,
+      362
+     ],
+     "cols": 4,
+     "size": [
+      2176,
+      2896
      ],
      "anchor": [
       272.0,
-      330.0
+      272.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/howitzer_L5.webp",
+     "cell": [
+      544,
+      362
+     ],
+     "cols": 4,
+     "size": [
+      2176,
+      2896
+     ],
+     "anchor": [
+      272.0,
+      272.0
      ]
     }
    ]
@@ -65,13 +99,13 @@
      "level": 1,
      "image": "portraits/zis3_L1.webp",
      "cell": [
-      406,
-      219
+      348,
+      214
      ],
      "cols": 4,
      "size": [
-      1624,
-      1752
+      1392,
+      1712
      ],
      "anchor": [
       174.0,
@@ -82,34 +116,513 @@
      "level": 2,
      "image": "portraits/zis3_L2.webp",
      "cell": [
-      406,
-      219
+      348,
+      214
      ],
      "cols": 4,
      "size": [
-      1624,
-      1752
+      1392,
+      1712
      ],
      "anchor": [
       174.0,
-      147.0
+      149.0
      ]
     },
     {
      "level": 3,
      "image": "portraits/zis3_L3.webp",
      "cell": [
-      383,
-      204
+      348,
+      208
      ],
      "cols": 4,
      "size": [
-      1532,
-      1632
+      1392,
+      1664
      ],
      "anchor": [
-      173.0,
-      126.0
+      174.0,
+      149.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/zis3_L4.webp",
+     "cell": [
+      356,
+      211
+     ],
+     "cols": 4,
+     "size": [
+      1424,
+      1688
+     ],
+     "anchor": [
+      178.0,
+      152.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/zis3_L5.webp",
+     "cell": [
+      356,
+      212
+     ],
+     "cols": 4,
+     "size": [
+      1424,
+      1696
+     ],
+     "anchor": [
+      178.0,
+      154.0
+     ]
+    }
+   ]
+  },
+  "crossbow": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/crossbow_L1.webp",
+     "cell": [
+      192,
+      119
+     ],
+     "cols": 4,
+     "size": [
+      768,
+      952
+     ],
+     "anchor": [
+      96.0,
+      113.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/crossbow_L2.webp",
+     "cell": [
+      200,
+      119
+     ],
+     "cols": 4,
+     "size": [
+      800,
+      952
+     ],
+     "anchor": [
+      100.0,
+      113.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/crossbow_L3.webp",
+     "cell": [
+      204,
+      125
+     ],
+     "cols": 4,
+     "size": [
+      816,
+      1000
+     ],
+     "anchor": [
+      102.0,
+      119.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/crossbow_L4.webp",
+     "cell": [
+      204,
+      135
+     ],
+     "cols": 4,
+     "size": [
+      816,
+      1080
+     ],
+     "anchor": [
+      102.0,
+      129.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/crossbow_L5.webp",
+     "cell": [
+      204,
+      135
+     ],
+     "cols": 4,
+     "size": [
+      816,
+      1080
+     ],
+     "anchor": [
+      102.0,
+      129.0
+     ]
+    }
+   ]
+  },
+  "greekfire": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/greekfire_L1.webp",
+     "cell": [
+      216,
+      144
+     ],
+     "cols": 4,
+     "size": [
+      864,
+      1152
+     ],
+     "anchor": [
+      108.0,
+      116.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/greekfire_L2.webp",
+     "cell": [
+      216,
+      144
+     ],
+     "cols": 4,
+     "size": [
+      864,
+      1152
+     ],
+     "anchor": [
+      108.0,
+      116.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/greekfire_L3.webp",
+     "cell": [
+      231,
+      157
+     ],
+     "cols": 4,
+     "size": [
+      924,
+      1256
+     ],
+     "anchor": [
+      116.0,
+      129.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/greekfire_L4.webp",
+     "cell": [
+      234,
+      184
+     ],
+     "cols": 4,
+     "size": [
+      936,
+      1472
+     ],
+     "anchor": [
+      117.0,
+      125.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/greekfire_L5.webp",
+     "cell": [
+      234,
+      184
+     ],
+     "cols": 4,
+     "size": [
+      936,
+      1472
+     ],
+     "anchor": [
+      117.0,
+      125.0
+     ]
+    }
+   ]
+  },
+  "railgun": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/railgun_L1.webp",
+     "cell": [
+      312,
+      189
+     ],
+     "cols": 4,
+     "size": [
+      1248,
+      1512
+     ],
+     "anchor": [
+      156.0,
+      154.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/railgun_L2.webp",
+     "cell": [
+      312,
+      186
+     ],
+     "cols": 4,
+     "size": [
+      1248,
+      1488
+     ],
+     "anchor": [
+      156.0,
+      154.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/railgun_L3.webp",
+     "cell": [
+      312,
+      190
+     ],
+     "cols": 4,
+     "size": [
+      1248,
+      1520
+     ],
+     "anchor": [
+      156.0,
+      154.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/railgun_L4.webp",
+     "cell": [
+      312,
+      195
+     ],
+     "cols": 4,
+     "size": [
+      1248,
+      1560
+     ],
+     "anchor": [
+      156.0,
+      159.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/railgun_L5.webp",
+     "cell": [
+      312,
+      195
+     ],
+     "cols": 4,
+     "size": [
+      1248,
+      1560
+     ],
+     "anchor": [
+      156.0,
+      159.0
+     ]
+    }
+   ]
+  },
+  "scorpion": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/scorpion_L1.webp",
+     "cell": [
+      218,
+      163
+     ],
+     "cols": 4,
+     "size": [
+      872,
+      1304
+     ],
+     "anchor": [
+      109.0,
+      172.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/scorpion_L2.webp",
+     "cell": [
+      218,
+      163
+     ],
+     "cols": 4,
+     "size": [
+      872,
+      1304
+     ],
+     "anchor": [
+      109.0,
+      172.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/scorpion_L3.webp",
+     "cell": [
+      226,
+      222
+     ],
+     "cols": 4,
+     "size": [
+      904,
+      1776
+     ],
+     "anchor": [
+      113.0,
+      174.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/scorpion_L4.webp",
+     "cell": [
+      226,
+      222
+     ],
+     "cols": 4,
+     "size": [
+      904,
+      1776
+     ],
+     "anchor": [
+      113.0,
+      174.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/scorpion_L5.webp",
+     "cell": [
+      226,
+      223
+     ],
+     "cols": 4,
+     "size": [
+      904,
+      1784
+     ],
+     "anchor": [
+      113.0,
+      175.0
+     ]
+    }
+   ]
+  },
+  "trebuchet": {
+   "levels": [
+    {
+     "level": 1,
+     "image": "portraits/trebuchet_L1.webp",
+     "cell": [
+      368,
+      324
+     ],
+     "cols": 4,
+     "size": [
+      1472,
+      2592
+     ],
+     "anchor": [
+      184.0,
+      239.0
+     ]
+    },
+    {
+     "level": 2,
+     "image": "portraits/trebuchet_L2.webp",
+     "cell": [
+      370,
+      330
+     ],
+     "cols": 4,
+     "size": [
+      1480,
+      2640
+     ],
+     "anchor": [
+      185.0,
+      239.0
+     ]
+    },
+    {
+     "level": 3,
+     "image": "portraits/trebuchet_L3.webp",
+     "cell": [
+      370,
+      330
+     ],
+     "cols": 4,
+     "size": [
+      1480,
+      2640
+     ],
+     "anchor": [
+      185.0,
+      239.0
+     ]
+    },
+    {
+     "level": 4,
+     "image": "portraits/trebuchet_L4.webp",
+     "cell": [
+      372,
+      332
+     ],
+     "cols": 4,
+     "size": [
+      1488,
+      2656
+     ],
+     "anchor": [
+      186.0,
+      239.0
+     ]
+    },
+    {
+     "level": 5,
+     "image": "portraits/trebuchet_L5.webp",
+     "cell": [
+      372,
+      332
+     ],
+     "cols": 4,
+     "size": [
+      1488,
+      2656
+     ],
+     "anchor": [
+      186.0,
+      239.0
      ]
     }
    ]

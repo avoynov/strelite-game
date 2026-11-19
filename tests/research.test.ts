@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
 import { Game } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { bank, battleTakings, newResearch, pause, RESEARCH, resume, sanitize, settle, start, startError, status, upgrades, victoryBonus } from '../src/sim/research';
+import { bank, battleTakings, MASTERY_DAMAGE, newResearch, pause, RESEARCH, resume, sanitize, settle, start, startError, status, upgrades, victoryBonus } from '../src/sim/research';
 
 describe('research', () => {
   it('every item needs only items that exist, and deeper items cost more and take longer', () => {
@@ -72,7 +72,8 @@ describe('research', () => {
     const g = new Game(buildPathMap(MEADOW), { upgrades: upgrades(all, TOWER_IDS) });
     expect(g.money).toBe(base.money + 250);
     expect(g.lives).toBe(base.lives + 5);
-    expect(g.levelStats('crossbow', 0).damage).toBeCloseTo(base.levelStats('crossbow', 0).damage * 1.3, 1);
+    // Three damage boosts, and the full crossbow set on top.
+    expect(g.levelStats('crossbow', 0).damage).toBeCloseTo(base.levelStats('crossbow', 0).damage * 1.3 * (1 + MASTERY_DAMAGE), 1);
     expect(g.levelStats('railgun', 0).fireInterval).toBeCloseTo(base.levelStats('railgun', 0).fireInterval * 0.9 * 0.8, 2);
     expect(g.levelStats('zis3', 0).range).toBe(base.levelStats('zis3', 0).range + 1);
     expect(g.defOf('crossbow').pierce).toBe(0.25);

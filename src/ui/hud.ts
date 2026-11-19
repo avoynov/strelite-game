@@ -1,4 +1,4 @@
-import { getLang, setLang, t, type MessageKey } from '../i18n';
+import { t, type MessageKey } from '../i18n';
 import { TOWER_IDS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import type { ActionResult, Building, Game, Structure } from '../sim/game';
 import type { Armed, Selection } from '../render/boardRenderer';
@@ -39,6 +39,10 @@ export interface HudCallbacks {
   banked(): number;
   /** The player's base, when this battle is fought at it. */
   base(): BaseHud | null;
+  /** Stop the battle and open the pause screen (sound, graphics, language, install). */
+  pause(): void;
+  /** A build, upgrade or repair went through. */
+  done?(): void;
 }
 
 const SPEEDS = [1, 2, 3];
@@ -109,7 +113,10 @@ export class Hud {
   }
 
   showResult(r: ActionResult): void {
-    if (r.ok) return;
+    if (r.ok) {
+      this.cb.done?.();
+      return;
+    }
     const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', blocks: 'reason.blocks', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied', noBuilder: 'reason.noBuilder', busy: 'reason.busy' };
     if (r.reason === 'locked') {
       this.showToast(t('reason.locked'));
@@ -137,7 +144,7 @@ export class Hud {
       ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/></svg></button>` : ''}
       <button class="chip chip-ico" data-action="lab" aria-label="${t('action.lab')}" title="${t('action.lab')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.7 3h10.6a2 2 0 0 0 1.7-3l-5-9V3"/><path d="M7.5 15h9"/></svg></button>
       <button class="chip" data-action="speed" aria-label="${t('action.speed')}">${speed}×</button>
-      <button class="chip" data-action="lang">${t('lang.switch')}</button>`;
+      <button class="chip chip-ico pause-btn" data-action="pause" aria-label="${t('action.pause')}" title="${t('action.pause')}"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button>`;
     if (top !== this.lastTop) {
       this.top.innerHTML = top;
       this.lastTop = top;
@@ -434,8 +441,8 @@ export class Hud {
         this.cb.setSpeed(SPEEDS[(i + 1) % SPEEDS.length]!);
         break;
       }
-      case 'lang':
-        setLang(getLang() === 'bg' ? 'en' : 'bg');
+      case 'pause':
+        this.cb.pause();
         break;
       case 'restart':
         this.cb.restart();

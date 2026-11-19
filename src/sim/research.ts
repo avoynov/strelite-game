@@ -34,6 +34,8 @@ export interface Upgrades {
   lives: number;
   /** Per gun, boosts for every gun already folded in. */
   gun: Record<TowerId, GunMods>;
+  /** Share added to the gold a battle banks (the full Fortress set). */
+  goldBonus: number;
 }
 
 type ItemEffect =
@@ -303,5 +305,94 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): U
     m.damage *= damage;
     m.reload *= reload;
   }
-  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per };
+  // A full set: a small bonus on top (see RESEARCH_SETS).
+  const full = new Set(completeSets(done));
+  for (const id of gunIds) if (full.has(id)) per[id]!.damage *= 1 + MASTERY_DAMAGE;
+  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0 };
+}
+
+// ------------------------------------------------------------------- sets
+
+/** The guns in the order they are unlocked: the order of the sets on the research screen. */
+export const GUN_ORDER: readonly TowerId[] = ['crossbow', 'zis3', 'howitzer', 'scorpion', 'trebuchet', 'greekfire', 'railgun'];
+
+export type SetId = TowerId | 'fortress';
+
+/**
+ * A set the player completes for a medal: each gun (the gun, levels 4 and 5,
+ * its effect) and the Fortress (every boost). A starting gun's unlock is no
+ * research item but counts as done, so the tree never starts at zero.
+ */
+export interface ResearchSet {
+  id: SetId;
+  /** The gun is there from the start. */
+  starter: boolean;
+  /** Research items, in the order they are shown. */
+  items: readonly string[];
+}
+
+export const RESEARCH_SETS: readonly ResearchSet[] = [
+  ...GUN_ORDER.map((g): ResearchSet => {
+    const starter = START_GUNS.includes(g);
+    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, `fx.${g}`] };
+  }),
+  { id: 'fortress', starter: false, items: RESEARCH.filter((r) => r.branch === 'boosts').map((r) => r.id) },
+];
+
+/** A full gun set: this much more damage for that gun. */
+export const MASTERY_DAMAGE = 0.05;
+/** The full Fortress set: this share more gold banked from every battle. */
+export const MASTERY_GOLD = 0.05;
+
+export interface Progress {
+  done: number;
+  total: number;
+}
+
+/** How far a set is: a starting gun counts as one done. */
+export function setProgress(set: ResearchSet, done: readonly string[]): Progress {
+  const extra = set.starter ? 1 : 0;
+  return { done: extra + set.items.filter((id) => done.includes(id)).length, total: extra + set.items.length };
+}
+
+/** The sets with every piece done. */
+export function completeSets(done: readonly string[]): SetId[] {
+  return RESEARCH_SETS.filter((set) => set.items.every((id) => done.includes(id))).map((set) => set.id);
+}
+
+/** The whole tree: every set's pieces together. */
+export function treeProgress(done: readonly string[]): Progress {
+  let d = 0;
+  let total = 0;
+  for (const set of RESEARCH_SETS) {
+    const p = setProgress(set, done);
+    d += p.done;
+    total += p.total;
+  }
+  return { done: d, total };
+}
+
+/** The set an item belongs to. */
+export function setOf(id: string): ResearchSet | undefined {
+  return RESEARCH_SETS.find((set) => set.items.includes(id));
+}
+
+/**
+ * What to research next: of the items that can start now, the one that brings
+ * a set closest to its medal, then the cheapest. When none can start, the
+ * cheapest item the laboratory could run once there is gold and a free place.
+ * Null when there is none.
+ */
+export function suggestNext(s: ResearchState, lab: LabInfo = FIRST_LAB): string | null {
+  const left = (id: string) => {
+    const set = setOf(id);
+    if (!set) return Infinity;
+    const p = setProgress(set, s.done);
+    return p.total - p.done;
+  };
+  const byGoal = (a: ResearchItem, b: ResearchItem) => left(a.id) - left(b.id) || a.cost - b.cost;
+  const now = RESEARCH.filter((r) => startError(s, r.id, lab) === null).sort(byGoal);
+  if (now.length) return now[0]!.id;
+  const later = RESEARCH.filter((r) => status(s, r.id) === 'ready' && (r.lab ?? 1) <= lab.level + 1).sort((a, b) => a.cost - b.cost);
+  return later[0]?.id ?? null;
 }

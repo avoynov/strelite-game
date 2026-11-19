@@ -1,9 +1,33 @@
 import { t, type MessageKey } from '../i18n';
-import { itemSeconds, labSlots, RESEARCH, researchItem, status, startError, type Branch, type LabInfo, type ResearchItem, type ResearchState, type StartError } from '../sim/research';
+import type { GunPortrait } from '../render/towers/spriteTowerView';
+import type { TowerId } from '../sim/content';
+import {
+  completeSets,
+  itemSeconds,
+  labSlots,
+  MASTERY_DAMAGE,
+  MASTERY_GOLD,
+  RESEARCH_SETS,
+  researchItem,
+  setOf,
+  setProgress,
+  startError,
+  status,
+  suggestNext,
+  treeProgress,
+  type LabInfo,
+  type ResearchItem,
+  type ResearchSet,
+  type ResearchState,
+  type SetId,
+  type StartError,
+} from '../sim/research';
 
 /**
- * "Лаборатория": the research tree. Three columns (guns, boosts, effects), each
- * a chain of items; one item researches at a time on a real-time countdown.
+ * "Лаборатория": the research tree as eight sets to complete. Each gun is a
+ * row (the gun, levels IV and V, its effect); the Fortress (boosts) closes the
+ * list. A full row earns a medal and a small bonus. Lines show what leads to
+ * what: the guns down the left, the effects down the right.
  */
 
 export interface LabCallbacks {
@@ -13,13 +37,21 @@ export interface LabCallbacks {
   start(id: string): StartError | null;
   /** Timers run this many times faster than listed (testing builds). */
   speed: number;
+  /** A clean picture of a gun at a level. */
+  portrait(def: TowerId, level: number): GunPortrait | undefined;
+  /** Calls back when more gun art has loaded; returns an unsubscribe. */
+  onArt?(fn: () => void): () => void;
+  /** A set was just completed. */
+  celebrate?(): void;
   close(): void;
 }
 
-const BRANCHES: Branch[] = ['guns', 'levels', 'boosts', 'effects'];
 const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', labLevel: 'lab.labLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+const SEEN_KEY = 'strelite.lab.seen';
+const MEDALS_KEY = 'strelite.lab.medals';
 
 /** "2 ч 15 мин", "3 д 4 ч", "45 сек": the two largest units. */
 export function formatDuration(seconds: number): string {
@@ -77,29 +109,170 @@ export function itemEffect(item: ResearchItem): string {
   }
 }
 
+export function setName(id: SetId): string {
+  return id === 'fortress' ? t('lab.set.fortress') : t(`tower.${id}` as MessageKey);
+}
+
+/** The bonus a full set gives, in words. */
+export function setBonus(id: SetId): string {
+  return id === 'fortress' ? t('lab.bonus.fortress', { n: pct(MASTERY_GOLD) }) : t('lab.bonus.gun', { n: pct(MASTERY_DAMAGE), gun: setName(id) });
+}
+
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
+
+/** How a node looks: research status, refined by whether it can start right now. */
+type NodeState = 'done' | 'active' | 'go' | 'ready' | 'lab' | 'locked';
+
+// ------------------------------------------------------------------ shapes
+
+/** Node outlines in a 56×56 box, each starting at the top so a progress stroke fills clockwise from 12 o'clock. */
+const SHAPE = {
+  oct: 'M28 4.5H37.7L51.5 18.3V37.7L37.7 51.5H18.3L4.5 37.7V18.3L18.3 4.5Z',
+  circle: 'M28 3.5a24.5 24.5 0 1 1 0 49a24.5 24.5 0 1 1 0-49Z',
+  hex: 'M28 3L49.7 15.5V40.5L28 53L6.3 40.5V15.5Z',
+} as const;
+type Shape = keyof typeof SHAPE;
+
+const ICON = {
+  spark: '<svg class="fill" viewBox="0 0 24 24"><path d="M12 2.5l2.1 6.3 6.4 2.2-6.4 2.2L12 19.5l-2.1-6.3-6.4-2.2 6.4-2.2z"/></svg>',
+  coins: '<svg viewBox="0 0 24 24"><ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7"/><path d="M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/></svg>',
+  shell: '<svg viewBox="0 0 24 24"><path d="M12 2.5c2.8 2.6 4 5.6 4 8.5v8.5H8V11c0-2.9 1.2-5.9 4-8.5z"/><path d="M8 15.5h8M10 19.5v2M14 19.5v2"/></svg>',
+  shield: '<svg viewBox="0 0 24 24"><path d="M12 3l7 3v6c0 4.4-3 7.4-7 9-4-1.6-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>',
+  reload: '<svg viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/><path d="M12 8.5V12l2.5 1.5"/></svg>',
+  lock: '<svg viewBox="0 0 24 24"><rect x="6" y="11" width="12" height="9" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></svg>',
+  check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+  clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/></svg>',
+  flask: '<svg viewBox="0 0 24 24"><path d="M9.5 3h5M10.5 3v5.5L5 18.5A1.7 1.7 0 0 0 6.5 21h11a1.7 1.7 0 0 0 1.5-2.5L13.5 8.5V3"/><path d="M7.5 15h9"/></svg>',
+  castle:
+    '<svg viewBox="0 0 24 24"><path d="M3.5 21V8.5h3V11h2.5V8.5h3V11h2.5V8.5h3V11h3V21z"/><path d="M10 21v-4.5a2 2 0 0 1 4 0V21"/><path d="M3.5 21h17"/></svg>',
+} as const;
+
+function shapeOf(item: ResearchItem): Shape {
+  const k = item.effect.kind;
+  return k === 'maxLevel' ? 'oct' : k === 'gunMod' ? 'circle' : 'hex';
+}
+
+function glyphOf(item: ResearchItem): string {
+  const e = item.effect;
+  switch (e.kind) {
+    case 'maxLevel':
+      return ROMAN[e.level] ?? String(e.level);
+    case 'gunMod':
+      return ICON.spark;
+    case 'startGold':
+      return ICON.coins;
+    case 'damage':
+      return ICON.shell;
+    case 'lives':
+      return ICON.shield;
+    case 'reload':
+      return ICON.reload;
+    case 'gun':
+      return ICON.flask;
+  }
+}
+
+/** The outline of a node: fill, rim, and (while it runs) a progress stroke. */
+function shapeSvg(d: string, active: boolean, ends = 0, total = 1, box = '0 0 56 56'): string {
+  const prog = active ? `<path class="p" d="${d}" pathLength="100" stroke-dasharray="0 100" data-ends="${ends}" data-total="${total}"/>` : '';
+  return `<svg class="sh" viewBox="${box}" aria-hidden="true"><path class="f" d="${d}"/><path class="r" d="${d}"/>${prog}</svg>`;
+}
+
+const CARD = 'M14 1.5H60A12.5 12.5 0 0 1 72.5 14V70A12.5 12.5 0 0 1 60 82.5H14A12.5 12.5 0 0 1 1.5 70V14A12.5 12.5 0 0 1 14 1.5Z';
+
+function readList(key: string): string[] | null {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) ?? 'null') as unknown;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeList(key: string, list: Iterable<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify([...list]));
+  } catch {
+    // Not saved: this visit only.
+  }
+}
+
+/** Draw a gun picture into a box `w`×`h`, centred. */
+function paintGun(el: HTMLElement, p: GunPortrait | undefined, w: number, h: number, zoom: number): void {
+  if (!p) {
+    el.textContent = '';
+    return;
+  }
+  const [hx, hy] = p.half ?? [p.reach, p.reach];
+  // The picture's box holds the gun at every heading; one heading fills less of it, so zoom in.
+  const k = Math.min(w / (2 * hx), h / (2 * hy)) * zoom;
+  const [fx, fy, fw, fh] = p.frame;
+  let img = el.firstElementChild as HTMLElement | null;
+  if (!img) {
+    img = document.createElement('span');
+    el.appendChild(img);
+  }
+  img.style.cssText =
+    `width:${fw}px;height:${fh}px;background-image:url('${p.url}');` +
+    `background-position:-${fx}px -${fy}px;background-size:${p.sheetSize[0]}px ${p.sheetSize[1]}px;` +
+    `transform:scale(${k.toFixed(4)}) translate(${p.offset[0]}px,${p.offset[1]}px)`;
+}
 
 export class Lab {
   readonly el: HTMLElement;
+  private readonly scroller: HTMLElement;
+  private readonly page: HTMLElement;
+  private readonly foot: HTMLElement;
+  private readonly sheet: HTMLElement;
+  private readonly cele: HTMLElement;
   private timer = 0;
-  private last = '';
+  private pageKey = '';
+  private sheetKey = '';
+  private footKey = '';
+  /** The node whose details are open. */
+  private openId: string | null = null;
   private note = '';
+  /** Finished items the player has seen on this screen; the rest show as new. */
+  private seen = new Set<string>();
+  /** Sets whose medal was already handed out. */
+  private medals = new Set<string>();
+  /** New items whose arrival animation has played on this visit. */
+  private readonly stamped = new Set<string>();
+  private celebrating: SetId | null = null;
+  private readonly reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+  private offArt: (() => void) | null = null;
+  private readonly resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.drawWires()) : null;
 
   constructor(private readonly cb: LabCallbacks) {
     this.el = document.createElement('div');
-    this.el.className = 'lab';
+    this.el.className = 'lab lt';
     this.el.hidden = true;
     this.el.setAttribute('role', 'dialog');
     this.el.setAttribute('aria-modal', 'true');
-    this.el.addEventListener('click', (ev) => {
-      const btn = (ev.target as HTMLElement).closest<HTMLButtonElement>('button[data-lab]');
-      if (!btn) return;
-      if (btn.dataset.lab === 'close') this.close();
-      else if (btn.dataset.lab === 'start' && btn.dataset.id) {
-        const err = this.cb.start(btn.dataset.id);
-        this.note = err ? t(ERR[err]) : '';
-        this.render();
-      }
+    this.el.innerHTML = `
+      <svg class="lt-defs" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="lt-brass" x1="0" y1="0" x2="0.4" y2="1">
+            <stop offset="0" stop-color="#fbe3a3"/><stop offset="0.45" stop-color="#d9a24a"/><stop offset="1" stop-color="#8a5a1c"/>
+          </linearGradient>
+        </defs>
+      </svg>
+      <div class="lt-scroll"><div class="lt-page"></div></div>
+      <footer class="lab-foot lt-foot"></footer>
+      <div class="lt-sheet-wrap"></div>
+      <div class="lt-cele-wrap"></div>`;
+    this.scroller = this.el.querySelector('.lt-scroll')!;
+    this.page = this.el.querySelector('.lt-page')!;
+    this.foot = this.el.querySelector('.lt-foot')!;
+    this.sheet = this.el.querySelector('.lt-sheet-wrap')!;
+    this.cele = this.el.querySelector('.lt-cele-wrap')!;
+    this.resize?.observe(this.page);
+    this.el.addEventListener('click', (ev) => this.onClick(ev));
+    this.el.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Escape') return;
+      if (this.celebrating) this.dismissCelebration();
+      else if (this.openId) this.closeSheet();
+      else this.close();
     });
   }
 
@@ -109,101 +282,528 @@ export class Lab {
 
   open(): void {
     this.note = '';
+    this.openId = null;
+    const done = this.cb.state().done;
+    // The first visit since this screen existed: nothing is new, no medal is owed.
+    const seen = readList(SEEN_KEY);
+    const medals = readList(MEDALS_KEY);
+    this.seen = new Set(seen ?? done);
+    this.medals = new Set(medals ?? completeSets(done));
+    if (!seen) writeList(SEEN_KEY, this.seen);
+    if (!medals) writeList(MEDALS_KEY, this.medals);
+    this.stamped.clear();
     this.el.hidden = false;
+    this.pageKey = '';
+    this.scroller.scrollTop = 0;
     this.render();
     window.clearInterval(this.timer);
     this.timer = window.setInterval(() => this.render(), 1000);
+    this.offArt?.();
+    this.offArt = this.cb.onArt?.(() => [this.page, this.sheet, this.cele].forEach((root) => this.paintPictures(root))) ?? null;
   }
 
   close(): void {
     if (!this.isOpen) return;
     window.clearInterval(this.timer);
+    this.offArt?.();
+    this.offArt = null;
+    // What was on screen is no longer new.
+    this.seen = new Set(this.cb.state().done);
+    writeList(SEEN_KEY, this.seen);
+    this.openId = null;
+    this.celebrating = null;
+    this.sheet.innerHTML = '';
+    this.cele.innerHTML = '';
+    this.sheetKey = '';
     this.el.hidden = true;
     this.cb.close();
   }
 
   invalidate(): void {
-    this.last = '';
+    this.pageKey = '';
+    this.sheetKey = '';
+    this.footKey = '';
     if (this.isOpen) this.render();
   }
 
+  // ------------------------------------------------------------- events
+
+  private onClick(ev: MouseEvent): void {
+    const target = ev.target as HTMLElement;
+    const btn = target.closest<HTMLElement>('[data-lt]');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    switch (btn.dataset.lt) {
+      case 'close':
+        this.close();
+        return;
+      case 'node':
+        if (id) this.openSheet(id);
+        return;
+      case 'scrim':
+        this.closeSheet();
+        return;
+      case 'start': {
+        if (!id || btn.getAttribute('aria-disabled') === 'true') return;
+        const err = this.cb.start(id);
+        this.note = err ? t(ERR[err]) : '';
+        if (!err) this.openId = null;
+        this.render();
+        return;
+      }
+      case 'goto': {
+        const set = btn.dataset.set;
+        if (set) this.scrollToSet(set);
+        return;
+      }
+      case 'cele':
+        this.dismissCelebration();
+        return;
+    }
+  }
+
+  private openSheet(id: string): void {
+    this.openId = id;
+    this.note = '';
+    this.render();
+    this.sheet.querySelector<HTMLElement>('.lt-sheet')?.focus({ preventScroll: true });
+  }
+
+  private closeSheet(): void {
+    this.openId = null;
+    this.note = '';
+    this.render();
+  }
+
+  private scrollToSet(id: string): void {
+    const lane = this.page.querySelector<HTMLElement>(`.lt-set[data-set="${id}"]`);
+    if (!lane) return;
+    const top = lane.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top + this.scroller.scrollTop - 12;
+    this.scroller.scrollTo({ top, behavior: this.reduceMotion ? 'auto' : 'smooth' });
+    lane.classList.remove('flash');
+    void lane.offsetWidth;
+    lane.classList.add('flash');
+  }
+
+  private dismissCelebration(): void {
+    if (this.celebrating) this.medals.add(this.celebrating);
+    writeList(MEDALS_KEY, this.medals);
+    this.celebrating = null;
+    this.cele.innerHTML = '';
+    this.render();
+  }
+
+  // ------------------------------------------------------------- state
+
+  private nodeState(s: ResearchState, lab: LabInfo, id: string): NodeState {
+    const st = status(s, id);
+    if (st !== 'ready') return st;
+    const err = startError(s, id, lab);
+    return err === null ? 'go' : err === 'labLevel' ? 'lab' : 'ready';
+  }
+
+  /** The gun shown on a set's card: the highest level researched, or level 1 while locked. */
+  private gunLevel(gun: TowerId, s: ResearchState): number {
+    return s.done.includes(`lvl5.${gun}`) ? 5 : s.done.includes(`lvl4.${gun}`) ? 4 : 3;
+  }
+
+  private now(s: ResearchState): number {
+    return s.pausedAt ?? Date.now();
+  }
+
+  // ------------------------------------------------------------- render
+
   render(): void {
     const s = this.cb.state();
-    const html = `
+    const lab = this.cb.lab();
+    // A set just completed: its medal ceremony, once.
+    if (!this.celebrating) {
+      const owed = completeSets(s.done).find((id) => !this.medals.has(id));
+      if (owed) {
+        this.celebrating = owed;
+        this.cele.innerHTML = this.celebrationHtml(owed);
+        this.paintPictures(this.cele);
+        this.cb.celebrate?.();
+        this.cele.querySelector<HTMLElement>('[data-lt="cele"]')?.focus({ preventScroll: true });
+      }
+    }
+    const next = suggestNext(s, lab);
+    const key = JSON.stringify([s.done, s.active.map((a) => a.id), s.gold, lab, s.pausedAt !== null, next, [...this.seen].length, this.medals.size, document.documentElement.lang]);
+    if (key !== this.pageKey) {
+      this.pageKey = key;
+      this.page.innerHTML = this.pageHtml(s, lab, next);
+      this.paintPictures(this.page);
+      requestAnimationFrame(() => this.drawWires());
+    }
+    const sheetKey = this.openId ? JSON.stringify([key, this.openId, this.note]) : '';
+    if (sheetKey !== this.sheetKey) {
+      this.sheetKey = sheetKey;
+      this.sheet.innerHTML = this.openId ? this.sheetHtml(s, lab, this.openId) : '';
+      this.paintPictures(this.sheet);
+    }
+    const footKey = `${s.gold}|${document.documentElement.lang}`;
+    if (footKey !== this.footKey) {
+      this.footKey = footKey;
+      this.foot.innerHTML = `
+        <div class="lab-treasury" title="${t('lab.treasury')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${s.gold}</b></div>
+        <button class="btn primary" data-lt="close">${t('lab.close')}</button>`;
+    }
+    this.tick(s);
+    // Fonts and pictures can shift the layout after it was drawn.
+    this.drawWires();
+  }
+
+  /** Move the clocks and progress strokes without rebuilding anything. */
+  private tick(s: ResearchState): void {
+    const now = this.now(s);
+    this.el.querySelectorAll<HTMLElement | SVGElement>('[data-ends]').forEach((el) => {
+      const left = (Number(el.dataset.ends) - now) / 1000;
+      const total = Number(el.dataset.total) || 1;
+      const done = Math.min(1, Math.max(0, 1 - left / total));
+      if (el instanceof SVGElement) el.setAttribute('stroke-dasharray', `${(done * 100).toFixed(2)} 100`);
+      else if (el.classList.contains('lt-bar')) (el.firstElementChild as HTMLElement).style.width = `${(done * 100).toFixed(1)}%`;
+      else el.textContent = formatDuration(left);
+    });
+  }
+
+  private paintPictures(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>('[data-pic]').forEach((el) => {
+      paintGun(el, this.cb.portrait(el.dataset.pic as TowerId, Number(el.dataset.lv) || 1), Number(el.dataset.w) || 60, Number(el.dataset.h) || 60, Number(el.dataset.z) || 1.4);
+    });
+  }
+
+  private pageHtml(s: ResearchState, lab: LabInfo, next: string | null): string {
+    const tree = treeProgress(s.done);
+    const won = new Set(completeSets(s.done));
+    const ratio = tree.done / tree.total;
+    const C = 2 * Math.PI * 22;
+    const medals = RESEARCH_SETS.map((set) => {
+      const ok = won.has(set.id);
+      const name = setName(set.id);
+      const pic =
+        set.id === 'fortress'
+          ? `<span class="lt-medal-ico">${ICON.castle}</span>`
+          : `<span class="lt-pic" data-pic="${set.id}" data-lv="${ok ? 5 : 3}" data-w="34" data-h="34" data-z="1.7"></span>`;
+      return `<li><button class="lt-medal${ok ? ' won' : ''}" data-lt="goto" data-set="${set.id}" aria-label="${esc(name)}${ok ? `: ${t('lab.medal')}` : ''}" title="${esc(name)}">${pic}</button></li>`;
+    }).join('');
+    return `
       <header class="lab-head">
         <div>
           <p class="lab-kicker">${t('lab.kicker')}</p>
           <h1 class="lab-title">${t('lab.title')}</h1>
         </div>
-        <div class="lab-treasury" title="${t('lab.treasury')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${s.gold}</b></div>
       </header>
-      ${this.activeHtml(s)}
-      <div class="lab-branches">
-        ${BRANCHES.map((b) => this.branchHtml(b, s)).join('')}
-      </div>
-      <footer class="lab-foot">
-        <p class="lab-note" role="status">${esc(this.note)}</p>
-        <button class="btn primary" data-lab="close">${t('lab.close')}</button>
-      </footer>`;
-    if (html !== this.last) {
-      this.el.innerHTML = html;
-      this.last = html;
-    }
-  }
-
-  private activeHtml(s: ResearchState): string {
-    const lab = this.cb.lab();
-    const head = `<p class="lab-idle">${t('lab.building', { n: lab.level + 1, slots: labSlots(lab) })}</p>`;
-    if (!lab.standing) return `<p class="lab-idle lab-down">${t('lab.destroyed')}</p>`;
-    if (!s.active.length) return `${head}<p class="lab-idle">${t('lab.idle')}</p>`;
-    const now = s.pausedAt ?? Date.now();
-    return head + s.active.map((a) => {
-      const item = researchItem(a.id)!;
-      const left = (a.endsAt - now) / 1000;
-      const total = itemSeconds(item, this.cb.speed);
-      const done = Math.min(1, Math.max(0, 1 - left / total));
-      return `
-      <div class="lab-active">
-        <div class="lab-active-row"><span>${t('lab.inProgress')}: <b>${esc(itemName(item))}</b></span><span class="lab-left">${formatDuration(left)}</span></div>
-        <div class="lab-bar"><i style="width:${(done * 100).toFixed(1)}%"></i></div>
+      <section class="lt-summary${tree.done === tree.total ? ' all' : ''}">
+        <div class="lt-sum-top">
+          <div class="lt-ring" aria-hidden="true">
+            <svg viewBox="0 0 52 52"><circle class="track" cx="26" cy="26" r="22"/><circle class="val" cx="26" cy="26" r="22" stroke-dasharray="${(ratio * C).toFixed(1)} ${C.toFixed(1)}"/></svg>
+            <b>${pct(ratio)}%</b>
+          </div>
+          <div class="lt-sum-text">
+            <strong>${t('lab.progress', { n: tree.done, total: tree.total })}</strong>
+            <span>${tree.done === tree.total ? t('lab.allDone') : t('lab.medals', { n: won.size, total: RESEARCH_SETS.length })}</span>
+          </div>
+        </div>
+        <ol class="lt-medals">${medals}</ol>
+      </section>
+      <div class="lt-status">${this.statusHtml(s, lab, next)}</div>
+      <div class="lt-tree">
+        <svg class="lt-wires" aria-hidden="true"></svg>
+        ${RESEARCH_SETS.map((set) => this.setHtml(set, s, lab, won.has(set.id))).join('')}
       </div>`;
-    }).join('');
   }
 
-  private branchHtml(branch: Branch, s: ResearchState): string {
-    const items = RESEARCH.filter((r) => r.branch === branch);
+  /** What runs now, and what to do next. */
+  private statusHtml(s: ResearchState, lab: LabInfo, next: string | null): string {
+    if (!lab.standing) return `<p class="lt-banner down">${t('lab.destroyed')}</p>`;
+    const now = this.now(s);
+    const runs = s.active.map((a) => {
+      const item = researchItem(a.id)!;
+      const total = itemSeconds(item, this.cb.speed);
+      return `
+        <button class="lt-run" data-lt="node" data-id="${item.id}">
+          ${this.miniHtml(item, 'active')}
+          <span class="lt-run-body">
+            <span class="lt-run-kicker">${t('lab.inProgress')}</span>
+            <span class="lt-run-name">${esc(itemName(item))}</span>
+            <span class="lt-bar" data-ends="${a.endsAt}" data-total="${total}"><i></i></span>
+          </span>
+          <span class="lt-run-time" data-ends="${a.endsAt}" data-total="${total}">${formatDuration((a.endsAt - now) / 1000)}</span>
+        </button>`;
+    });
+    const free = s.active.length < labSlots(lab);
+    let nextHtml = '';
+    if (next && free) {
+      const item = researchItem(next)!;
+      const err = startError(s, next, lab);
+      const set = setOf(next);
+      const p = set ? setProgress(set, s.done) : null;
+      const toMedal = p ? p.total - p.done : 0;
+      const why = err === 'noGold' ? `<span class="lt-run-sub poor">${t('lab.needGold', { n: item.cost - s.gold })}</span>` : p ? `<span class="lt-run-sub">${esc(setName(set!.id))} ${p.done}/${p.total} · ${t('lab.toMedal', { n: toMedal })}</span>` : '';
+      nextHtml = `
+        <div class="lt-next">
+          <button class="lt-next-main" data-lt="node" data-id="${item.id}">
+            ${this.miniHtml(item, err ? 'ready' : 'go')}
+            <span class="lt-run-body">
+              <span class="lt-run-kicker">${t('lab.next')}</span>
+              <span class="lt-run-name">${esc(itemName(item))}</span>
+              ${why}
+            </span>
+          </button>
+          <button class="btn primary lt-go" data-lt="start" data-id="${item.id}" ${err ? 'aria-disabled="true"' : ''}>
+            <span>${t('lab.start')}</span>
+            <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span> · ${formatDuration(itemSeconds(item, this.cb.speed))}</span>
+          </button>
+        </div>`;
+    }
+    const slots = `<p class="lt-slots">${t('lab.building', { n: lab.level + 1, slots: labSlots(lab) })}</p>`;
+    return runs.join('') + nextHtml + slots;
+  }
+
+  private setHtml(set: ResearchSet, s: ResearchState, lab: LabInfo, complete: boolean): string {
+    const p = setProgress(set, s.done);
+    const name = setName(set.id);
+    const left = p.total - p.done;
+    const pips = Array.from({ length: p.total }, (_, i) => `<i${i < p.done ? ' class="on"' : ''}></i>`).join('');
+    const tail = complete ? `<span class="lt-won"><i></i>${t('lab.medal')}</span>` : '';
+    // One piece short: name the reward, the strongest pull to finish.
+    const foot = complete
+      ? `<p class="lt-bonus">${esc(setBonus(set.id))}</p>`
+      : left === 1
+        ? `<p class="lt-bonus near"><b>${t('lab.toMedal', { n: 1 })}</b> · ${esc(setBonus(set.id))}</p>`
+        : '';
+    const head = `
+      <header class="lt-set-head">
+        <h2>${esc(name)}</h2>
+        <span class="lt-count" aria-label="${esc(t('lab.setOf', { name, n: p.done, total: p.total }))}">${p.done}/${p.total}</span>
+        <span class="lt-pips" aria-hidden="true">${pips}</span>
+        ${tail}
+      </header>`;
+    if (set.id === 'fortress') {
+      // The boosts snake: four across, then three back.
+      const cols = [1, 2, 3, 4, 4, 3, 2];
+      const rows = [1, 1, 1, 1, 2, 2, 2];
+      const nodes = set.items.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, `grid-column:${cols[i]};grid-row:${rows[i]}`)).join('');
+      return `
+        <section class="lt-set fortress${complete ? ' complete' : ''}" data-set="fortress">
+          <div class="lt-card lt-emblem${complete ? ' st-done' : ''}" aria-hidden="true">${shapeSvg(CARD, false, 0, 1, '0 0 74 84')}<span class="lt-emblem-ico">${ICON.castle}</span></div>
+          ${head}
+          <div class="lt-nodes snake">${nodes}</div>
+          ${foot}
+        </section>`;
+    }
+    const gun = set.id as TowerId;
+    const unlock = set.starter ? null : researchItem(`gun.${gun}`)!;
+    const lv4 = researchItem(`lvl4.${gun}`)!;
+    const lv5 = researchItem(`lvl5.${gun}`)!;
+    const fx = researchItem(`fx.${gun}`)!;
     return `
-      <section class="lab-branch">
-        <h2>${t(`lab.branch.${branch}` as MessageKey)}</h2>
-        <ol>${items.map((r) => this.itemHtml(r, s)).join('')}</ol>
+      <section class="lt-set${complete ? ' complete' : ''}" data-set="${gun}">
+        ${this.cardHtml(gun, unlock, s, lab)}
+        ${head}
+        <div class="lt-nodes">
+          ${this.slotHtml(lv4, s, lab, 'grid-column:1')}
+          ${this.slotHtml(lv5, s, lab, 'grid-column:2')}
+          <span class="lt-split" aria-hidden="true"></span>
+          ${this.slotHtml(fx, s, lab, 'grid-column:4')}
+        </div>
+        ${foot}
       </section>`;
   }
 
-  private itemHtml(item: ResearchItem, s: ResearchState): string {
-    const st = status(s, item.id);
-    const lab = this.cb.lab();
-    const err = startError(s, item.id, lab);
-    const seconds = itemSeconds(item, this.cb.speed);
-    let foot: string;
-    if (st === 'done') foot = `<span class="lab-tag done">${t('lab.done')}</span>`;
-    else if (st === 'active') foot = `<span class="lab-tag active">${t('lab.inProgress')}</span>`;
-    else if (st === 'locked') {
-      const need = item.requires.filter((r) => !s.done.includes(r)).map((r) => itemName(researchItem(r)!));
-      foot = `<span class="lab-need">${esc(t('lab.requires', { list: need.join(', ') }))}</span>`;
-    } else if (err === 'labLevel') {
-      foot = `<span class="lab-need">${esc(t('lab.needsLab', { n: item.lab ?? 1 }))}</span>`;
-    } else {
-      foot = `<button class="btn primary lab-go" data-lab="start" data-id="${item.id}" ${err ? 'aria-disabled="true"' : ''}>
-        ${t('lab.start')}
-        <span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>
-        <span class="lab-time">${formatDuration(seconds)}</span>
-      </button>`;
-    }
+  /** The gun's own card: its picture, and the node that unlocks it. */
+  private cardHtml(gun: TowerId, unlock: ResearchItem | null, s: ResearchState, lab: LabInfo): string {
+    const st: NodeState = unlock ? this.nodeState(s, lab, unlock.id) : 'done';
+    const known = st === 'done';
+    const name = t(`tower.${gun}` as MessageKey);
+    const active = unlock ? s.active.find((a) => a.id === unlock.id) : undefined;
+    const total = unlock ? itemSeconds(unlock, this.cb.speed) : 1;
+    const fresh = unlock ? this.freshClass(unlock.id, st) : '';
+    let strip = '';
+    if (!unlock) strip = `<span class="lt-strip starter">${t('lab.starter')}</span>`;
+    else if (st === 'active' && active) strip = `<span class="lt-strip time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
+    else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.labShort', { n: ROMAN[unlock.lab ?? 1]! })}</span>`;
+    else if (!known) strip = `<span class="lt-strip${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < unlock.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${unlock.cost}</span>`;
+    const label = `${name}. ${t(`lab.state.${st}` as MessageKey)}`;
+    const attrs = unlock ? `data-lt="node" data-id="${unlock.id}"` : 'disabled';
     return `
-      <li class="lab-item ${st}">
-        <div class="lab-name">${esc(itemName(item))}</div>
-        <div class="lab-desc">${esc(itemEffect(item))}</div>
-        <div class="lab-foot-row">${foot}${st === 'locked' || err === 'labLevel' ? `<span class="lab-meta"><span class="ico ico-gold"></span>${item.cost} · ${formatDuration(seconds)}</span>` : ''}</div>
-      </li>`;
+      <button class="lt-card st-${st}${fresh}" ${attrs} aria-label="${esc(label)}">
+        ${shapeSvg(CARD, st === 'active', active?.endsAt, total, '0 0 74 84')}
+        <span class="lt-pic" data-pic="${gun}" data-lv="${known ? this.gunLevel(gun, s) : 1}" data-w="66" data-h="54" data-z="1.45"></span>
+        ${st === 'locked' ? `<span class="lt-lock">${ICON.lock}</span>` : ''}
+        ${known && unlock ? `<span class="lt-check">${ICON.check}</span>` : ''}
+        ${fresh ? `<span class="lt-new">${t('lab.new')}</span>` : ''}
+        ${strip}
+      </button>`;
+  }
+
+  /** One research node and the line under it (time, price or what it waits for). */
+  private slotHtml(item: ResearchItem, s: ResearchState, lab: LabInfo, place: string): string {
+    const st = this.nodeState(s, lab, item.id);
+    const active = s.active.find((a) => a.id === item.id);
+    const total = itemSeconds(item, this.cb.speed);
+    const fresh = this.freshClass(item.id, st);
+    let cap: string;
+    if (st === 'active' && active) cap = `<span class="lt-cap time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
+    else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.labShort', { n: ROMAN[item.lab ?? 1]! })}</span>`;
+    else if (st !== 'done') cap = `<span class="lt-cap${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < item.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>`;
+    else cap = '<span class="lt-cap"></span>';
+    const label = `${itemName(item)}. ${t(`lab.state.${st}` as MessageKey)}`;
+    return `
+      <div class="lt-slot" style="${place}">
+        <button class="lt-node shape-${shapeOf(item)} st-${st}${fresh}" data-lt="node" data-id="${item.id}" aria-label="${esc(label)}">
+          ${shapeSvg(SHAPE[shapeOf(item)], st === 'active', active?.endsAt, total)}
+          <span class="lt-glyph">${st === 'locked' && shapeOf(item) !== 'oct' ? ICON.lock : glyphOf(item)}</span>
+          ${st === 'done' ? `<span class="lt-check">${ICON.check}</span>` : ''}
+          ${fresh ? `<span class="lt-new">${t('lab.new')}</span>` : ''}
+        </button>
+        ${cap}
+      </div>`;
+  }
+
+  /** A small copy of a node, for the status cards and the sheet. */
+  private miniHtml(item: ResearchItem, st: NodeState): string {
+    if (item.effect.kind === 'gun') {
+      return `<span class="lt-mini lt-mini-gun st-${st}"><span class="lt-pic" data-pic="${item.effect.gun}" data-lv="1" data-w="40" data-h="36"></span></span>`;
+    }
+    const shape = shapeOf(item);
+    return `<span class="lt-mini lt-node shape-${shape} st-${st}">${shapeSvg(SHAPE[shape], false)}<span class="lt-glyph">${glyphOf(item)}</span></span>`;
+  }
+
+  /** "fresh" for an item finished since the player last looked; "stamp" the first time it is drawn. */
+  private freshClass(id: string, st: NodeState): string {
+    if (st !== 'done' || this.seen.has(id)) return '';
+    if (this.stamped.has(id)) return ' fresh';
+    this.stamped.add(id);
+    return ' fresh stamp';
+  }
+
+  private sheetHtml(s: ResearchState, lab: LabInfo, id: string): string {
+    const item = researchItem(id);
+    if (!item) return '';
+    const st = this.nodeState(s, lab, id);
+    const err = startError(s, id, lab);
+    const set = setOf(id);
+    const p = set ? setProgress(set, s.done) : null;
+    const reqs = item.requires.map((r) => {
+      const ok = s.done.includes(r);
+      return `<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(itemName(researchItem(r)!))}</li>`;
+    });
+    if ((item.lab ?? 1) > 1) {
+      const ok = item.lab! <= lab.level + 1;
+      reqs.push(`<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(t('lab.labLevelReq', { n: item.lab! }))}</li>`);
+    }
+    const active = s.active.find((a) => a.id === id);
+    const total = itemSeconds(item, this.cb.speed);
+    let action: string;
+    if (st === 'done') action = `<p class="lt-sheet-state done">${ICON.check}${t('lab.done')}</p>`;
+    else if (st === 'active' && active)
+      action = `<p class="lt-sheet-state active">${ICON.clock}${t('lab.inProgress')} · <span data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span></p>`;
+    else {
+      const reason = err && err !== 'noGold' ? `<p class="lt-sheet-why">${esc(t(ERR[err]))}</p>` : err === 'noGold' ? `<p class="lt-sheet-why">${t('lab.needGold', { n: item.cost - s.gold })}</p>` : '';
+      action = `${reason}
+        <button class="btn primary lt-go wide" data-lt="start" data-id="${id}" ${err ? 'aria-disabled="true"' : ''}>
+          <span>${t('lab.start')}</span>
+          <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span> · ${formatDuration(total)}</span>
+        </button>`;
+    }
+    const setLine = set && p
+      ? `<p class="lt-sheet-set">${esc(t('lab.ofSet', { name: setName(set.id), n: p.done, total: p.total }))} · ${esc(t('lab.setBonus', { bonus: setBonus(set.id) }))}</p>`
+      : '';
+    return `
+      <div class="lt-scrim" data-lt="scrim"></div>
+      <section class="lt-sheet" role="dialog" aria-modal="true" tabindex="-1" aria-label="${esc(itemName(item))}">
+        <div class="lt-sheet-top">
+          ${this.miniHtml(item, st)}
+          <div>
+            <p class="lab-kicker">${t(`lab.branch.${item.branch}` as MessageKey)}</p>
+            <h2 class="lt-sheet-title">${esc(itemName(item))}</h2>
+          </div>
+        </div>
+        <p class="lt-sheet-fx">${esc(itemEffect(item))}</p>
+        ${reqs.length ? `<p class="lt-sheet-h">${t('lab.needs')}</p><ul class="lt-reqs">${reqs.join('')}</ul>` : ''}
+        ${setLine}
+        ${this.note ? `<p class="lt-sheet-why" role="status">${esc(this.note)}</p>` : ''}
+        ${action}
+      </section>`;
+  }
+
+  private celebrationHtml(id: SetId): string {
+    const pic = id === 'fortress' ? `<span class="lt-medal-ico big">${ICON.castle}</span>` : `<span class="lt-pic" data-pic="${id}" data-lv="5" data-w="104" data-h="96" data-z="1.35"></span>`;
+    return `
+      <div class="lt-cele" role="dialog" aria-modal="true" aria-label="${esc(t('lab.cele.kicker'))}">
+        <div class="lt-cele-card">
+          <div class="lt-cele-medal"><span class="lt-cele-rays" aria-hidden="true"></span><span class="lt-cele-disc">${pic}</span></div>
+          <p class="lab-kicker">${t('lab.cele.kicker')}</p>
+          <h2 class="lt-cele-title">${esc(setName(id))}</h2>
+          <p class="lt-cele-bonus">${esc(setBonus(id))}</p>
+          <button class="btn primary" data-lt="cele">${t('lab.cele.ok')}</button>
+        </div>
+      </div>`;
+  }
+
+  // ------------------------------------------------------------- wires
+
+  /**
+   * The lines between nodes, measured from where the nodes landed: each row
+   * left to right, the guns down the left, the effects down the right, and the
+   * Fortress snake. Lit brass where done, moving where it leads to the next step.
+   */
+  private drawWires(): void {
+    const svg = this.page.querySelector<SVGSVGElement>('.lt-wires');
+    if (!svg || this.el.hidden) return;
+    const tree = svg.parentElement!;
+    const base = tree.getBoundingClientRect();
+    const box = (id: string) => {
+      const el = tree.querySelector<HTMLElement>(`[data-id="${id}"], [data-set="${id}"] .lt-card`);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { l: r.left - base.left, r: r.right - base.left, t: r.top - base.top, b: r.bottom - base.top, cx: r.left - base.left + r.width / 2, cy: r.top - base.top + r.height / 2 };
+    };
+    const s = this.cb.state();
+    const lab = this.cb.lab();
+    const stateOf = (id: string): NodeState => (researchItem(id) ? this.nodeState(s, lab, id) : 'done');
+    const cls = (from: string, to: string) => {
+      const a = stateOf(from);
+      const b = stateOf(to);
+      if (a === 'done' && b === 'done') return 'lit';
+      if (a === 'done' && (b === 'active' || b === 'go')) return 'flow';
+      if (a === 'done') return 'dim';
+      return 'dash';
+    };
+    const paths: string[] = [];
+    const line = (from: string, to: string, kind: string) => {
+      const a = box(from);
+      const b = box(to);
+      if (!a || !b) return;
+      let d: string;
+      if (Math.abs(a.cx - b.cx) < 3) d = `M${a.cx} ${a.cy}V${b.cy}`;
+      else if (b.cy >= a.t && b.cy <= a.b) d = `M${a.cx} ${b.cy}H${b.cx}`;
+      else d = `M${a.cx} ${a.cy}V${(a.cy + b.cy) / 2}H${b.cx}V${b.cy}`;
+      if (kind === 'lit') paths.push(`<path class="w-glow" d="${d}"/>`);
+      paths.push(`<path class="w-${kind}" d="${d}"/>`);
+    };
+    const gunKey = (set: ResearchSet) => (set.starter ? set.id : `gun.${set.id}`);
+    const guns = RESEARCH_SETS.filter((set) => set.id !== 'fortress');
+    guns.forEach((set, i) => {
+      const g = gunKey(set);
+      line(g, `lvl4.${set.id}`, cls(g, `lvl4.${set.id}`));
+      line(`lvl4.${set.id}`, `lvl5.${set.id}`, cls(`lvl4.${set.id}`, `lvl5.${set.id}`));
+      const after = guns[i + 1];
+      if (after) {
+        line(g, gunKey(after), cls(g, gunKey(after)));
+        line(`fx.${set.id}`, `fx.${after.id}`, cls(`fx.${set.id}`, `fx.${after.id}`));
+      }
+    });
+    const boosts = RESEARCH_SETS.find((set) => set.id === 'fortress')!.items;
+    for (let i = 1; i < boosts.length; i++) line(boosts[i - 1]!, boosts[i]!, cls(boosts[i - 1]!, boosts[i]!));
+    // Only when something moved, so the moving dashes do not restart.
+    const html = paths.join('');
+    const view = `0 0 ${base.width} ${base.height}`;
+    if (svg.getAttribute('viewBox') !== view) svg.setAttribute('viewBox', view);
+    if (svg.dataset.d !== html) {
+      svg.dataset.d = html;
+      svg.innerHTML = html;
+    }
   }
 }
