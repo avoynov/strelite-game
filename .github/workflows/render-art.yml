@@ -1,6 +1,7 @@
 name: Render art
 # Renders the style В sprites with headless Blender (pip bpy), one job per tower level,
-# projectile set and enemy, then packs them into public/art and commits back to the branch.
+# projectile set, enemy and gun-portrait level, then packs them into public/art and commits back
+# to the branch.
 on:
   push:
     branches: ['claude/**']
@@ -29,6 +30,7 @@ jobs:
           jobs = [{"kind": "tower", "model": m, "level": l} for m, ls in q.get("towers", {}).items() for l in ls]
           jobs += [{"kind": "proj", "model": m, "level": 0} for m in q.get("projectiles", [])]
           jobs += [{"kind": "enemy", "model": m, "level": 0} for m in q.get("enemies", [])]
+          jobs += [{"kind": "portrait", "model": m, "level": l} for m, ls in q.get("portraits", {}).items() for l in ls]
           print("matrix=" + json.dumps({"include": jobs or [{"kind": "none", "model": "none", "level": 0}]}))
           print("any=" + ("true" if jobs else "false"))
           EOF
@@ -66,6 +68,10 @@ jobs:
             run python3 render_sprites.py --model "$MODEL" --style photoreal --levels "$LEVEL" --dirs 32 \
               --fire --fire-dirs 32 --fire-samples 20 --ground patch --ppm 32 --samples 32 --out ../out
             python3 pack_atlas.py --src ../out --dst ../../public/art --models "$MODEL" --levels "$LEVEL"
+          elif [ "$KIND" = portrait ]; then
+            run python3 render_portraits.py --model "$MODEL" --levels "$LEVEL" --dirs 32 --ppm 44 --samples 24 \
+              --out ../out
+            python3 pack_portraits.py --src ../out/portraits --dst ../../public/art
           elif [ "$KIND" = proj ]; then
             run python3 render_projectiles.py --model "$MODEL" --out ../out
           else
@@ -78,9 +84,10 @@ jobs:
           set -euo pipefail
           F=frag/files
           mkdir -p "$F"
-          git ls-files -mo --exclude-standard public/art | { grep -v '^public/art/towers.json$' || true; } | while read -r p; do
+          git ls-files -mo --exclude-standard public/art | { grep -vE '^public/art/(towers|portraits)\.json$' || true; } | while read -r p; do
             mkdir -p "$F/$(dirname "${p#public/art/}")"; cp "$p" "$F/${p#public/art/}"; done
           cp public/art/towers.json frag/towers.json
+          cp public/art/portraits.json frag/portraits.json
           printf '{"kind":"%s","model":"%s","level":%s}' "${{ matrix.kind }}" "${{ matrix.model }}" \
             "${{ matrix.level }}" > frag/job.json
           du -sh frag

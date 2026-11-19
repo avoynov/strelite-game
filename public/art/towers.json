@@ -10989,90 +10989,146 @@
     "bg": "Пехота",
     "en": "Infantry"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/infantry",
    "frames": "infantry",
    "directions": 16,
    "lengthM": 2.4,
-   "radiusM": 1.2
+   "radiusM": 1.2,
+   "move": {
+    "frames": 12,
+    "kind": "walk",
+    "cycleM": 1.85,
+    "fps": null,
+    "names": "infantry_DD_FF",
+    "animation": "infantry_DD_move"
+   }
   },
   "truck": {
    "name": {
     "bg": "Камион",
     "en": "Truck"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/truck",
    "frames": "truck",
    "directions": 16,
-   "lengthM": 6.6,
-   "radiusM": 3.3
+   "lengthM": 6.7,
+   "radiusM": 3.3,
+   "move": {
+    "frames": 4,
+    "kind": "wheels",
+    "cycleM": 0.4319689898685966,
+    "fps": null,
+    "names": "truck_DD_FF",
+    "animation": "truck_DD_move"
+   }
   },
   "tank": {
    "name": {
     "bg": "Танк",
     "en": "Tank"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/tank",
    "frames": "tank",
    "directions": 16,
    "lengthM": 8.0,
-   "radiusM": 3.0
+   "radiusM": 3.0,
+   "move": {
+    "frames": 4,
+    "kind": "tracks",
+    "cycleM": 0.15939404695024448,
+    "fps": null,
+    "names": "tank_DD_FF",
+    "animation": "tank_DD_move"
+   }
   },
   "apc": {
    "name": {
     "bg": "БТР",
     "en": "Armoured personnel carrier"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/apc",
    "frames": "apc",
    "directions": 16,
    "lengthM": 7.6,
-   "radiusM": 3.8
+   "radiusM": 3.8,
+   "move": {
+    "frames": 4,
+    "kind": "wheels",
+    "cycleM": 0.4319689898685966,
+    "fps": null,
+    "names": "apc_DD_FF",
+    "animation": "apc_DD_move"
+   }
   },
   "fortress": {
    "name": {
     "bg": "Крепост",
     "en": "Land fortress"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/fortress",
    "frames": "fortress",
    "directions": 16,
-   "lengthM": 17.5,
-   "radiusM": 7.5
+   "lengthM": 17.3,
+   "radiusM": 7.5,
+   "move": {
+    "frames": 3,
+    "kind": "tracks",
+    "cycleM": 0.24103635522933986,
+    "fps": null,
+    "names": "fortress_DD_FF",
+    "animation": "fortress_DD_move"
+   }
   },
   "moto": {
    "name": {
     "bg": "Мотоциклисти",
     "en": "Motorcycle raiders"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/bikers",
    "frames": "bikers",
    "directions": 16,
    "lengthM": 3.4,
-   "radiusM": 1.4
+   "radiusM": 1.4,
+   "move": {
+    "frames": 4,
+    "kind": "wheels",
+    "cycleM": 0.3560471674068433,
+    "fps": null,
+    "names": "bikers_DD_FF",
+    "animation": "bikers_DD_move"
+   }
   },
   "drone": {
    "name": {
     "bg": "Дирижабъл",
     "en": "Armoured airship"
    },
-   "placeholder": true,
+   "placeholder": false,
    "sheet": "enemies/airship",
    "frames": "airship",
    "directions": 16,
    "lengthM": 14.0,
    "radiusM": 4.0,
+   "move": {
+    "frames": 4,
+    "kind": "props",
+    "cycleM": null,
+    "fps": 20,
+    "names": "airship_DD_FF",
+    "animation": "airship_DD_move"
+   },
    "flying": true,
    "flightHeightM": 10.0,
    "shadow": "no shadow in the sprite: draw a dark ellipse on the ground below it"
   }
  },
- "enemiesNote": "enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen lower-right); anchor = the unit's ground centre; shadow included",
+ "enemiesNote": "enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen lower-right); anchor = the unit's ground centre; shadow included. With a 'move' entry, <model>_NN_FF are its movement frames (animation <model>_NN_move); <model>_NN stays the still (= frame 00). Distance-driven (cycleM set): frame = floor((distance / cycleM + phase) * frames) mod frames, phase a random 0..1 per unit; time-driven (fps set): frame = floor(t * fps + phase * frames) mod frames.",
  "effects": {
   "muzzle_flash": {
    "sheet": "effects/muzzle_flash",
@@ -11270,5 +11326,48 @@
    "frameM": 7.5
   }
  },
- "fencesNote": "fences/<material>@1x|@2x.json, frames <material>_<piece>, anchor = ground point of the tile centre. Per tile draw <material>_post, then the half-segments toward each fenced neighbour: px (+x), nx (-x), py (+y), ny (-y) in grid cells. Draw order: segments behind the post (ny, nx) first, then post, then py, px; sort tiles back to front as usual."
+ "fencesNote": "fences/<material>@1x|@2x.json, frames <material>_<piece>, anchor = ground point of the tile centre. Per tile draw <material>_post, then the half-segments toward each fenced neighbour: px (+x), nx (-x), py (+y), ny (-y) in grid cells. Draw order: segments behind the post (ny, nx) first, then post, then py, px; sort tiles back to front as usual.",
+ "buildings": {
+  "hq": {
+   "name": {
+    "bg": "Щаб",
+    "en": "Headquarters"
+   },
+   "sheet": "buildings/hq",
+   "levels": [
+    "hq_L1",
+    "hq_L2",
+    "hq_L3",
+    "hq_L4",
+    "hq_L5"
+   ],
+   "tiles": 2,
+   "footprintM": 4.0,
+   "frameM": [
+    15.0,
+    19.0
+   ]
+  },
+  "lab": {
+   "name": {
+    "bg": "Лаборатория",
+    "en": "Laboratory"
+   },
+   "sheet": "buildings/lab",
+   "levels": [
+    "lab_L1",
+    "lab_L2",
+    "lab_L3",
+    "lab_L4",
+    "lab_L5"
+   ],
+   "tiles": 2,
+   "footprintM": 4.0,
+   "frameM": [
+    15.0,
+    19.0
+   ]
+  }
+ },
+ "buildingsNote": "buildings/<id>@1x|@2x.json, frame <id>_L<n> for level n (1-based; the game's level index 0 = L1). Anchor = ground point of the building's centre (the middle of its 2x2 tiles); the frame is taller than wide, so anchor.y is below the middle. One static frame per level; draw in the normal depth sort with the guns."
 }

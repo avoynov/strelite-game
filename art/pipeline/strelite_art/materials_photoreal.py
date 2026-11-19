@@ -58,6 +58,12 @@ SPEC = {
     "wood":          ("wood", dict(color=(0.63, 0.48, 0.30))),
     "rope":          ("plain", dict(color=(0.55, 0.47, 0.33), rough=0.95, dust=0.6)),
     "stone":         ("stone", {}),
+    # --- buildings (models/hq.py, lab.py): dressed and pale stone, roof slate, verdigris copper
+    "stone_dressed": ("stone", dict(light=(0.56, 0.52, 0.46), dark=(0.44, 0.41, 0.37))),
+    "stone_pale":    ("stone", dict(light=(0.74, 0.71, 0.64), dark=(0.63, 0.60, 0.54))),
+    "slate":         ("plain", dict(color=(0.11, 0.12, 0.13), rough=0.55, dust=0.35)),
+    "verdigris":     ("plain", dict(color=(0.30, 0.50, 0.42), rough=0.6, dust=0.3)),
+    "plaster":       ("plain", dict(color=(0.62, 0.58, 0.50), rough=0.85, dust=0.6)),
     "dirt":          ("dirt", {}),
     "grass":         ("grass", {}),
     "bore":          ("bore", {}),
@@ -84,12 +90,31 @@ SPEC = {
     "paint_steel":   ("painted", dict(color=(0.30, 0.33, 0.35), rough=0.42, wear=0.8, dust=0.5)),
     "paint_blue":    ("painted", dict(color=(0.08, 0.16, 0.42), rough=0.45, wear=0.6, dust=0.3)),
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
-    "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
+    "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=0.9, rust=0.7)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
+    # doped envelope fabric of the airship (slate dope over linen), two batches for the gores
+    "canvas_doped":      ("cloth", dict(color=(0.36, 0.37, 0.36), dust=0.25, wrinkle=3.0)),
+    "canvas_doped_dark": ("cloth", dict(color=(0.29, 0.30, 0.30), dust=0.25, wrinkle=3.0)),
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
+    # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)
+    "tunic_slate":   ("cloth", dict(color=(0.27, 0.285, 0.28), alt=(0.24, 0.25, 0.245), dust=0.35, wrinkle=9.0)),
+    "breeches_dark": ("cloth", dict(color=(0.14, 0.145, 0.14), alt=(0.12, 0.125, 0.12), dust=0.5, wrinkle=9.0)),
+    "webbing_pale":  ("plain", dict(color=(0.40, 0.37, 0.29), rough=0.8, dust=0.6)),
+    "boot_sole":     ("plain", dict(color=(0.055, 0.045, 0.04), rough=0.7, dust=0.35)),
     "webbing":       ("plain", dict(color=(0.22, 0.22, 0.19), rough=0.8, dust=0.8)),
-    "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2)),
+    "skin":          ("plain", dict(color=(0.66, 0.47, 0.37), rough=0.55, dust=0.2, sss=0.2)),
     "boot":          ("plain", dict(color=(0.07, 0.065, 0.06), rough=0.6, dust=1.2)),
+    # --- people (human.py): skin tones, gloves, oxblood scarf of the Iron Concord
+    "skin_fair":     ("plain", dict(color=(0.72, 0.53, 0.43), rough=0.5, dust=0.2, sss=0.2)),
+    "skin_olive":    ("plain", dict(color=(0.55, 0.38, 0.27), rough=0.52, dust=0.2, sss=0.2)),
+    "skin_dark":     ("plain", dict(color=(0.33, 0.21, 0.14), rough=0.5, dust=0.2, sss=0.15)),
+    "eye_white":     ("plain", dict(color=(0.60, 0.56, 0.50), rough=0.12, dust=0.0)),
+    "eye_iris":      ("plain", dict(color=(0.035, 0.025, 0.018), rough=0.08, dust=0.0)),
+    "hair":          ("plain", dict(color=(0.06, 0.045, 0.035), rough=0.7, dust=0.3)),
+    "tyre":          ("plain", dict(color=(0.05, 0.05, 0.05), rough=0.8, dust=0.55)),
+    "boot_leather":  ("plain", dict(color=(0.05, 0.04, 0.034), rough=0.45, dust=0.15)),
+    "glove":         ("plain", dict(color=(0.16, 0.11, 0.07), rough=0.66, dust=0.6)),
+    "cloth_oxblood": ("cloth", dict(color=(0.38, 0.07, 0.05), alt=(0.32, 0.06, 0.045), dust=0.3, wrinkle=7.0)),
     # --- siege engines: one material set per upgrade level
     "timber_raw":    ("timber", dict(light=(0.54, 0.45, 0.34), dark=(0.31, 0.24, 0.17), rough=0.85,
                                      weather=0.55, dust=0.8)),
@@ -433,15 +458,19 @@ def _metal(name, color, rough, dust=0.5, rust=0.0):
     return mat
 
 
-def _plain(name, color, rough, dust=1.0):
+def _plain(name, color, rough, dust=1.0, sss=0.0):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     P = g.coords()
     dust_m, _, cavity = _dust_mask(g, P, dust)
     var = g.math("ADD", 0.85, g.math("MULTIPLY", g.noise(P, 20, detail=4), 0.3))
     col = g.mix(dust_m, g.mix(1.0, rgb(color), var, "MULTIPLY"), rgb(DUST))
-    g.finish(col, g.mixf(dust_m, rough, 0.95), 0.0, height=g.noise(P, 120, detail=3),
-             bump=0.15, bump_dist=0.001)
+    bsdf = g.finish(col, g.mixf(dust_m, rough, 0.95), 0.0, height=g.noise(P, 120, detail=3),
+                    bump=0.15, bump_dist=0.001)
+    if sss:     # skin: light scatters a few millimetres under the surface, reddest deepest
+        bsdf.inputs["Subsurface Weight"].default_value = sss
+        bsdf.inputs["Subsurface Radius"].default_value = (1.0, 0.35, 0.2)
+        bsdf.inputs["Subsurface Scale"].default_value = 0.006
     return mat
 
 
@@ -500,14 +529,14 @@ def _timber(name, light, dark, rough=0.8, weather=0.6, dust=0.7, checks=1.0):
     return mat
 
 
-def _stone(name):
+def _stone(name, light=(0.60, 0.53, 0.42), dark=(0.40, 0.36, 0.31)):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     tc = g.node("ShaderNodeTexCoord")
     info = g.node("ShaderNodeObjectInfo")
     P = tc.outputs["Object"]
     n = g.noise(P, 30, detail=6, rough=0.7)
-    a = g.mix(info.outputs["Random"], rgb((0.60, 0.53, 0.42)), rgb((0.40, 0.36, 0.31)))
+    a = g.mix(info.outputs["Random"], rgb(light), rgb(dark))
     col = g.mix(1.0, a, g.math("ADD", 0.7, g.math("MULTIPLY", n, 0.6)), "MULTIPLY")
     _, nz, _ = g.world()
     col = g.mix(g.ramp(nz, 0.9, -0.2), col, rgb(DUST))   # soil clings to the lower half
