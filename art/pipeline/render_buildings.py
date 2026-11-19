@@ -129,14 +129,14 @@ def pack(a):
         if states:
             _atlas(a, d, meta, [(f"{name}_L{lv}_{st}", f"L{lv}_{st}.png") for st in states for lv in levels],
                    f"{name}_states")
-            entry["statesSheet"] = f"buildings/{name}_states"
-            entry["states"] = {st: [f"{name}_L{lv}_{st}" for lv in levels] for st in states}
+            entry["states"] = {"sheet": f"buildings/{name}_states",
+                               **{st: [f"{name}_L{lv}_{st}" for lv in levels] for st in states}}
         entries[name] = entry
     manifest["buildingsNote"] = (
         "buildings/<id>@1x|@2x.json, frame <id>_L<n> for level n (1-based; the game's level index 0 = L1). "
         "Anchor = ground point of the building's centre (the middle of its 2x2 tiles); the frame is taller "
         "than wide, so anchor.y is below the middle. One static frame per level; draw in the normal depth "
-        "sort with the guns. Damage: buildings/<id>_states@1x|@2x holds states.damaged[n-1] (below half "
+        "sort with the guns. Damage: states.sheet (buildings/<id>_states@1x|@2x) holds states.damaged[n-1] (below half "
         "health: a breach in the front-right corner), states.rubble[n-1] (destroyed) and, for hq only, "
         "states.occupied[n-1] (taken by the Iron Concord); same frame size and anchor as the level frames. "
         "Put effects fire_burn + smoke_plume on damaged ones.")
