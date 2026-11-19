@@ -350,6 +350,24 @@ def occupy(scene, style="photoreal", seed=1):
         mats = o.data.materials
         if mats and mats[0] is not None and mats[0].name.split("__")[0] == "paint_blue":
             mats[0] = red
+    # a long oxblood banner with the faction emblem hung over the front wall (-Y), left of centre
+    walls = [b for b in (_world_bbox(o) for o in scene.objects if o.type == "MESH" and o.name.startswith("core"))
+             if b]
+    if walls:
+        lo = Vector((min(b[0].x for b in walls), min(b[0].y for b in walls), 0))
+        hi = Vector((max(b[1].x for b in walls), 0, max(b[1].z for b in walls)))
+        bx = lo.x + (hi.x - lo.x) * 0.25
+        skin = [b for b in (_world_bbox(o) for o in scene.objects if o.type == "MESH"
+                            and o.name.startswith(("block", "log", "plank")) and o.name[:5] != "quoin")
+                if b and b[1].z > 1.0 and lo.x - 0.5 < (b[0].x + b[1].x) / 2 < hi.x + 0.5]
+        by = (min(b[0].y for b in skin) if skin else lo.y - 0.4) - 0.04
+        top = hi.z - 0.15
+        L = min(2.6, top * 0.7)
+        k.tube("banner_rod", (bx - 0.75, by, top), (bx + 0.75, by, top), 0.03, "brass", segs=8)
+        k.box("banner", (1.2, 0.02, L), (bx, by - 0.02, top - L / 2 - 0.05), "cloth_oxblood", bevel=False)
+        k.prism("banner_tail", [(bx - 0.6, top - L - 0.05), (bx + 0.6, top - L - 0.05), (bx, top - L - 0.4)], 0.02,
+                "cloth_oxblood", y=by - 0.02)
+        faction.emblem(k, None, (bx, by - 0.045, top - L * 0.4), (0, -1, 0), r=0.4)
     # faction pennants on the top of the tallest parts
     tops = []
     for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain")]:
@@ -364,5 +382,5 @@ def occupy(scene, style="photoreal", seed=1):
         if any((c.xy - p.xy).length < 2.0 for p in placed):
             continue
         p = Vector((c.x, c.y, z))
-        faction.pennant(k, None, p, h=1.4, w=0.9)
+        faction.pennant(k, None, p, h=1.8, w=1.3)
         placed.append(p)
