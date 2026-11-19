@@ -296,4 +296,6 @@ export const en: Record<MessageKey, string> = {
   'stat.wreck': "Wreck",
   'base.lost': "Destroyed {n}% · the attack stops at {max}%",
   'hud.raid': "Raid…",
+  'hud.path': "Point {n}",
+  'hud.arc': "Campaign {n}",
 };

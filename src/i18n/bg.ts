@@ -295,6 +295,8 @@ export const bg = {
   'stat.wreck': "Развалина",
   'base.lost': "Разрушено {n}% · при {max}% атаката спира",
   'hud.raid': "Набег…",
+  'hud.path': "Точка {n}",
+  'hud.arc': "Поход {n}",
 } as const;
 
 export type MessageKey = keyof typeof bg;

@@ -2,7 +2,7 @@ import { t, type MessageKey } from '../i18n';
 import { TOWER_IDS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import { isWreck, type ActionResult, type Building, type Game, type Structure } from '../sim/game';
 import type { Armed, Selection } from '../render/boardRenderer';
-import { BASE_RULES, builders, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, TREASURY_LEVELS, type BaseState, type BuildingKind, type JobError } from '../sim/base';
+import { BASE_RULES, builders, isRaisable, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, TREASURY_LEVELS, type BaseState, type BuildingKind, type JobError } from '../sim/base';
 import { formatDuration } from './lab';
 
 /** How an attack on the base (or the battle to win the headquarters back) ended. */
@@ -170,7 +170,7 @@ export class Hud {
       top = `
         <div class="stat" title="${t('hud.money')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${g.money}</b></div>
         <div class="stat" title="${t('hud.lives')}"><span class="ico ico-heart" aria-hidden="true"></span><b>${g.lives}</b></div>
-        <div class="stat wave"><span>${t(g.mode === 'arc' ? 'mission.arc' : 'mission.path', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></div>
+        <div class="stat wave"><span>${t(g.mode === 'arc' ? 'hud.arc' : 'hud.path', { n: g.level })}</span><span>${t('hud.wave', { n: g.wave, total: g.totalWaves })}</span></div>
         <div class="spacer"></div>
         ${g.phase === 'build' ? `<button class="chip chip-ico" data-action="arsenal" aria-label="${t('arsenal.title')}" title="${t('arsenal.title')}">${ICON.arsenal}</button>` : ''}
         <button class="chip" data-action="speed" aria-label="${t('action.speed')}">${speed}×</button>
@@ -379,7 +379,7 @@ export class Hud {
       const err = jobError(st, what, g.money);
       const label = price.kind === 'rebuild' ? t(price.cost ? 'building.rebuildIt' : 'building.rebuildFree') : t('building.upgrade', { n: level + 2 });
       jobBtn = `<button class="btn${ruined ? ' primary' : ''}" data-action="job" data-def="${what}" ${err && err !== 'noBuilder' ? 'disabled' : ''}>${label}${price.cost ? `<span class="cost"><span class="ico ico-gold"></span>${price.cost}</span>` : ''}<span class="lab-time">${formatDuration(price.seconds / base.speed)}</span></button>`;
-    } else if (!ruined) jobBtn = `<button class="btn" disabled>${t('building.max')}</button>`;
+    } else if (!ruined && isRaisable(what)) jobBtn = `<button class="btn" disabled>${t('building.max')}</button>`;
     let fx: string;
     let main = '';
     if (ruined) fx = t(`ruin.${what}`);
