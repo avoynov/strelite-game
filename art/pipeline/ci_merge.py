@@ -25,11 +25,13 @@ def merge_levels(known, new):
     return out
 
 
+PORTRAIT_ID = {"ballista": "crossbow"}   # = pack_atlas.GAME_ID (not imported: the merge job has no numpy)
+
+
 def merge_portraits(frag_path, path, level, model):
     """portraits.json: each portrait job adds only the level it rendered (its fragment also
     carries the older entries it started from, which must not overwrite fresher ones)."""
-    from pack_atlas import GAME_ID as TID
-    gid = TID.get(model, model)
+    gid = PORTRAIT_ID.get(model, model)
     with open(frag_path) as f:
         frag = json.load(f)
     frag["guns"] = {gid: {"levels": [lv for lv in frag["guns"].get(gid, {}).get("levels", [])
