@@ -387,3 +387,176 @@ def spoke_wheel(k, parent, motion, loc, r, width, rim_mat, spokes=36, knobs=24, 
                bevel=False)
     motion.wheel(w, r)
     return w
+
+
+# ---------------------------------------------------------------------------
+# tracked running gear sized so everything wraps (tank, fortress)
+class TrackPlan:
+    """Belt round an idler (front), road wheels and a sprocket (rear). The link step is
+    chosen so the belt closes on a whole number of links, and every wheel is sized from
+    that step so it turns by exactly one repeat of its bolt or tooth pattern while the
+    belt moves one link: a cycle of one link wraps for links and wheels alike."""
+
+    def __init__(self, road_y, idler_yz, sprocket_yz, n_road=16, n_idler=14, n_sprocket=13, pitch=0.16,
+                 thick=0.06, grouser=0.026):
+        self.road_y, self.idler_yz, self.sprocket_yz = road_y, idler_yz, sprocket_yz
+        self.n_road, self.n_idler, self.n_sprocket = n_road, n_idler, n_sprocket
+        self.pitch, self.thick, self.grouser = pitch, thick, grouser
+        n = max(1, round(belt_length(self.circles(pitch)) / pitch))
+        # solve belt_length(step) = n * step (the wheels grow with the step): secant
+        s0, s1 = pitch * 0.98, pitch * 1.02
+        g0 = belt_length(self.circles(s0)) - n * s0
+        for _ in range(40):
+            g1 = belt_length(self.circles(s1)) - n * s1
+            if abs(g1) < 1e-10 or g1 == g0:
+                break
+            s0, s1, g0 = s1, s1 - g1 * (s1 - s0) / (g1 - g0), g1
+        step = s1
+        self.step, self.n = step, n
+        self.r_road, self.r_idler, self.r_sprocket = self.radii(step)
+        self.z_road = grouser + thick + self.r_road
+
+    def radii(self, step):
+        f = step / (2 * math.pi)
+        return self.n_road * f, self.n_idler * f, self.n_sprocket * f
+
+    def circles(self, step=None):
+        step = step or self.step
+        rr, ri, rs = self.radii(step)
+        t = self.thick
+        zr = self.grouser + t + rr            # road wheels stand on the inner face of the bottom run
+        road = [(y, zr, rr + t / 2) for y in self.road_y]
+        return ([(self.idler_yz[0], self.idler_yz[1], ri + t / 2)] + road +
+                [(self.sprocket_yz[0], self.sprocket_yz[1], rs)] + list(reversed(road)))
+
+    def build(self, k, root, motion, x, width, paint, worn, link_mat, horn=True, arms=True):
+        """Wheels, belt of links and suspension arms for one track centred at x."""
+        sx = 1 if x > 0 else -1
+        f = width / 0.58
+        path, total = belt(self.circles())
+        assert abs(total / self.n - self.step) < 1e-6, (total, self.n, self.step)
+        for y in self.road_y:
+            road_wheel_pair(k, root, motion, (x, y, self.z_road), self.r_road, sx, f, self.n_road, paint)
+        idler(k, root, motion, (x, self.idler_yz[0], self.idler_yz[1]), self.r_idler, sx, f, self.n_idler, paint,
+              worn)
+        sprocket(k, root, motion, (x, self.sprocket_yz[0], self.sprocket_yz[1]), self.r_sprocket, sx, f,
+                 self.n_sprocket, paint, worn, link_mat)
+        belt_links(k, root, motion, x, path, total, self.n, width, link_mat, thick=self.thick, horn=horn)
+        if arms:
+            xi = x - sx * width / 2
+            for y in self.road_y:
+                k.beam("road_arm", (xi - sx * 0.09 * f, y + 0.32 * f, self.z_road + 0.12 * f),
+                       (xi + sx * 0.03 * f, y, self.z_road), (0.08 * f, 0.1 * f), worn, parent=root, bevel=0.01)
+
+
+def belt_length(circles):
+    """Length of belt(circles) in pure Python (usable at import time)."""
+    cs = [((y, z), r) for y, z, r in circles]
+    while True:
+        m = len(cs)
+        seg = []
+        for i in range(m):
+            (p1, r1), (p2, r2) = cs[i], cs[(i + 1) % m]
+            dy, dz = p2[0] - p1[0], p2[1] - p1[1]
+            ln = math.hypot(dy, dz)
+            hy, hz = dy / ln, dz / ln
+            a = (r1 - r2) / ln
+            b = math.sqrt(max(0.0, 1 - a * a))
+            ny, nz = hy * a - hz * b, hz * a + hy * b
+            t1 = (p1[0] + ny * r1, p1[1] + nz * r1)
+            t2 = (p2[0] + ny * r2, p2[1] + nz * r2)
+            seg.append((t1, t2, (ny, nz)))
+        total, drop = 0.0, None
+        for i in range(m):
+            a_in = math.atan2(seg[i - 1][2][1], seg[i - 1][2][0])
+            a_out = math.atan2(seg[i][2][1], seg[i][2][0])
+            sweep = (a_in - a_out) % (2 * math.pi)
+            if sweep > 1.5 * math.pi:
+                drop = i
+                break
+            total += cs[i][1] * sweep + math.hypot(seg[i][1][0] - seg[i][0][0], seg[i][1][1] - seg[i][0][1])
+        if drop is None:
+            return total
+        cs.pop(drop)
+
+
+
+def road_wheel_pair(k, root, motion, loc, r, sx, f, n_bolts, paint):
+    """Double road wheel with rubber tyres on dished discs; f scales the widths (1 = a
+    0.58 m track), sx is the side (+1 right) whose face shows the bolts and hub."""
+    w = k.empty("road_wheel", loc, parent=root)
+    hw, cx0 = 0.085 * f, 0.16 * f
+    for s in (-1, 1):
+        cx = s * cx0
+        k.lathe("tyre", [(-hw, r * 0.78), (-hw, r * 0.95), (-hw + 0.015, r), (hw - 0.015, r), (hw, r * 0.95),
+                         (hw, r * 0.78)], "rubber", segs=40, loc=(cx, 0, 0), rot=AXLE_X, parent=w)
+        face = cx + s * hw
+        k.lathe("wheel_disc", [(0.0, 0.0), (0.0, r * 0.8), (s * 0.02, r * 0.76), (s * 0.04, r * 0.4),
+                               (s * 0.07, r * 0.3), (s * 0.07, 0.0)], paint, segs=40,
+                loc=(face - s * 0.02, 0, 0), rot=AXLE_X, parent=w)
+    face = cx0 + hw
+    for i in range(n_bolts):
+        a = 2 * math.pi * i / n_bolts
+        k.cylinder("wheel_bolt", 0.016 * f ** 0.5, 0.03, (sx * (face + 0.009), r * 0.6 * math.cos(a),
+                                                           r * 0.6 * math.sin(a)),
+                   "steel_worn", segs=6, rot=(0, sx * math.pi / 2, 0), parent=w, bevel=False)
+    k.cylinder("hub_cap", r * 0.24, 0.07, (sx * (face + 0.05), 0, 0), "gunmetal", segs=20,
+               rot=(0, sx * math.pi / 2, 0), parent=w, radius_top=r * 0.2, bevel=0.008)
+    k.cylinder("hub_nut", r * 0.07, 0.03, (sx * (face + 0.12), 0, 0), "brass", segs=12,
+               rot=(0, sx * math.pi / 2, 0), parent=w, bevel=False)
+    motion.wheel(w, r)
+    return w
+
+
+def idler(k, root, motion, loc, r, sx, f, n_bolts, paint, worn):
+    """Front idler: two steel rims on dished discs, with the track adjuster crank."""
+    w = k.empty("idler", loc, parent=root)
+    hw, cx0 = 0.07 * f, 0.16 * f
+    for s in (-1, 1):
+        k.lathe("idler_rim", [(-hw, r * 0.8), (-hw, r), (hw, r), (hw, r * 0.8)], "steel_worn", segs=40,
+                loc=(s * cx0, 0, 0), rot=AXLE_X, parent=w)
+        k.lathe("idler_disc", [(0.0, 0.0), (0.0, r * 0.82), (s * 0.03, r * 0.7), (s * 0.06, r * 0.3),
+                               (s * 0.06, 0.0)], paint, segs=40, loc=(s * (cx0 + 0.04 * f), 0, 0), rot=AXLE_X,
+                parent=w)
+    face = cx0 + 0.04 * f + 0.044
+    for i in range(n_bolts):
+        a = 2 * math.pi * i / n_bolts
+        k.cylinder("idler_bolt", 0.015 * f ** 0.5, 0.03, (sx * face, r * 0.52 * math.cos(a), r * 0.52 * math.sin(a)),
+                   "steel_worn", segs=6, rot=(0, sx * math.pi / 2, 0), parent=w, bevel=False)
+    k.cylinder("idler_hub", r * 0.26, 0.08, (sx * (face + 0.016), 0, 0), "gunmetal", segs=18,
+               rot=(0, sx * math.pi / 2, 0), parent=w, radius_top=r * 0.2, bevel=0.008)
+    x = loc[0]
+    k.beam("idler_crank", (x - sx * 0.36 * f, loc[1] - 0.35 * f, loc[2] + 0.1 * f), (x - sx * 0.23 * f, loc[1], loc[2]),
+           (0.1 * f, 0.12 * f), worn, parent=root, bevel=0.01)
+    motion.wheel(w, r)
+    return w
+
+
+def sprocket(k, root, motion, loc, r, sx, f, n_teeth, paint, worn, tooth_mat):
+    """Rear drive sprocket: two toothed rings (pitch radius r), dished cover, final drive."""
+    w = k.empty("sprocket", loc, parent=root)
+    cx0 = 0.13 * f
+    for s in (-1, 1):
+        k.lathe("sprocket_ring", [(-0.035 * f, r * 0.6), (-0.035 * f, r * 0.86), (0.035 * f, r * 0.86),
+                                  (0.035 * f, r * 0.6)], worn, segs=40, loc=(s * cx0, 0, 0), rot=AXLE_X, parent=w)
+        for i in range(n_teeth):
+            a = 2 * math.pi * (i + 0.5) / n_teeth
+            k.box("sprocket_tooth", (0.07 * f, 0.075 * r / 0.33, r * 0.3),
+                  (s * cx0, r * 0.94 * math.cos(a), r * 0.94 * math.sin(a)),
+                  tooth_mat, rot=(a - math.pi / 2, 0, 0), parent=w, bevel=0.01)
+    k.lathe("sprocket_disc", [(0.0, 0.0), (0.0, r * 0.66), (sx * 0.05, r * 0.6), (sx * 0.1, r * 0.3),
+                              (sx * 0.12, 0.0)], paint, segs=40, loc=(sx * (cx0 + 0.04 * f), 0, 0), rot=AXLE_X,
+            parent=w)
+    face = cx0 + 0.04 * f + 0.083
+    for i in range(n_teeth):
+        a = 2 * math.pi * i / n_teeth
+        k.cylinder("sprocket_bolt", 0.016 * f ** 0.5, 0.03, (sx * face, r * 0.4 * math.cos(a), r * 0.4 * math.sin(a)),
+                   "steel_worn", segs=6, rot=(0, sx * math.pi / 2, 0), parent=w, bevel=False)
+    k.cylinder("sprocket_hub", r * 0.24, 0.06, (sx * (face + 0.037), 0, 0), "brass", segs=18,
+               rot=(0, sx * math.pi / 2, 0), parent=w, radius_top=r * 0.18, bevel=0.008)
+    x = loc[0]
+    x0 = min(x - sx * 0.48 * f, x - sx * 0.18 * f)
+    k.cylinder("final_drive", 0.3 * f ** 0.7, 0.3 * f, (x0, loc[1], loc[2]), worn, segs=24,
+               rot=(0, math.pi / 2, 0), parent=root, bevel=0.02)
+    motion.wheel(w, r)
+    return w

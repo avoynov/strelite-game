@@ -78,7 +78,7 @@ def _hull(k, root):
         # side door between the 2nd and 3rd axles, on the upper sloped side
         tilt = math.atan2(1.43 - 1.1, 2.02 - 1.36)
         door = k.empty("door", (sx * 1.27, 0.05, 1.7), parent=root)
-        door.rotation_euler = (0, sx * tilt, 0)
+        door.rotation_euler = (0, -sx * tilt, 0)
         k.box("door_plate", (0.04, 0.8, 0.58), (sx * 0.02, 0, 0), WORN, parent=door, bevel=0.008)
         for dz in (-0.18, 0.18):
             k.cylinder("door_hinge", 0.025, 0.12, (sx * 0.04, -0.42, dz), "brass", segs=10, parent=door, bevel=False)
@@ -86,7 +86,7 @@ def _hull(k, root):
         # firing ports and vision blocks along the upper side
         for y in (1.75, -1.0, -1.7, -2.6):
             port = k.empty("firing_port", (sx * 1.26, y, 1.72), parent=root)
-            port.rotation_euler = (0, sx * tilt, 0)
+            port.rotation_euler = (0, -sx * tilt, 0)
             k.cylinder("port_ball", 0.075, 0.05, (sx * 0.02, 0, 0), "gunmetal", segs=14, rot=(0, math.pi / 2, 0),
                        parent=port, bevel=0.01)
             k.box("vision_block", (0.04, 0.2, 0.07), (sx * 0.02, 0, 0.17), "glass", parent=port, bevel=False)
@@ -147,7 +147,7 @@ def _deck(k, root):
         k.box("faction_band", (1.1, 0.32, 0.012), (sx * 0.55, 0.6, 2.037), fx.RED, rot=(0, sx * 0.018, 0),
               parent=root, bevel=False)
         k.box("faction_band", (0.012, 0.32, 0.74), (sx * (1.265 + 0.007), 0.6, 1.69 + 0.004), fx.RED,
-              rot=(0, sx * tilt, 0), parent=root, bevel=False)
+              rot=(0, -sx * tilt, 0), parent=root, bevel=False)
     # canvas tarpaulin rolled and strapped across the rear deck, pennant on the right rear corner
     k.cylinder("tarp_roll", 0.15, 1.5, (0, -3.42, 2.19), "canvas", segs=20, rot=(0, math.pi / 2, 0),
                parent=root, bevel=0.03)
