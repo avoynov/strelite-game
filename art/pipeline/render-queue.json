@@ -3,14 +3,6 @@
  "branch": "claude/project-thread-83mb8u",
  "towers": {},
  "projectiles": [],
- "enemies": [
-  "infantry",
-  "truck",
-  "apc",
-  "tank",
-  "bikers",
-  "fortress",
-  "airship"
- ],
+ "enemies": [],
  "portraits": {}
 }
