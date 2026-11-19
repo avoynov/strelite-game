@@ -152,6 +152,8 @@ async function start(): Promise<void> {
   };
   baseStore.settle();
   syncLab();
+  /** A battle's takings with the full Fortress set's share on top. */
+  const withBonus = (gold: number) => Math.round(gold * (1 + research.upgrades().goldBonus));
   /** Once an attack on the base is over: its reward, and (base lost) what the remains sold for. */
   let baseResult: { bonus: number; sale: number } | null = null;
 
@@ -331,11 +333,17 @@ async function start(): Promise<void> {
   });
   document.body.appendChild(levels.el);
 
+  /** The research screen shows each gun from the same three-quarter angle as the arsenal at rest. */
+  const LAB_FRAME = 28;
   const lab = new Lab({
     state: () => research.state,
     lab: () => research.lab,
     start: (id) => research.start(id),
     speed: research.speed,
+    portrait: (def, level) =>
+      portraits?.has(def) ? portraits.portrait(def, level, LAB_FRAME, art?.manifest.directions ?? 32) : art?.portrait(def, level, LAB_FRAME),
+    onArt: (fn) => art?.onChange(fn) ?? (() => {}),
+    celebrate: () => audio.play('waveClear'),
     close: () => hud.update(),
   });
   document.body.appendChild(lab.el);
@@ -562,7 +570,7 @@ async function start(): Promise<void> {
       if (game.base) {
         // The base: kills already went to the treasury; the defence reward comes on top.
         const won = game.phase === 'won';
-        banked = baseTakings(game.goldEarned, won, game.level);
+        banked = withBonus(baseTakings(game.goldEarned, won, game.level));
         research.bank(banked);
         if (won) {
           saveBase();
@@ -578,7 +586,7 @@ async function start(): Promise<void> {
           baseResult = { bonus: banked, sale };
         }
       } else {
-        banked = battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level);
+        banked = withBonus(battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level));
         research.bank(banked);
         if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
       }
