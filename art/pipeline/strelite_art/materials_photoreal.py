@@ -61,6 +61,10 @@ SPEC = {
     # --- buildings (models/hq.py, lab.py): dressed and pale stone, roof slate, verdigris copper
     "stone_dressed": ("stone", dict(light=(0.56, 0.52, 0.46), dark=(0.44, 0.41, 0.37))),
     "stone_pale":    ("stone", dict(light=(0.74, 0.71, 0.64), dark=(0.63, 0.60, 0.54))),
+    # damage states (damage.py): burnt timber and ash/soot on the ground of a wreck
+    "timber_charred": ("timber", dict(light=(0.085, 0.07, 0.06), dark=(0.025, 0.02, 0.018), rough=0.92, weather=0.1,
+                                      dust=0.35, checks=1.6)),
+    "ash":           ("plain", dict(color=(0.075, 0.07, 0.065), rough=0.95, dust=0.5)),
     "slate":         ("plain", dict(color=(0.11, 0.12, 0.13), rough=0.55, dust=0.35)),
     "verdigris":     ("plain", dict(color=(0.30, 0.50, 0.42), rough=0.6, dust=0.3)),
     "plaster":       ("plain", dict(color=(0.62, 0.58, 0.50), rough=0.85, dust=0.6)),
