@@ -8,12 +8,24 @@ Each job uploads a fragment directory:
 
     python3 ci_merge.py <fragments dir> <public/art>
 """
+import ast
 import json
 import os
 import shutil
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def constant(module, name):
+    """A literal module constant read from the source: the merge job has no numpy, so the
+    pack modules cannot be imported here."""
+    with open(os.path.join(HERE, f"{module}.py")) as f:
+        tree = ast.parse(f.read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", None) == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise KeyError(f"{module}.{name}")
 
 
 def merge_levels(known, new):
@@ -25,13 +37,10 @@ def merge_levels(known, new):
     return out
 
 
-PORTRAIT_ID = {"ballista": "crossbow"}   # = pack_atlas.GAME_ID (not imported: the merge job has no numpy)
-
-
 def merge_portraits(frag_path, path, level, model):
     """portraits.json: each portrait job adds only the level it rendered (its fragment also
     carries the older entries it started from, which must not overwrite fresher ones)."""
-    gid = PORTRAIT_ID.get(model, model)
+    gid = constant("pack_atlas", "GAME_ID").get(model, model)
     with open(frag_path) as f:
         frag = json.load(f)
     frag["guns"] = {gid: {"levels": [lv for lv in frag["guns"].get(gid, {}).get("levels", [])
@@ -69,9 +78,8 @@ def main(frags, dst):
                             job["level"], job["model"])
             print(f"[merge] {job}")
             continue
-        from pack_atlas import GAME_ID as TID
-        from pack_enemies import GAME_ID as EID
-        model = (EID if job["kind"] == "enemy" else TID).get(job["model"], job["model"])
+        ids = constant("pack_enemies" if job["kind"] == "enemy" else "pack_atlas", "GAME_ID")
+        model = ids.get(job["model"], job["model"])
         for k, v in frag.items():                      # top-level notes and constants
             if k not in ("towers", "enemies", "projectiles"):
                 manifest[k] = v
