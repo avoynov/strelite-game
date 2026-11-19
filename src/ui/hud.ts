@@ -380,7 +380,7 @@ export class Hud {
       const label = price.kind === 'rebuild' ? t(price.cost ? 'building.rebuildIt' : 'building.rebuildFree') : t('building.upgrade', { n: level + 2 });
       jobBtn = `<button class="btn${ruined ? ' primary' : ''}" data-action="job" data-def="${what}" ${err && err !== 'noBuilder' ? 'disabled' : ''}>${label}${price.cost ? `<span class="cost"><span class="ico ico-gold"></span>${price.cost}</span>` : ''}<span class="lab-time">${formatDuration(price.seconds / base.speed)}</span></button>`;
     } else if (!ruined) jobBtn = `<button class="btn" disabled>${t('building.max')}</button>`;
-    let fx = '';
+    let fx: string;
     let main = '';
     if (ruined) fx = t(`ruin.${what}`);
     else if (what === 'hq') fx = t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun });

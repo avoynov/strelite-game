@@ -7,7 +7,8 @@ import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
  * rest of its page. The next page appears once the player reaches it.
  */
 
-const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
+/** Missions from the muster; the base itself is not a level. */
+const MODES: readonly Mode[] = ['path', 'arc'];
 
 export interface LevelsCallbacks {
   /** Highest map level won (0 for none). */
@@ -17,8 +18,6 @@ export interface LevelsCallbacks {
   mode(): Mode;
   setMode(mode: Mode): void;
   play(level: number): void;
-  /** Siege mode: the next attack on the player's base. */
-  attack(): number;
   close(): void;
 }
 
@@ -86,7 +85,6 @@ export class LevelSelect {
   private render(): void {
     const won = this.cb.won();
     const current = this.cb.current();
-    const base = this.cb.mode() === 'siege';
     const pages = levelPages(won);
     this.page = Math.min(Math.max(0, this.page), pages - 1);
     const from = this.page * LEVELS_PER_PAGE + 1;
@@ -104,25 +102,23 @@ export class LevelSelect {
     this.el.innerHTML = `
       <header class="lab-head">
         <div>
-          <p class="lab-kicker">${t('levels.kicker')}</p>
+          <p class="lab-kicker">${t('building.muster')}</p>
           <h1 class="lab-title">${t('levels.title')}</h1>
         </div>
       </header>
       <div class="lv-modes" role="tablist">
         ${MODES.map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
       </div>
-      ${base
-        ? `<div class="lv-base"><p>${t('levels.baseNote')}</p><button class="btn primary" data-lv="${this.cb.attack()}">${t('action.enterBase', { n: this.cb.attack() })}</button></div>`
-        : pages > 1
+      ${pages > 1
         ? `<nav class="lv-pages">
             <button class="chip" data-lv="prev" ${this.page === 0 ? 'disabled' : ''} aria-label="${t('levels.prev')}">‹</button>
             <span>${t('levels.range', { from, to })}</span>
             <button class="chip" data-lv="next" ${this.page >= pages - 1 ? 'disabled' : ''} aria-label="${t('levels.nextPage')}">›</button>
           </nav>`
         : ''}
-      ${base ? '' : `<ol class="lv-list">${items.join('')}</ol>`}
+      <ol class="lv-list">${items.join('')}</ol>
       <footer class="lab-foot">
-        <p class="lv-note">${base ? '' : t('levels.replay')}</p>
+        <p class="lv-note">${t('levels.replay')}</p>
         <button class="btn" data-lv="close">${t('action.back')}</button>
       </footer>`;
   }

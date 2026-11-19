@@ -10,7 +10,9 @@ export interface PauseCallbacks {
   setQuality(q: QualityChoice): void;
   installWay(): InstallWay;
   install(): void;
-  openLevels(): void;
+  /** In the base the menu is the settings; in a mission it also leads back to the base. */
+  inBase(): boolean;
+  toBase(): void;
   /** The menu closed: play on. */
   resume(): void;
 }
@@ -62,9 +64,9 @@ export class PauseMenu {
           if (this.cb.installWay() === 'ios') this.iosHelp = !this.iosHelp;
           else this.cb.install();
           break;
-        case 'levels':
+        case 'toBase':
           this.el.hidden = true;
-          this.cb.openLevels();
+          this.cb.toBase();
           return;
       }
       this.render();
@@ -126,14 +128,15 @@ export class PauseMenu {
             : ''}
         </section>`
       : '';
+    const base = this.cb.inBase();
     this.el.innerHTML = `
       <div class="pm-card">
         <header class="pm-head">
-          <p class="lab-kicker">${t('pause.kicker')}</p>
-          <h1 class="lab-title">${t('pause.title')}</h1>
+          <p class="lab-kicker">${t(base ? 'pause.settingsKicker' : 'pause.kicker')}</p>
+          <h1 class="lab-title">${t(base ? 'pause.settings' : 'pause.title')}</h1>
         </header>
         <button class="btn primary pm-resume" data-pm="resume">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>${t('pause.resume')}
+          ${base ? t('action.back') : `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>${t('pause.resume')}`}
         </button>
         <section class="pm-group">
           <div class="pm-row">
@@ -159,9 +162,7 @@ export class PauseMenu {
           </div>
         </section>
         ${install}
-        <footer class="pm-foot">
-          <button class="btn" data-pm="levels">${t('action.levels')}</button>
-        </footer>
+        ${base ? '' : `<footer class="pm-foot"><button class="btn" data-pm="toBase">${t('action.toBase')}</button></footer>`}
       </div>`;
   }
 }
