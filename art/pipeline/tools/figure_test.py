@@ -32,7 +32,8 @@ model = importlib.import_module(f"strelite_art.models.{a.model}")
 materials.clear_cache()
 frame_m = a.frame_m or model.SPRITE_FRAME_M
 size = int(round(frame_m * a.ppm / 2)) * 2
-scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m, ground="patch",
+scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m,
+                          ground="none" if getattr(model, "FLYING", False) else "patch",
                           target_z=a.target_z, projection="ortho", catcher_hole=0.0)
 scene.render.film_transparent = True
 scene.cycles.seed = 1

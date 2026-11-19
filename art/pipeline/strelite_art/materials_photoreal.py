@@ -92,6 +92,9 @@ SPEC = {
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
     "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=0.9, rust=0.7)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
+    # doped envelope fabric of the airship (slate dope over linen), two batches for the gores
+    "canvas_doped":      ("cloth", dict(color=(0.36, 0.37, 0.36), dust=0.25, wrinkle=3.0)),
+    "canvas_doped_dark": ("cloth", dict(color=(0.29, 0.30, 0.30), dust=0.25, wrinkle=3.0)),
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
     # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)
     "tunic_slate":   ("cloth", dict(color=(0.27, 0.285, 0.28), alt=(0.24, 0.25, 0.245), dust=0.35, wrinkle=9.0)),
