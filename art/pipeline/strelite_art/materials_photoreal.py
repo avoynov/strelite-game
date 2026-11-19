@@ -90,7 +90,7 @@ SPEC = {
     "paint_steel":   ("painted", dict(color=(0.30, 0.33, 0.35), rough=0.42, wear=0.8, dust=0.5)),
     "paint_blue":    ("painted", dict(color=(0.08, 0.16, 0.42), rough=0.45, wear=0.6, dust=0.3)),
     "paint_enemy_worn": ("painted", dict(color=ENEMY_GREY, rough=0.58, wear=1.6, dust=0.8)),
-    "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=1.8, rust=0.6)),
+    "track_steel":   ("metal", dict(color=(0.20, 0.19, 0.18), rough=0.55, dust=0.9, rust=0.7)),
     "canvas":        ("cloth", dict(color=(0.27, 0.27, 0.22), alt=(0.23, 0.24, 0.20), dust=0.5, wrinkle=5.0)),
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
     # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)

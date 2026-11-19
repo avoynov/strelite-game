@@ -251,3 +251,86 @@ def hull(k, name, sections, mat, parent, bevel=0.012):
     bm.to_mesh(obj.data)
     bm.free()
     return k._finish(obj, mat, bevel=bevel, parent=parent)
+
+
+# ---------------------------------------------------------------------------
+# tracks of real tanks: a belt round sprocket, road wheels and idler
+def belt(circles):
+    """Closed belt (link centreline) round circles [(y, z, r), ...] listed clockwise as
+    seen from +X with +Y to the right: front idler, the road wheels' bottoms front to
+    rear, the sprocket, then any wheels the top run rests on, rear to front. Circles the
+    belt does not touch (inside the hull of the others) are dropped. Returns
+    (path, total): path(s) -> (Vector point, pitch angle); s grows along the travel, so
+    the bottom run moves backward (-Y) as s grows."""
+    cs = [(Vector((y, z)), r) for y, z, r in circles]
+    while True:
+        m = len(cs)
+        seg = []
+        for i in range(m):
+            (p1, r1), (p2, r2) = cs[i], cs[(i + 1) % m]
+            d = p2 - p1
+            ln = d.length
+            dh = d / ln
+            nl = Vector((-dh.y, dh.x))
+            a = (r1 - r2) / ln
+            n = dh * a + nl * math.sqrt(max(0.0, 1 - a * a))
+            seg.append((p1 + n * r1, p2 + n * r2, n))
+        arcs, drop = [], None
+        for i in range(m):
+            a_in = math.atan2(seg[i - 1][2].y, seg[i - 1][2].x)
+            a_out = math.atan2(seg[i][2].y, seg[i][2].x)
+            sweep = (a_in - a_out) % (2 * math.pi)
+            if sweep > 1.5 * math.pi:
+                drop = i
+                break
+            arcs.append((a_in, sweep))
+        if drop is None:
+            break
+        cs.pop(drop)
+    parts, total = [], 0.0
+    for i in range(len(cs)):
+        (c, r), (a_in, sweep) = cs[i], arcs[i]
+        parts.append(("arc", total, r * sweep, c, r, a_in))
+        total += r * sweep
+        t1, t2, _ = seg[i]
+        parts.append(("line", total, (t2 - t1).length, t1, t2, None))
+        total += (t2 - t1).length
+
+    def at(s):
+        s %= total
+        for kind, s0, ln, a, b, c in parts:
+            if s < s0 + ln or (kind, s0, ln) == parts[-1][:3]:
+                u = s - s0
+                if kind == "arc":
+                    ang = c - u / b
+                    q = a + Vector((math.cos(ang), math.sin(ang))) * b
+                    return Vector((0.0, q.x, q.y)), ang - math.pi / 2
+                d = (b - a)
+                q = a + d * (u / ln if ln else 0.0)
+                return Vector((0.0, q.x, q.y)), math.atan2(d.y, d.x)
+    return at, total
+
+
+def belt_links(k, parent, motion, x, path, total, n, width, mat, thick=0.06, horn=True):
+    """n track links spaced evenly on a belt path at x; each link is a shoe with an
+    outside grouser, an inside guide horn and the pin. Moves with motion.set."""
+    step = total / n
+
+    def placed(s):
+        q, phi = path(s)
+        return Vector((x, q.y, q.z)), phi
+    objs = []
+    for i in range(n):
+        p, phi = placed(i * step)
+        e = k.empty("link", p, parent=parent)
+        e.rotation_euler = (phi, 0, 0)
+        k.box("shoe", (width, step * 0.86, thick), (0, 0, 0), mat, parent=e, bevel=0.008)
+        k.box("grouser", (width * 0.94, 0.04, 0.028), (0, -step * 0.15, thick / 2 + 0.012), mat, parent=e,
+              bevel=0.006)
+        if horn:
+            k.box("guide_horn", (0.06, step * 0.5, 0.1), (0, 0, -thick / 2 - 0.045), mat, parent=e, bevel=0.01)
+        k.cylinder("pin", 0.02, width + 0.05, (-width / 2 - 0.025, step / 2, 0), "steel_worn", segs=8,
+                   rot=(0, math.pi / 2, 0), parent=e, bevel=False)
+        objs.append((e, i * step))
+    motion.links.append((placed, objs))
+    return step
