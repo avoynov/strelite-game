@@ -317,7 +317,13 @@
        -0.977,
        2.958
       ]
-     ]
+     ],
+     "states": {
+      "wreck": {
+       "sheet": "towers/howitzer_wreck",
+       "frame": "howitzer_L1_wreck"
+      }
+     }
     },
     {
      "level": 2,
@@ -617,7 +623,13 @@
        -0.977,
        2.958
       ]
-     ]
+     ],
+     "states": {
+      "wreck": {
+       "sheet": "towers/howitzer_wreck",
+       "frame": "howitzer_L2_wreck"
+      }
+     }
     },
     {
      "level": 3,
@@ -917,7 +929,13 @@
        -1.182,
        3.401
       ]
-     ]
+     ],
+     "states": {
+      "wreck": {
+       "sheet": "towers/howitzer_wreck",
+       "frame": "howitzer_L3_wreck"
+      }
+     }
     },
     {
      "level": 4,
@@ -1229,6 +1247,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/howitzer_wreck",
+       "frame": "howitzer_L4_wreck"
+      }
      }
     },
     {
@@ -1541,6 +1565,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/howitzer_wreck",
+       "frame": "howitzer_L5_wreck"
+      }
      }
     }
    ],
@@ -1866,6 +1896,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/zis3_wreck",
+       "frame": "zis3_L1_wreck"
+      }
      }
     },
     {
@@ -2166,7 +2202,13 @@
        -0.758,
        1.504
       ]
-     ]
+     ],
+     "states": {
+      "wreck": {
+       "sheet": "towers/zis3_wreck",
+       "frame": "zis3_L2_wreck"
+      }
+     }
     },
     {
      "level": 3,
@@ -2466,7 +2508,13 @@
        -0.758,
        0.954
       ]
-     ]
+     ],
+     "states": {
+      "wreck": {
+       "sheet": "towers/zis3_wreck",
+       "frame": "zis3_L3_wreck"
+      }
+     }
     },
     {
      "level": 4,
@@ -2778,6 +2826,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/zis3_wreck",
+       "frame": "zis3_L4_wreck"
+      }
      }
     },
     {
@@ -3090,6 +3144,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/zis3_wreck",
+       "frame": "zis3_L5_wreck"
+      }
      }
     }
    ],
@@ -3414,6 +3474,12 @@
       "reloadFrom": 12,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/trebuchet_wreck",
+       "frame": "trebuchet_L1_wreck"
+      }
      }
     },
     {
@@ -3726,6 +3792,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/trebuchet_wreck",
+       "frame": "trebuchet_L2_wreck"
+      }
      }
     },
     {
@@ -4038,6 +4110,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/trebuchet_wreck",
+       "frame": "trebuchet_L3_wreck"
+      }
      }
     },
     {
@@ -4350,6 +4428,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/trebuchet_wreck",
+       "frame": "trebuchet_L4_wreck"
+      }
      }
     },
     {
@@ -4662,6 +4746,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/trebuchet_wreck",
+       "frame": "trebuchet_L5_wreck"
+      }
      }
     }
    ],
@@ -4980,6 +5070,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/greekfire_wreck",
+       "frame": "greekfire_L1_wreck"
+      }
      }
     },
     {
@@ -5293,6 +5389,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/greekfire_wreck",
+       "frame": "greekfire_L2_wreck"
+      }
      }
     },
     {
@@ -5606,6 +5708,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/greekfire_wreck",
+       "frame": "greekfire_L3_wreck"
+      }
      }
     },
     {
@@ -5919,6 +6027,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/greekfire_wreck",
+       "frame": "greekfire_L4_wreck"
+      }
      }
     },
     {
@@ -6232,6 +6346,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/greekfire_wreck",
+       "frame": "greekfire_L5_wreck"
+      }
      }
     }
    ],
@@ -6556,6 +6676,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/railgun_wreck",
+       "frame": "railgun_L1_wreck"
+      }
      }
     },
     {
@@ -6868,6 +6994,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/railgun_wreck",
+       "frame": "railgun_L2_wreck"
+      }
      }
     },
     {
@@ -7180,6 +7312,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/railgun_wreck",
+       "frame": "railgun_L3_wreck"
+      }
      }
     },
     {
@@ -7492,6 +7630,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/railgun_wreck",
+       "frame": "railgun_L4_wreck"
+      }
      }
     },
     {
@@ -7804,6 +7948,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/railgun_wreck",
+       "frame": "railgun_L5_wreck"
+      }
      }
     }
    ],
@@ -8129,6 +8279,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/scorpion_wreck",
+       "frame": "scorpion_L1_wreck"
+      }
      }
     },
     {
@@ -8441,6 +8597,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/scorpion_wreck",
+       "frame": "scorpion_L2_wreck"
+      }
      }
     },
     {
@@ -8753,6 +8915,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/scorpion_wreck",
+       "frame": "scorpion_L3_wreck"
+      }
      }
     },
     {
@@ -9065,6 +9233,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/scorpion_wreck",
+       "frame": "scorpion_L4_wreck"
+      }
      }
     },
     {
@@ -9377,6 +9551,12 @@
       "loop": false,
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/scorpion_wreck",
+       "frame": "scorpion_L5_wreck"
+      }
      }
     }
    ],
@@ -9700,6 +9880,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/crossbow_wreck",
+       "frame": "crossbow_L1_wreck"
+      }
      }
     },
     {
@@ -10013,6 +10199,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/crossbow_wreck",
+       "frame": "crossbow_L2_wreck"
+      }
      }
     },
     {
@@ -10326,6 +10518,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/crossbow_wreck",
+       "frame": "crossbow_L3_wreck"
+      }
      }
     },
     {
@@ -10639,6 +10837,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/crossbow_wreck",
+       "frame": "crossbow_L4_wreck"
+      }
      }
     },
     {
@@ -10952,6 +11156,12 @@
       "frameForAim": "DD = Math.round(aim / (2 * Math.PI / dirs)) mod dirs, two digits",
       "use": "on a shot draw the frames of direction DD instead of the aim layer (base stays); frames 1..releaseFrame-1 at fps, the round leaves at releaseFrame (muzzle point), play on to reloadFrom-1, then spread reloadFrom..frames over the reload time; after the last frame show the aim layer again",
       "loopUse": "loop: one loop is one shot; repeat it while a target is in range (rate = fps / frames shots a second at full speed)"
+     },
+     "states": {
+      "wreck": {
+       "sheet": "towers/crossbow_wreck",
+       "frame": "crossbow_L5_wreck"
+      }
      }
     }
    ],
@@ -11359,7 +11569,31 @@
    "frameM": [
     15.0,
     19.0
-   ]
+   ],
+   "states": {
+    "sheet": "buildings/hq_states",
+    "damaged": [
+     "hq_L1_damaged",
+     "hq_L2_damaged",
+     "hq_L3_damaged",
+     "hq_L4_damaged",
+     "hq_L5_damaged"
+    ],
+    "rubble": [
+     "hq_L1_rubble",
+     "hq_L2_rubble",
+     "hq_L3_rubble",
+     "hq_L4_rubble",
+     "hq_L5_rubble"
+    ],
+    "occupied": [
+     "hq_L1_occupied",
+     "hq_L2_occupied",
+     "hq_L3_occupied",
+     "hq_L4_occupied",
+     "hq_L5_occupied"
+    ]
+   }
   },
   "lab": {
    "name": {
@@ -11379,8 +11613,160 @@
    "frameM": [
     15.0,
     19.0
-   ]
+   ],
+   "states": {
+    "sheet": "buildings/lab_states",
+    "damaged": [
+     "lab_L1_damaged",
+     "lab_L2_damaged",
+     "lab_L3_damaged",
+     "lab_L4_damaged",
+     "lab_L5_damaged"
+    ],
+    "rubble": [
+     "lab_L1_rubble",
+     "lab_L2_rubble",
+     "lab_L3_rubble",
+     "lab_L4_rubble",
+     "lab_L5_rubble"
+    ]
+   }
+  },
+  "muster": {
+   "name": {
+    "bg": "Военно свикване",
+    "en": "Muster hall"
+   },
+   "sheet": "buildings/muster",
+   "levels": [
+    "muster_L1",
+    "muster_L2",
+    "muster_L3",
+    "muster_L4",
+    "muster_L5"
+   ],
+   "tiles": 2,
+   "footprintM": 4.0,
+   "frameM": [
+    15.0,
+    19.0
+   ],
+   "states": {
+    "sheet": "buildings/muster_states",
+    "damaged": [
+     "muster_L1_damaged",
+     "muster_L2_damaged",
+     "muster_L3_damaged",
+     "muster_L4_damaged",
+     "muster_L5_damaged"
+    ],
+    "rubble": [
+     "muster_L1_rubble",
+     "muster_L2_rubble",
+     "muster_L3_rubble",
+     "muster_L4_rubble",
+     "muster_L5_rubble"
+    ]
+   }
+  },
+  "arsenal": {
+   "name": {
+    "bg": "Арсенал",
+    "en": "Arsenal"
+   },
+   "sheet": "buildings/arsenal",
+   "levels": [
+    "arsenal_L1",
+    "arsenal_L2",
+    "arsenal_L3",
+    "arsenal_L4",
+    "arsenal_L5"
+   ],
+   "tiles": 2,
+   "footprintM": 4.0,
+   "frameM": [
+    15.0,
+    19.0
+   ],
+   "states": {
+    "sheet": "buildings/arsenal_states",
+    "damaged": [
+     "arsenal_L1_damaged",
+     "arsenal_L2_damaged",
+     "arsenal_L3_damaged",
+     "arsenal_L4_damaged",
+     "arsenal_L5_damaged"
+    ],
+    "rubble": [
+     "arsenal_L1_rubble",
+     "arsenal_L2_rubble",
+     "arsenal_L3_rubble",
+     "arsenal_L4_rubble",
+     "arsenal_L5_rubble"
+    ]
+   }
+  },
+  "treasury": {
+   "name": {
+    "bg": "Хазна",
+    "en": "Treasury"
+   },
+   "sheet": "buildings/treasury",
+   "levels": [
+    "treasury_L1",
+    "treasury_L2",
+    "treasury_L3",
+    "treasury_L4",
+    "treasury_L5"
+   ],
+   "tiles": 2,
+   "footprintM": 4.0,
+   "frameM": [
+    15.0,
+    19.0
+   ],
+   "states": {
+    "sheet": "buildings/treasury_states",
+    "damaged": [
+     "treasury_L1_damaged",
+     "treasury_L2_damaged",
+     "treasury_L3_damaged",
+     "treasury_L4_damaged",
+     "treasury_L5_damaged"
+    ],
+    "rubble": [
+     "treasury_L1_rubble",
+     "treasury_L2_rubble",
+     "treasury_L3_rubble",
+     "treasury_L4_rubble",
+     "treasury_L5_rubble"
+    ]
+   }
   }
  },
- "buildingsNote": "buildings/<id>@1x|@2x.json, frame <id>_L<n> for level n (1-based; the game's level index 0 = L1). Anchor = ground point of the building's centre (the middle of its 2x2 tiles); the frame is taller than wide, so anchor.y is below the middle. One static frame per level; draw in the normal depth sort with the guns."
+ "buildingsNote": "buildings/<id>@1x|@2x.json, frame <id>_L<n> for level n (1-based; the game's level index 0 = L1). Anchor = ground point of the building's centre (the middle of its 2x2 tiles); the frame is taller than wide, so anchor.y is below the middle. One static frame per level; draw in the normal depth sort with the guns. Damage: states.sheet (buildings/<id>_states@1x|@2x) holds states.damaged[n-1] (below half health: a breach in the front-right corner), states.rubble[n-1] (destroyed) and, for hq only, states.occupied[n-1] (taken by the Iron Concord); same frame size and anchor as the level frames. Put effects fire_burn + smoke_plume on damaged ones.",
+ "wreckNote": "towers.<id>.levels[].states.wreck = {sheet, frame}: the destroyed gun, one static frame per level, drawn alone instead of base + aim, same anchor as the base frame. Damaged guns (below half health) keep their normal frames with the looping effects fire_small and smoke_plume on top.",
+ "allies": {
+  "raiders": {
+   "name": {
+    "bg": "Разузнавачи",
+    "en": "Raiders"
+   },
+   "placeholder": false,
+   "sheet": "enemies/raiders",
+   "frames": "raiders",
+   "directions": 16,
+   "lengthM": 3.4,
+   "radiusM": 1.4,
+   "move": {
+    "frames": 4,
+    "kind": "wheels",
+    "cycleM": 0.3560471674068433,
+    "fps": null,
+    "names": "raiders_DD_FF",
+    "animation": "raiders_DD_move"
+   }
+  }
+ },
+ "alliesNote": "allies/<id>: the player's own units (raiders = the party that rides out to provoke the enemy). Same sheet layout, headings and movement as enemies."
 }

@@ -449,6 +449,19 @@ Start every new object by copying the closest existing model and keeping its str
 
 **New building (base)** — `models/building.py` is the construction kit (masonry block by block with openings cut, log and plank walls, gable roofs of real shingles on a boarded deck, windows, doors, flag mast, crates, barrels). `render_buildings.py` renders one static frame per level (`SPRITE_WH_M`, `ANCHOR_FROM_BOTTOM_M`, own soil patch), `--review` makes the level sheet, `--pack` writes `buildings/<id>@1x|@2x`, frames `<id>_L<n>`, manifest key `buildings`. Doors and emblems face -Y and +X (the faces the camera sees). Each level: new material and one new machine; the silhouette stays.
 
+Built so far: `hq`, `lab`, `muster` (Военно свикване; its mark is a military horn on a post or tower at the +X side, from an ox horn to a crown of gilded fanfares), `arsenal` (two crossed barrels over the gate, a lifting rig in the yard), `treasury` (squat strongroom, gold pile left of the door, round vault door from L3). Give every new building one mark of this kind that reads at game zoom and grows with the level, so the player knows what it is for without a label.
+
+**Damage states (buildings and guns)** — `strelite_art/damage.py`, applied after `build()` and before `stamp()`; never model a damaged version by hand.
+
+- `damaged` (building below half health): a bowl-shaped breach at the front-right corner of the main body (found from the `core` objects, so name the inner fill of every building `core`). Parts above the bowl are cut with real geometry and capped, the inner fill is sliced and turned to `ash`, wood near the hole is charred (`timber_charred`), the removed volume lies below the hole as debris of the same materials.
+- `rubble` (destroyed building): everything cut to a ragged stump 0.2 to 1.3 m high, inner fills cut level, a mound of the removed materials inside, ash bed under it.
+- `wreck` (destroyed gun): the turret knocked askew (`tilt`), one side torn away by a blast near the edge of the footprint, paint scorched to `paint_soot`, wood charred, bright metals tarnished, cloth burnt, a scorched ash disc under it.
+- `occupied` (HQ taken by the Iron Concord): `damage.occupy()` then `damaged`: defender emblems become the cog-and-spear, blue paint turns oxblood, a long oxblood banner on the front wall, faction pennants on the highest points.
+- Render: `render_buildings.py --states normal damaged rubble occupied` (files `L<n>_<state>.png`, `--pack` adds `buildings.<id>.states = {sheet: buildings/<id>_states, damaged: [...], rubble: [...], occupied: [...]}`); `render_wrecks.py` (35 frames, `towers/<id>_wreck`, `towers.<id>.levels[].states.wreck = {sheet, frame}`). A damaged gun keeps its normal frames; the game adds the looping `fire_burn` and `smoke_plume` effects. All of it is about 25 minutes locally.
+- Review sheet: one level of every building in each state plus all gun wrecks side by side; check that the breach is on a face the camera sees and that the wreck still shows which gun it was.
+
+**Own units (allies)** — the player's units reuse an enemy model with the defenders' paint swapped in (`models/raiders.py`: 4BO green, `tunic_olive`, `cloth_blue`, defender emblem, blue pennant). Pack with `pack_enemies.py`; models in its `ALLIES` set go to the manifest key `allies`, not `enemies` (the art test checks every enemy id against the game).
+
 **New ground** — `render_ground.py --kind ... --name ...`: seamless in both screen directions, same pixels per metre, calm enough that units read on top of it.
 
 ## 13. Gotchas and lessons learned
