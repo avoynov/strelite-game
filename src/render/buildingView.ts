@@ -1,9 +1,11 @@
-import { Container, Graphics } from 'pixi.js';
+import { Container, Graphics, Sprite } from 'pixi.js';
+import type { TowerArt } from './towers/spriteTowerView';
 import { box, type Look } from './fenceView';
 import { depth, isoX, isoY } from './iso';
 
 /**
- * The base's buildings, drawn from simple shapes until there is art: the
+ * The base's buildings: the rendered art (one frame per level) when the
+ * manifest has it and the sheet has loaded, else drawn from simple shapes: the
  * headquarters (a stone keep that grows a storey and battlements with each
  * level, a flag on top) and the laboratory (a brick hall with a glass dome,
  * a brass chimney and, at higher levels, an annex and a mast). Coordinates
@@ -75,28 +77,57 @@ function drawLab(g: Graphics, level: number): void {
 export class BuildingView {
   readonly node = new Container();
   private key = '';
+  private level = 0;
+  private readonly off: (() => void) | undefined;
 
+  /**
+   * @param x, y  the building's centre in grid cells
+   * @param art   rendered art, or null for the drawn stand-in
+   * @param scale sprite scale that puts @1x art at real size on the board
+   */
   constructor(
     readonly kind: 'hq' | 'lab',
     x: number,
     y: number,
+    private readonly art: TowerArt | null = null,
+    private readonly scale = 1,
   ) {
     this.node.position.set(isoX(x, y), isoY(x, y));
     this.node.zIndex = depth(x, y);
+    // Redraw once the sheet arrives (or the zoom swaps @1x for @2x).
+    this.off = art?.onChange(() => this.draw());
   }
 
+  /** @param level 0-based, as in the base's state */
   update(level: number): void {
-    const key = `${level}`;
-    if (key === this.key) return;
-    this.key = key;
-    this.node.removeChildren().forEach((c) => c.destroy());
-    const g = new Graphics();
-    if (this.kind === 'hq') drawHq(g, level);
-    else drawLab(g, level);
-    this.node.addChild(g);
+    this.level = level;
+    this.draw();
   }
 
   destroy(): void {
+    this.off?.();
     this.node.destroy({ children: true });
+  }
+
+  private draw(): void {
+    const def = this.art?.manifest.buildings?.[this.kind];
+    const frame = def?.levels[Math.min(this.level, def.levels.length - 1)];
+    const tex = def && frame ? this.art!.sheetTexture(def.sheet, frame) : undefined;
+    const key = tex ? `${tex.uid}` : `drawn ${this.level}`;
+    if (key === this.key) return;
+    this.key = key;
+    this.node.removeChildren().forEach((c) => c.destroy());
+    if (tex) {
+      const sprite = new Sprite(tex);
+      // The frame is anchored at the building's ground centre (below the frame's middle).
+      sprite.anchor.set(tex.defaultAnchor?.x ?? 0.5, tex.defaultAnchor?.y ?? 0.5);
+      sprite.scale.set(this.scale);
+      this.node.addChild(sprite);
+      return;
+    }
+    const g = new Graphics();
+    if (this.kind === 'hq') drawHq(g, this.level);
+    else drawLab(g, this.level);
+    this.node.addChild(g);
   }
 }

@@ -496,7 +496,7 @@ export class BoardRenderer {
       if (!b) continue;
       let view = this.buildingViews.get(b.kind);
       if (!view) {
-        view = new BuildingView(b.kind, b.x, b.y);
+        view = new BuildingView(b.kind, b.x, b.y, this.art, this.artScale());
         this.objects.addChild(view.node);
         this.buildingViews.set(b.kind, view);
       }
