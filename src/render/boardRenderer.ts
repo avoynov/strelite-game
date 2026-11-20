@@ -509,19 +509,25 @@ export class BoardRenderer {
       }
       const state: BuildingState = b.kind === 'hq' && occupied && b.hp <= 0 ? 'occupied' : b.hp <= 0 ? 'rubble' : b.hp < b.maxHp / 2 ? 'damaged' : 'ok';
       view.update(b.level, state);
+      // Hit hard: a breach burns under a column of smoke; ruins only smoke.
+      if (state !== 'ok') {
+        this.effects?.hold(`smoke:${b.kind}`, 'smoke_plume', b.x, b.y, { size: 1.4, zBias: 1.5 });
+        if (state === 'damaged') this.effects?.hold(`fire:${b.kind}`, 'fire_burn', b.x + 0.3, b.y + 0.3, { size: 0.9, zBias: 1.4 });
+      }
     }
   }
 
-  /** The raiding party, while it rides: the defenders' riders (the bikers' art, in the player's colours until their own arrives). */
+  /** The raiding party, while it rides: the defenders' riders (the bikers' art, in the player's colours, until their own is there). */
   private syncRaid(): void {
     const riders = this.game.raiders();
     while (this.raiderViews.length > riders.length) this.raiderViews.pop()!.destroy();
     riders.forEach((r, i) => {
       let view = this.raiderViews[i];
       if (!view) {
-        const def = this.art?.manifest.enemies?.moto;
-        view = this.art && def ? new SpriteEnemyView(this.art, def, 'moto', this.artScale(), METRES_PER_TILE) : new PlaceholderEnemyView('moto', ENEMIES.moto.radius);
-        view.node.tint = 0x9fc4ff;
+        const own = this.art?.manifest.allies?.raiders;
+        const def = own ?? this.art?.manifest.enemies?.moto;
+        view = this.art && def ? new SpriteEnemyView(this.art, def, own ? 'raiders' : 'moto', this.artScale(), METRES_PER_TILE) : new PlaceholderEnemyView('moto', ENEMIES.moto.radius);
+        if (!own) view.node.tint = 0x9fc4ff;
         this.objects.addChild(view.node);
         this.raiderViews[i] = view;
       }
@@ -529,6 +535,10 @@ export class BoardRenderer {
       view.setHeading(r.heading);
       view.setHealth(1);
     });
+  }
+
+  private wreckArt(t: Tower): boolean {
+    return !!this.art?.level(t.def, t.level + 1)?.states?.wreck;
   }
 
   /**
@@ -561,9 +571,15 @@ export class BoardRenderer {
     for (const t of this.game.towers) {
       const view = this.towerViews.get(t.id)?.view;
       if (view) {
-        view.node.alpha = t.job?.kind === 'build' ? 0.45 : isWreck(t) ? 0.85 : 1;
-        // A wreck: burnt dark until the art's wreck frames arrive.
-        view.node.tint = isWreck(t) ? 0x4a4440 : 0xffffff;
+        const wreck = isWreck(t);
+        view.node.alpha = t.job?.kind === 'build' ? 0.45 : wreck && !this.wreckArt(t) ? 0.85 : 1;
+        // A wreck: the art's wreck frame, else the gun burnt dark.
+        const drawn = view.setWreck?.(wreck) ?? false;
+        view.node.tint = wreck && !drawn ? 0x4a4440 : 0xffffff;
+        if (wreck || t.hp < t.maxHp / 2) {
+          this.effects?.hold(`smoke:t${t.id}`, 'smoke_plume', t.x, t.y, { size: 0.5 + 0.35 * t.size, zBias: 1 });
+          if (!wreck) this.effects?.hold(`fire:t${t.id}`, 'fire_burn', t.x, t.y, { size: 0.3 + 0.25 * t.size, zBias: 0.9 });
+        }
       }
       if (!t.job) continue;
       const total = (gunJobSeconds(t.def, t.job.kind === 'build' ? 0 : t.job.kind === 'repair' ? t.level : t.level + 1) * 1000) / speed;

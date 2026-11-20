@@ -23,6 +23,8 @@ export interface TowerView {
   fire(reload: number): number;
   /** A stream weapon (the siphon) is pouring, or has stopped. */
   setFiring(on: boolean): void;
+  /** Siege mode: show the gun wrecked, or whole again. Returns true when the art draws the wreck itself. */
+  setWreck?(on: boolean): boolean;
   /** Advance the view's own animations by `dt` seconds. */
   update(dt: number): void;
   /** Where shots leave the barrel at the current aim: grid cells and metres above the ground. */
