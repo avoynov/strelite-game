@@ -1,6 +1,6 @@
 import { Container, Graphics, Sprite } from 'pixi.js';
 import type { TowerArt } from './towers/spriteTowerView';
-import { frameForAim, frameName, type EnemyArtDef } from './towers/towerArt';
+import { frameForAim, frameName, moveFrameName, type EnemyArtDef } from './towers/towerArt';
 import { depth, isoX, isoY, RISE, TILE_W } from './iso';
 
 /**
@@ -29,6 +29,8 @@ const KIT = {
 } as const;
 /** Height a flyer is drawn above its ground point, in tiles (stand-in; the airship art says its own). */
 export const FLY_HEIGHT = 1.2;
+/** A unit counts as standing once it has not moved for this long. */
+const STAND_AFTER_MS = 250;
 /** Added to a flyer's depth so it draws over everything on the ground. */
 const FLYER_Z = 10_000;
 
@@ -176,13 +178,19 @@ export class SpriteEnemyView implements EnemyView {
   private health = -1;
   private readonly off: () => void;
   private readonly flying: boolean;
+  /** Movement loop state: metres travelled, where it was last placed, when it last moved. */
+  private distanceM = 0;
+  private lastX = NaN;
+  private lastY = NaN;
+  private movedAt = -Infinity;
+  private readonly phase = Math.random();
 
   constructor(
     private readonly art: TowerArt,
     private readonly def: EnemyArtDef,
     readonly kind: string,
     scale: number,
-    metresPerTile: number,
+    private readonly metresPerTile: number,
   ) {
     this.sprite.anchor.set(0.5);
     this.sprite.scale.set(scale);
@@ -206,6 +214,14 @@ export class SpriteEnemyView implements EnemyView {
     this.node.position.set(isoX(gx, gy), isoY(gx, gy));
     // Flyers pass over everything on the ground.
     this.node.zIndex = depth(gx, gy) + (this.flying ? FLYER_Z : 0);
+    const d = Math.hypot(gx - this.lastX, gy - this.lastY);
+    if (d > 1e-4) {
+      this.distanceM += d * this.metresPerTile;
+      this.movedAt = performance.now();
+    }
+    this.lastX = gx;
+    this.lastY = gy;
+    if (this.def.move) this.refresh();
   }
 
   setHeading(heading: number): void {
@@ -232,8 +248,13 @@ export class SpriteEnemyView implements EnemyView {
   }
 
   private refresh(): void {
-    const tex = this.art.sheetTexture(this.def.sheet, frameName(this.def.frames, this.frame));
-    if (tex) this.sprite.texture = tex;
+    const move = this.def.move;
+    const now = performance.now();
+    // A unit that has not moved for a moment (firing at a wall, say) stands still; propellers always turn.
+    const moving = move && (move.fps || now - this.movedAt < STAND_AFTER_MS);
+    const name = moving ? moveFrameName(move, this.frame, this.distanceM, now / 1000, this.phase) : frameName(this.def.frames, this.frame);
+    const tex = this.art.sheetTexture(this.def.sheet, name) ?? this.art.sheetTexture(this.def.sheet, frameName(this.def.frames, this.frame));
+    if (tex && tex !== this.sprite.texture) this.sprite.texture = tex;
     this.sprite.visible = !!tex;
   }
 }

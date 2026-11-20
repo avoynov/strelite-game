@@ -109,6 +109,39 @@ export interface EnemyArtDef {
   /** Flyers: drawn this high over their ground point, with a shadow on the ground. */
   flying?: boolean;
   flightHeightM?: number;
+  /** Movement loop per heading; a unit standing still shows `${frames}_DD`. */
+  move?: EnemyMoveArt;
+}
+
+/**
+ * A movement loop: frames named by `names` with `DD` the heading and `FF` the
+ * frame. With `cycleM` the loop follows distance travelled (feet, wheels,
+ * tracks); with `fps` it follows time (an airship's propellers).
+ */
+export interface EnemyMoveArt {
+  frames: number;
+  kind?: string;
+  cycleM?: number | null;
+  fps?: number | null;
+  names: string;
+}
+
+/**
+ * Frame name of a movement loop for a heading frame. `phase` (0..1, random per
+ * unit) keeps a squad from stepping in lockstep.
+ */
+export function moveFrameName(move: EnemyMoveArt, dir: number, distanceM: number, seconds: number, phase: number): string {
+  const loop = move.cycleM ? distanceM / move.cycleM + phase : seconds * (move.fps ?? 0) / move.frames + phase;
+  const n = ((Math.floor(loop * move.frames) % move.frames) + move.frames) % move.frames;
+  return move.names.replace('DD', String(dir).padStart(2, '0')).replace('FF', String(n).padStart(2, '0'));
+}
+
+/** A base building: one frame per level (`levels[0]` is level 1), anchored at its ground centre. */
+export interface BuildingArtDef {
+  name?: { bg: string; en: string };
+  sheet: string;
+  levels: string[];
+  tiles: number;
 }
 
 /**
@@ -170,6 +203,8 @@ export interface TowerArtManifest {
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
   enemies?: Record<string, EnemyArtDef>;
+  /** The base's headquarters and laboratory. */
+  buildings?: Partial<Record<'hq' | 'lab', BuildingArtDef>>;
   /** Rounds seen in flight (bolts, stones), by gun id. */
   projectiles?: Record<string, ProjectileArtDef>;
   effects?: Record<string, EffectArtDef>;
