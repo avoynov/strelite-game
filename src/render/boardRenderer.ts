@@ -2,13 +2,12 @@ import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type T
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
 import { isWreck, type Building, type Fence, type Game, type Tower } from '../sim/game';
 import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT, type BuildingKind } from '../sim/base';
-import { t as tr } from '../i18n';
 import { BuildingView, type BuildingState } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
 import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
 import { FLY_HEIGHT, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
-import { depth, diamond, isoX, isoY, project, RISE, TILE_W, unproject } from './iso';
+import { depth, diamond, isoX, isoY, project, RISE, TILE_H, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
 import { PlaceholderTowerView } from './towers/placeholderTowerView';
@@ -114,7 +113,6 @@ export class BoardRenderer {
   private readonly fenceViews = new Map<number, FenceView>();
   private readonly buildingViews = new Map<BuildingKind, BuildingView>();
   /** The selected building's name, under it (like Clash of Clans: only while it is selected). */
-  private readonly label = new Text({ text: '', style: { fontFamily: 'system-ui, sans-serif', fontSize: 14, fontWeight: '700', fill: 0xffffff, stroke: { color: 0x000000, width: 4 }, align: 'center' } });
   /** The raid that provokes an attack: friendly riders. */
   private readonly raiderViews: PixiEnemyView[] = [];
   /** Base mode: the camera has been put on the base once. */
@@ -146,8 +144,7 @@ export class BoardRenderer {
   ) {
     this.objects.sortableChildren = true;
     this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots, this.rounds);
-    this.root.addChild(this.world, this.floats, this.label);
-    this.label.visible = false;
+    this.root.addChild(this.world, this.floats);
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
     this.effects = art ? new Effects(art, this.objects, this.artScale()) : null;
@@ -534,17 +531,27 @@ export class BoardRenderer {
     });
   }
 
-  /** The selected building's name under it, in screen space so it stays crisp. */
-  private placeLabel(selection: Selection | null): void {
-    const b = selection?.kind === 'building' ? this.game.building(selection.what) : null;
-    this.label.visible = !!b;
-    if (!b) return;
-    const name = tr(`building.${b.kind}`);
-    if (this.label.text !== name) this.label.text = name;
-    // Just below the building's front corner.
-    const p = this.gridToScreen(b.cx + b.size, b.cy + b.size);
-    this.label.anchor.set(0.5, 0);
-    this.label.position.set(Math.round(p.x), Math.round(p.y + 4));
+  /**
+   * Where the floating menu of the selection hangs, in CSS px: the footprint's
+   * horizontal centre, the top of the object (roughly, art height) and its front corner.
+   */
+  anchorOf(selection: Selection | null): { x: number; top: number; bottom: number } | null {
+    let f: { cx: number; cy: number; size: number; tall: number } | null = null;
+    if (selection?.kind === 'building') {
+      const b = this.game.building(selection.what);
+      if (b) f = { cx: b.cx, cy: b.cy, size: b.size, tall: 1.5 };
+    } else if (selection?.kind === 'tower') {
+      const t = this.game.towerById(selection.id);
+      if (t) f = { cx: t.cx, cy: t.cy, size: t.size, tall: 1.1 };
+    } else if (selection?.kind === 'fence') {
+      const fc = this.game.fenceById(selection.id);
+      if (fc) f = { cx: fc.cx, cy: fc.cy, size: 1, tall: 0.5 };
+    }
+    if (!f) return null;
+    const mid = this.gridToScreen(f.cx + f.size / 2, f.cy + f.size / 2);
+    const back = this.gridToScreen(f.cx, f.cy);
+    const front = this.gridToScreen(f.cx + f.size, f.cy + f.size);
+    return { x: mid.x, top: back.y - f.tall * f.size * TILE_H * this.camera.scale, bottom: front.y };
   }
 
   /** Siege mode: health bars over damaged guns and fences, and enemy shots; in the base, the builders' progress. */
@@ -896,7 +903,6 @@ export class BoardRenderer {
     if (this.game.hq) this.syncBuildings();
     this.syncEnemies(alpha);
     this.syncRaid();
-    this.placeLabel(selection);
     this.drawOverlay(selection, armed);
     this.drawShots(alpha, dtSeconds);
     this.effects?.update(dtSeconds);

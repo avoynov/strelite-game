@@ -822,3 +822,149 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .lt *, .lt *::before, .lt *::after { animation: none !important; transition: none !important; }
 }
+
+/* ============================================================ War paint
+ * One look for every screen: gunmetal plates with cut corners, brass edges,
+ * condensed capitals. No soft pills: everything is a stamped steel part.
+ * Circles stay only where they are round things (coins, medals, knobs).
+ */
+:root {
+  --display: 'Oswald', 'Arial Narrow', system-ui, sans-serif;
+  --brass: #d39a3f;
+  --brass-hi: #ffd27a;
+  --edge: rgba(211, 154, 63, 0.42);
+  --steel: linear-gradient(180deg, #262b24 0%, #171b15 55%, #10130e 100%);
+  --hot: #c4412b;
+  --c: 9px;
+  --cut4: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c));
+  --cut2: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+  --slant: polygon(var(--c) 0, 100% 0, calc(100% - var(--c)) 100%, 0 100%);
+  --radius: 0px;
+}
+
+/* Top bar: a steel strip with a brass seam and a notched end. */
+.hud-top {
+  background: var(--steel);
+  border-bottom: 0;
+  box-shadow: inset 0 -2px 0 var(--edge), 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.hud-top .stat {
+  min-height: 34px; padding: 0 12px 0 10px; border: 0;
+  background: rgba(0, 0, 0, 0.38); color: var(--text); font: inherit;
+  clip-path: var(--slant);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.hud-top .stat b { font: 600 18px/1 var(--display); letter-spacing: 0.02em; }
+.hud-top .wave { background: none; clip-path: none; padding: 0; font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em; }
+.chip {
+  border: 0; border-radius: 0; clip-path: var(--cut2);
+  background: linear-gradient(180deg, #343a31, #1e231b);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.4);
+  font: 600 15px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.chip:active:not(:disabled) { filter: brightness(1.2); }
+
+/* Bottom panel: an armoured plate, corners cut, a brass seam on top. */
+.hud-panel {
+  border: 0; border-radius: 0;
+  background: var(--steel);
+  clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%, 0 16px);
+  box-shadow: inset 0 2px 0 var(--edge);
+}
+
+.btn {
+  border: 0; border-radius: 0; clip-path: var(--cut2);
+  background: linear-gradient(180deg, #3a4036, #22271f);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+  font: 600 15px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.btn.primary {
+  background: linear-gradient(180deg, #ffd27a 0%, #e0a33a 45%, #a86d1c 100%);
+  color: #1b1306;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -3px 0 rgba(90, 52, 8, 0.6);
+}
+/* The battle button: hazard red with stripes, the loudest thing on screen. */
+.btn.go {
+  background:
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.16) 0 10px, transparent 10px 20px),
+    linear-gradient(180deg, #e0573a, #9b2d18);
+  color: #fff4e6; font-size: 18px; letter-spacing: 0.12em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  clip-path: var(--slant); --c: 16px;
+}
+.btn.go:disabled { opacity: 0.55; filter: saturate(0.4); }
+.btn .cost { font-family: system-ui, sans-serif; letter-spacing: 0; text-transform: none; font-size: 13px; }
+
+.card, .lv-mode, .lt-run, .lt-next, .ars-target, .pm-install, .lt-summary, .lt-banner {
+  border-radius: 0; clip-path: var(--cut2);
+}
+.card.armed { box-shadow: inset 0 0 0 2px var(--brass); }
+.gun-ico, .lt-mini-gun { border-radius: 0; clip-path: var(--cut2); --c: 7px; }
+.title, .end-card h2 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.title { font-size: 17px; }
+
+.toast {
+  border-radius: 0; clip-path: var(--slant); --c: 12px; padding: 9px 22px;
+  background: linear-gradient(180deg, rgba(40, 44, 36, 0.96), rgba(16, 19, 14, 0.96));
+  box-shadow: inset 0 -2px 0 var(--edge);
+  font: 500 15px/1.1 var(--display); letter-spacing: 0.04em;
+}
+.end-card {
+  border: 0; border-radius: 0; clip-path: var(--cut4); --c: 18px;
+  background: var(--steel); box-shadow: inset 0 3px 0 var(--edge);
+}
+.end-card h2 { font-size: 28px; color: var(--brass-hi); }
+
+/* Settings and the level list. */
+.pm-card, .lt-sheet {
+  border-radius: 0; border: 0;
+  clip-path: polygon(20px 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%, 0 20px);
+  box-shadow: inset 0 2px 0 var(--edge);
+}
+@media (min-width: 720px), (min-height: 820px) {
+  .pm-card { border-radius: 0; border: 0; clip-path: var(--cut4); --c: 20px; }
+}
+.pm-toggle, .pm-seg, .pm-seg button, .ars-start, .lt-reqs li { border-radius: 0; clip-path: var(--cut2); --c: 6px; }
+.pm-toggle i { border-radius: 0; clip-path: var(--slant); --c: 6px; }
+.pm-toggle i::after { border-radius: 0; }
+.ars-start { --c: 14px; }
+
+/* ------------------------------------------------- Floating building menu */
+/* Hangs under the tapped gun or building and follows it as the map moves. */
+.hud-float {
+  position: absolute; left: 0; top: 0; z-index: 5;
+  width: min(340px, calc(100vw - 16px));
+  will-change: transform;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+}
+.hud-float[hidden] { display: none; }
+/* The pointer at the object: a brass wedge on the side facing it. */
+.hud-float::before {
+  content: ''; position: absolute; left: calc(var(--ax, 50%) - 11px); top: -10px;
+  width: 22px; height: 11px; background: var(--brass);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.hud-float.above::before { top: auto; bottom: -10px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.float-card {
+  --c: 14px;
+  position: relative; padding: 12px 12px 12px 14px;
+  background: var(--steel);
+  clip-path: var(--cut4);
+  box-shadow: inset 0 2px 0 var(--brass), inset 3px 0 0 rgba(211, 154, 63, 0.25);
+}
+.hud-float.pop .float-card { animation: float-pop 170ms cubic-bezier(0.2, 0.9, 0.3, 1.3); transform-origin: var(--ax, 50%) 0; }
+.hud-float.above.pop .float-card { transform-origin: var(--ax, 50%) 100%; }
+@keyframes float-pop { from { transform: scale(0.82); opacity: 0; } }
+.float-card .row { flex-direction: column; align-items: stretch; gap: 10px; }
+.float-card .title { margin-bottom: 6px; color: var(--brass-hi); }
+.float-card .actions { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.float-card .actions .btn { flex: 1 1 auto; min-height: 42px; padding: 0 12px; }
+.float-card .actions .btn.primary { flex-basis: 100%; }
+.float-card .strength, .float-card .muted-note { flex-basis: 100%; }
+@media (prefers-reduced-motion: reduce) { .hud-float.pop .float-card { animation: none; } }
+.float-card .strength { font: 500 14px/1.2 var(--display); letter-spacing: 0.04em; color: #f0b3a6; }
+.float-card .strength.ahead { color: #a8e09b; }
+.float-card .muted-note { font-size: 12px; color: var(--muted); }
+.hud-panel { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.hud-panel.tucked { transform: translateY(calc(100% - 10px)); }
+@media (min-width: 720px) { .hud-panel.tucked { transform: translate(-50%, calc(100% - 10px)); } }

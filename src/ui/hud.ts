@@ -44,6 +44,8 @@ const ICON = {
 
 export interface HudCallbacks {
   getSelection(): Selection | null;
+  /** Screen point (CSS px) the selection's floating menu hangs from. */
+  anchor(): { x: number; top: number; bottom: number } | null;
   setSelection(sel: Selection | null): void;
   /** Gun (or, in siege mode, fence) picked in the build menu, if any. */
   getArmed(): Armed | null;
@@ -80,6 +82,8 @@ const escapeHtml = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', 
 export class Hud {
   private readonly top: HTMLElement;
   private readonly panel: HTMLElement;
+  private readonly float: HTMLElement;
+  private lastFloat = '';
   private readonly toast: HTMLElement;
   private readonly endScreen: HTMLElement;
   private lastTop = '';
@@ -96,9 +100,11 @@ export class Hud {
       <header class="hud-top" id="hud-top"></header>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
       <section class="hud-panel" id="hud-panel"></section>
+      <section class="hud-float" id="hud-float" hidden></section>
       <div class="end-screen" id="end-screen" hidden></div>`;
     this.top = root.querySelector('#hud-top')!;
     this.panel = root.querySelector('#hud-panel')!;
+    this.float = root.querySelector('#hud-float')!;
     this.toast = root.querySelector('#toast')!;
     this.endScreen = root.querySelector('#end-screen')!;
     root.addEventListener('click', (ev) => {
@@ -120,12 +126,12 @@ export class Hud {
 
   invalidate(): void {
     // Something no render produces, so the next update redraws (and hides an empty end screen).
-    this.lastTop = this.lastPanel = this.lastEnd = '\0';
+    this.lastTop = this.lastPanel = this.lastEnd = this.lastFloat = '\0';
   }
 
   /** Height in CSS px the HUD covers at the top and bottom; the board fits between. */
   insets(): { top: number; bottom: number } {
-    return { top: this.top.getBoundingClientRect().bottom, bottom: window.innerHeight - this.panel.getBoundingClientRect().top };
+    return { top: this.top.getBoundingClientRect().bottom, bottom: window.innerHeight - this.panel.offsetTop };
   }
 
   showToast(text: string): void {
@@ -186,6 +192,23 @@ export class Hud {
       this.panel.innerHTML = panel;
       this.lastPanel = panel;
     }
+
+    const fl = this.floatHtml();
+    if (fl !== this.lastFloat) {
+      const fresh = this.float.hidden || !this.lastFloat;
+      this.float.innerHTML = fl ? `<div class="float-card">${fl}</div>` : '';
+      this.float.hidden = !fl;
+      // Pop in only when it first appears, not on every redraw.
+      if (fl && fresh) {
+        this.float.classList.remove('pop');
+        void this.float.offsetWidth;
+        this.float.classList.add('pop');
+      }
+      this.lastFloat = fl;
+    }
+    // In the base at peace the panel only holds a hint: tuck it away while a menu is open.
+    this.panel.classList.toggle('tucked', !!fl && !!base && g.phase === 'build' && g.wave === 0 && g.raidTime === null);
+    this.place();
 
     const result = base?.result() ?? null;
     let end = '';
@@ -251,7 +274,79 @@ export class Hud {
             <button class="btn" data-action="cancel">${t('action.cancel')}</button>
           </div>
         </div>`;
-    } else if (sel?.kind === 'fence' && g.fenceById(sel.id)) {
+    } else if (base) {
+      // The base: no build bar; the arsenal sends guns and fences. A picked one is placed with a tap.
+      const mend = g.repairAllCost();
+      const hint = armed === 'fence' ? t('hint.fence', { cost: g.fenceCost() }) : armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.tapBuilding');
+      const lost = g.phase === 'wave' ? `<span class="strength">${t('base.lost', { n: Math.round(g.lostShare() * 100), max: Math.round(BASE_RULES.lossShare * 100) })}</span>` : '';
+      body = `<div class="picker base-idle">
+        <div class="base-row">
+          <p class="hint">${escapeHtml(hint)}</p>
+          ${armed ? `<button class="chip" data-action="cancel">${t('action.cancel')}</button>` : ''}
+        </div>
+        ${mend > 0 || lost ? `<div class="base-row">${lost}${mend > 0 && g.phase !== 'won' && g.phase !== 'lost' ? `<button class="chip" data-action="repairAll" ${g.money <= 0 ? 'disabled' : ''}>${t('action.repairAll')}<span class="cost"><span class="ico ico-gold"></span>${mend}</span></button>` : ''}</div>` : ''}
+      </div>`;
+    } else {
+      // Build menu: one card per gun; the picked one stays armed for placing.
+      // Only the guns this map level allows.
+      const cards = TOWER_IDS.filter((id) => g.isUnlocked(id)).map((id) => {
+        const cost = g.buildCost(id);
+        return `
+          <button class="card${armed === id ? ' armed' : ''}${g.money < cost ? ' poor' : ''}" data-action="pick" data-def="${id}" aria-pressed="${armed === id}">
+            ${this.iconHtml(id)}
+            <span class="card-name">${escapeHtml(t(`tower.${id}`))}</span>
+            <span class="cost"><span class="ico ico-gold"></span>${cost}</span>
+          </button>`;
+      }).join('');
+      const hint = armed && armed !== 'fence' ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
+      body = `<div class="picker"><div class="cards">${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
+    }
+
+    // In the base the attack is provoked (or the headquarters retaken) from the headquarters; the button only runs the waves after.
+    const waveBtn = base && (g.wave === 0 || g.phase === 'won' || g.phase === 'lost')
+      ? ''
+      : g.phase === 'build' && g.raidTime === null
+      ? `<button class="btn go" data-action="wave">${t('action.startWave', { n: g.wave + 1 })}</button>`
+      : `<button class="btn go" disabled>${t('action.waveRunning')}</button>`;
+    return `<div class="panel-body">${body}</div>${waveBtn}`;
+  }
+
+  /**
+   * Hang the floating menu under its object (above it when the bottom panel is
+   * in the way), kept inside the screen, with its pointer aimed at the object.
+   */
+  private place(): void {
+    if (this.float.hidden) return;
+    const a = this.cb.anchor();
+    if (!a) {
+      this.float.style.visibility = 'hidden';
+      return;
+    }
+    this.float.style.visibility = '';
+    const w = this.float.offsetWidth;
+    const h = this.float.offsetHeight;
+    const gap = 14;
+    const minY = this.top.getBoundingClientRect().bottom + 6;
+    const maxY = this.panel.getBoundingClientRect().top - 6;
+    let y = a.bottom + gap;
+    let below = true;
+    if (y + h > maxY && a.top - gap - h >= minY) {
+      y = a.top - gap - h;
+      below = false;
+    }
+    y = Math.max(minY, Math.min(y, maxY - h));
+    const x = Math.max(8, Math.min(a.x - w / 2, window.innerWidth - w - 8));
+    this.float.classList.toggle('above', !below);
+    this.float.style.setProperty('--ax', `${Math.round(Math.max(18, Math.min(a.x - x, w - 18)))}px`);
+    this.float.style.transform = `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0)`;
+  }
+
+  /** The floating menu under the picked gun, fence or building; empty when nothing is picked. */
+  private floatHtml(): string {
+    const g = this.game;
+    const sel = this.cb.getSelection();
+    let body = '';
+    if (sel?.kind === 'fence' && g.fenceById(sel.id)) {
       const f = g.fenceById(sel.id)!;
       const up = g.fenceUpgradeCost(f);
       body = `
@@ -317,41 +412,8 @@ export class Hud {
             <button class="btn" data-action="sell">${t('action.sell')}<span class="cost">+${g.sellValue(tower)}</span></button>
           </div>
         </div>`;
-    } else if (base) {
-      // The base: no build bar; the arsenal sends guns and fences. A picked one is placed with a tap.
-      const mend = g.repairAllCost();
-      const hint = armed === 'fence' ? t('hint.fence', { cost: g.fenceCost() }) : armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.tapBuilding');
-      const lost = g.phase === 'wave' ? `<span class="strength">${t('base.lost', { n: Math.round(g.lostShare() * 100), max: Math.round(BASE_RULES.lossShare * 100) })}</span>` : '';
-      body = `<div class="picker base-idle">
-        <div class="base-row">
-          <p class="hint">${escapeHtml(hint)}</p>
-          ${armed ? `<button class="chip" data-action="cancel">${t('action.cancel')}</button>` : ''}
-        </div>
-        ${mend > 0 || lost ? `<div class="base-row">${lost}${mend > 0 && g.phase !== 'won' && g.phase !== 'lost' ? `<button class="chip" data-action="repairAll" ${g.money <= 0 ? 'disabled' : ''}>${t('action.repairAll')}<span class="cost"><span class="ico ico-gold"></span>${mend}</span></button>` : ''}</div>` : ''}
-      </div>`;
-    } else {
-      // Build menu: one card per gun; the picked one stays armed for placing.
-      // Only the guns this map level allows.
-      const cards = TOWER_IDS.filter((id) => g.isUnlocked(id)).map((id) => {
-        const cost = g.buildCost(id);
-        return `
-          <button class="card${armed === id ? ' armed' : ''}${g.money < cost ? ' poor' : ''}" data-action="pick" data-def="${id}" aria-pressed="${armed === id}">
-            ${this.iconHtml(id)}
-            <span class="card-name">${escapeHtml(t(`tower.${id}`))}</span>
-            <span class="cost"><span class="ico ico-gold"></span>${cost}</span>
-          </button>`;
-      }).join('');
-      const hint = armed && armed !== 'fence' ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
-      body = `<div class="picker"><div class="cards">${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
     }
-
-    // In the base the attack is provoked (or the headquarters retaken) from the headquarters; the button only runs the waves after.
-    const waveBtn = base && (g.wave === 0 || g.phase === 'won' || g.phase === 'lost')
-      ? ''
-      : g.phase === 'build' && g.raidTime === null
-      ? `<button class="btn go" data-action="wave">${t('action.startWave', { n: g.wave + 1 })}</button>`
-      : `<button class="btn go" disabled>${t('action.waveRunning')}</button>`;
-    return `<div class="panel-body">${body}</div>${waveBtn}`;
+    return body;
   }
 
   /** Base mode: a repair button for a damaged part. */

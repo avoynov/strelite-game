@@ -251,6 +251,7 @@ async function start(): Promise<void> {
 
   const hud = new Hud(document.getElementById('hud')!, game, {
     getSelection: () => selection,
+    anchor: () => board.anchorOf(selection),
     setSelection: (s) => (selection = s),
     getArmed: () => armed,
     setArmed: (def) => {
