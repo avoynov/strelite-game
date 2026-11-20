@@ -924,7 +924,7 @@ html, body {
 @media (min-width: 720px), (min-height: 820px) {
   .pm-card { border-radius: 0; border: 0; clip-path: var(--cut4); --c: 20px; }
 }
-.pm-toggle, .pm-seg, .pm-seg button, .ars-start, .lt-reqs li { border-radius: 0; clip-path: var(--cut2); --c: 6px; }
+.pm-toggle, .pm-seg, .pm-seg button, .ars-start, .lt-reqs li, .ars-lv { border-radius: 0; clip-path: var(--cut2); --c: 6px; }
 .pm-toggle i { border-radius: 0; clip-path: var(--slant); --c: 6px; }
 .pm-toggle i::after { border-radius: 0; }
 .ars-start { --c: 14px; }
