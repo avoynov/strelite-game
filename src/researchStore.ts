@@ -71,6 +71,12 @@ export class ResearchStore {
     if (next !== this.s) this.set(next);
   }
 
+  /** Testing: every running item ends now (none while the laboratory lies destroyed). */
+  finishNow(now = Date.now()): void {
+    if (this.s.pausedAt !== null || !this.s.active.some((a) => a.endsAt > now)) return;
+    this.set({ ...this.s, active: this.s.active.map((a) => ({ ...a, endsAt: Math.min(a.endsAt, now) })) });
+  }
+
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);

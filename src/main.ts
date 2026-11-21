@@ -27,6 +27,7 @@ import type { SoundName } from './audio/synth';
 import { installWay, onInstallChange, promptInstall } from './pwa/install';
 import { AUTO_STEPS, FrameWatch, qualityFor, readChoice, saveAutoStep, saveChoice, startStep, type QualityChoice } from './perf';
 import { PauseMenu } from './ui/pauseMenu';
+import { CHEAT_GOLD, readCheats, writeCheats } from './cheats';
 import type { EnemyId, TowerId } from './sim/content';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
@@ -289,6 +290,20 @@ async function start(): Promise<void> {
     watch.reset();
     relayout();
   };
+  /** Testing switches from the pause screen: endless gold, no waiting. */
+  let cheats = readCheats();
+  const applyCheats = () => {
+    if (cheats.gold) {
+      if (game.money < CHEAT_GOLD) game.money = CHEAT_GOLD;
+      if (research.state.gold < CHEAT_GOLD) research.setGold(CHEAT_GOLD);
+    }
+    if (cheats.instant) {
+      const now = Date.now();
+      research.finishNow(now);
+      baseStore.finishNow(now);
+      for (const tw of game.towers) if (tw.job && tw.job.endsAt > now) tw.job.endsAt = now;
+    }
+  };
   const pauseMenu = new PauseMenu({
     audio: () => audio.settings,
     setAudio: (s) => audio.set(s),
@@ -300,6 +315,13 @@ async function start(): Promise<void> {
     },
     installWay,
     install: () => void promptInstall().then(() => pauseMenu.invalidate()),
+    cheats: () => cheats,
+    setCheats: (c) => {
+      cheats = { ...cheats, ...c };
+      writeCheats(cheats);
+      applyCheats();
+      hud.update();
+    },
     openLevels: () => {
       // The level list is a menu of its own; the battle stays paused behind it until one is chosen or it closes.
       levels.open();
@@ -492,6 +514,7 @@ async function start(): Promise<void> {
   }
 
   app.ticker.add((ticker) => {
+    if (cheats.gold || cheats.instant) applyCheats();
     const frame = ticker.deltaMS / 1000;
     const alpha = loop.advance(frame);
     for (const ev of game.drainEvents()) {
