@@ -210,6 +210,7 @@ export class SpriteTowerView implements TowerView {
   private reload = 0;
   /** A held stream (the siphon) loops its fire frames until it stops. */
   private streaming = false;
+  private wreck = false;
   private readonly off: () => void;
 
   constructor(
@@ -276,6 +277,14 @@ export class SpriteTowerView implements TowerView {
     return 0;
   }
 
+  setWreck(on: boolean): boolean {
+    if (on !== this.wreck) {
+      this.wreck = on;
+      this.refresh();
+    }
+    return !!this.lv.states?.wreck;
+  }
+
   setFiring(on: boolean): void {
     if (on === this.streaming || !this.lv.fire?.loop) return;
     this.streaming = on;
@@ -322,6 +331,14 @@ export class SpriteTowerView implements TowerView {
   }
 
   private refresh(): void {
+    const wreck = this.wreck ? this.lv.states?.wreck : undefined;
+    this.gun.visible = !wreck;
+    if (wreck) {
+      const tex = this.art.sheetTexture(wreck.sheet, wreck.frame);
+      if (tex) this.base.texture = tex;
+      this.node.visible = !!tex;
+      return;
+    }
     void this.art.request(this.lv);
     // The shot for the way the gun now faces: a few KB, fetched ahead of the first shot.
     if (this.lv.fire) void this.art.requestSheet(fireSheet(this.lv.fire, this.fireDir()).sheet);

@@ -1,4 +1,4 @@
-import { jobError, jobPrice, newBase, sanitizeBase, settleJobs, startJob, type BaseState, type JobError, type JobTarget } from './sim/base';
+import { jobError, jobPrice, newBase, sanitizeBase, settleJobs, startJob, type BaseState, type BuildingKind, type JobError } from './sim/base';
 
 const KEY = 'strelite.base';
 
@@ -41,7 +41,7 @@ export class BaseStore {
   }
 
   /** Start raising (or rebuilding) a building, paid from the treasury. */
-  startJob(what: JobTarget, wallet: { gold: number }): JobError | null {
+  startJob(what: BuildingKind, wallet: { gold: number }): JobError | null {
     const err = jobError(this.s, what, wallet.gold);
     if (err) return err;
     wallet.gold -= jobPrice(this.s, what)!.cost;
@@ -49,7 +49,7 @@ export class BaseStore {
     return null;
   }
 
-  /** The base is lost: start over. */
+  /** Start over (testing builds). */
   reset(): void {
     this.set(newBase());
   }
