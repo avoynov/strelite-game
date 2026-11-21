@@ -447,7 +447,7 @@ export class Lab {
       this.footKey = footKey;
       this.foot.innerHTML = `
         <div class="lab-treasury" title="${t('lab.treasury')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${s.gold}</b></div>
-        <button class="btn primary" data-lt="close">${t('lab.close')}</button>`;
+        <button class="btn primary" data-lt="close"><span class="not-base">${t('lab.close')}</span><span class="base-only">${t('action.close')}</span></button>`;
     }
     this.tick(s);
     // Fonts and pictures can shift the layout after it was drawn.
@@ -493,6 +493,7 @@ export class Lab {
           <p class="lab-kicker">${t('lab.kicker')}</p>
           <h1 class="lab-title">${t('lab.title')}</h1>
         </div>
+        <button class="win-x" data-lt="close" aria-label="${t('action.close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </header>
       <section class="lt-summary${tree.done === tree.total ? ' all' : ''}">
         <div class="lt-sum-top">
@@ -628,10 +629,10 @@ export class Lab {
     const label = `${name}. ${t(`lab.state.${st}` as MessageKey)}`;
     const attrs = unlock ? `data-lt="node" data-id="${unlock.id}"` : 'disabled';
     return `
-      <button class="lt-card st-${st}${fresh}" ${attrs} aria-label="${esc(label)}">
+      <button class="lt-card st-${st}${known ? '' : ' veiled'}${fresh}" ${attrs} aria-label="${esc(label)}">
         ${shapeSvg(CARD, st === 'active', active?.endsAt, total, '0 0 74 84')}
         <span class="lt-pic" data-pic="${gun}" data-lv="${known ? this.gunLevel(gun, s) : 1}" data-w="66" data-h="54" data-z="1.45"></span>
-        ${st === 'locked' ? `<span class="lt-lock">${ICON.lock}</span>` : ''}
+        ${known ? '' : `<span class="lt-lock">${ICON.lock}</span>`}
         ${known && unlock ? `<span class="lt-check">${ICON.check}</span>` : ''}
         ${fresh ? `<span class="lt-new">${t('lab.new')}</span>` : ''}
         ${strip}

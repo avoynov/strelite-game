@@ -56,6 +56,8 @@ export const en: Record<MessageKey, string> = {
   'arsenal.title': 'Arsenal',
   'arsenal.kicker': 'Before battle',
   'arsenal.start': 'To the battlefield',
+  'arsenal.pick': 'Pick to build',
+  'arsenal.kickerBase': 'Base guns',
   'arsenal.prev': 'Previous gun',
   'arsenal.next': 'Next gun',
   'arsenal.swipe': 'Swipe sideways for the next',

@@ -55,6 +55,8 @@ export const bg = {
   'arsenal.title': 'Арсенал',
   'arsenal.kicker': 'Преди битката',
   'arsenal.start': 'Към бойното поле',
+  'arsenal.pick': 'Избери за строеж',
+  'arsenal.kickerBase': 'Оръжията на базата',
   'arsenal.prev': 'Предишно оръдие',
   'arsenal.next': 'Следващо оръдие',
   'arsenal.swipe': 'Плъзни настрани за следващото',

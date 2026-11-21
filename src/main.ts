@@ -443,7 +443,7 @@ async function start(): Promise<void> {
     onArt: (fn) => art?.onChange(fn) ?? (() => {}),
     directions: art?.manifest.directions ?? 32,
     close: (def) => {
-      armed = def;
+      if (def) armed = def;
       selection = null;
       hud.update();
     },
@@ -453,6 +453,8 @@ async function start(): Promise<void> {
   document.body.appendChild(arsenal.el);
 
   const relayout = () => {
+    // In the base the arsenal, lab and level list open as windows over it.
+    document.body.classList.toggle('in-base', !!game.base);
     hud.update();
     const { top, bottom } = hud.insets();
     const pad = 6;

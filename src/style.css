@@ -389,14 +389,20 @@ html, body {
   .ars-val b { font-size: 17px; }
 }
 
-.ars-slide.locked .ars-gun { filter: grayscale(1) brightness(0.55) drop-shadow(0 18px 18px rgba(0, 0, 0, 0.45)); }
+/* A gun not unlocked yet: only a black shape, a padlock hung in front of it. */
+.ars-slide.locked .ars-gun { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.45)) drop-shadow(0 18px 18px rgba(0, 0, 0, 0.45)); opacity: 0.92; }
 .ars-lock {
-  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); margin: 0;
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; white-space: nowrap;
-  background: rgba(11, 14, 10, 0.8); border: 1px solid rgba(241, 234, 216, 0.2);
-  font: 600 12px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; white-space: nowrap; pointer-events: none;
+  font: 600 13px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass-hi);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
 }
-.ars-lock svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ars-lock svg {
+  width: 58px; height: 58px; padding: 12px; box-sizing: content-box;
+  fill: rgba(11, 14, 10, 0.85); stroke: var(--brass-hi); stroke-width: 1.8; stroke-linejoin: round;
+  background: radial-gradient(circle, rgba(211, 154, 63, 0.28), transparent 70%);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.8));
+}
 
 /* --------------------------------------------------------------------- Lab */
 
@@ -734,15 +740,15 @@ html, body {
   background: radial-gradient(circle at 50% 40%, rgba(211, 154, 63, 0.28), transparent 70%);
 }
 .lt-card .lt-pic { position: absolute; left: 4px; top: 6px; width: 66px; height: 54px; overflow: hidden; border-radius: 9px; }
-.lt-card.st-locked .lt-pic, .lt-card.st-lab .lt-pic { filter: grayscale(1) brightness(0.22) contrast(1.4); }
+.lt-card.st-locked .lt-pic, .lt-card.st-lab .lt-pic { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.4)); }
 .lt-card.st-go .lt-pic, .lt-card.st-ready .lt-pic, .lt-card.st-active .lt-pic { filter: grayscale(0.6) brightness(0.65); }
 .lt-card.st-go::after {
   content: ''; position: absolute; inset: -6px; border-radius: 18px; z-index: -1;
   background: radial-gradient(closest-side, rgba(231, 172, 79, 0.45), transparent);
   animation: lt-pulse 1.8s ease-in-out infinite;
 }
-.lt-lock { position: absolute; left: 50%; top: 33px; transform: translate(-50%, -50%); color: rgba(241, 234, 216, 0.5); }
-.lt-lock svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.lt-lock { position: absolute; left: 50%; top: 33px; transform: translate(-50%, -50%); z-index: 1; color: #ffd27a; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)); }
+.lt-lock svg { width: 26px; height: 26px; fill: rgba(11, 14, 10, 0.85); stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .lt-card .lt-check { right: -5px; top: -5px; }
 .lt-strip {
   position: absolute; left: 50%; bottom: 5px; transform: translateX(-50%);
@@ -968,3 +974,47 @@ html, body {
 .hud-panel { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .hud-panel.tucked { transform: translateY(calc(100% - 10px)); }
 @media (min-width: 720px) { .hud-panel.tucked { transform: translate(-50%, calc(100% - 10px)); } }
+
+/* ------------------------------------------------------ Windows in the base */
+/* Opened from a building, a screen is a window over the base, which stays in sight. */
+body.in-base .arsenal, body.in-base .lab, body.in-base .levels {
+  inset: auto; left: 50%; top: calc(50% + var(--safe-top) / 2);
+  transform: translate(-50%, -50%);
+  width: min(calc(100vw - 20px), 560px);
+  height: min(calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)), 820px);
+  border: 2px solid var(--edge); border-top: 3px solid var(--brass);
+  clip-path: var(--cut4); --c: 18px;
+  animation: win-in 200ms cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+@keyframes win-in { from { transform: translate(-50%, -46%) scale(0.94); opacity: 0; } }
+body.in-base:has(.arsenal:not([hidden]), .lab:not([hidden]), .levels:not([hidden]))::after {
+  content: ''; position: fixed; inset: 0; z-index: 15;
+  background: rgba(5, 7, 4, 0.38);
+}
+@media (prefers-reduced-motion: reduce) { body.in-base .arsenal, body.in-base .lab, body.in-base .levels { animation: none; } }
+.lt-lock svg rect { fill: rgba(11, 14, 10, 0.85); }
+.lt-lock svg path, .ars-lock svg path { fill: none; }
+/* Words that differ in the base, both in the markup; the body's class picks. */
+.base-only { display: none; }
+body.in-base .base-only { display: inline; }
+body.in-base .not-base { display: none; }
+/* The window's close cross: only where the screen is a window (the base). */
+.win-x { display: none; }
+body.in-base .win-x {
+  display: grid; place-items: center; flex: none; align-self: start;
+  width: 40px; height: 40px; margin-left: auto; padding: 0; border: 0;
+  background: linear-gradient(180deg, #d9573a, #8f2a16); color: #fff4e6;
+  clip-path: var(--cut2); --c: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+}
+body.in-base .win-x svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+body.in-base .ars-head { display: flex; align-items: flex-start; gap: 12px; }
+body.in-base .ars-count { display: none; }
+/* Smaller than the screen, so the base shows round it. */
+body.in-base .arsenal, body.in-base .lab, body.in-base .levels {
+  width: min(calc(100vw - 28px), 540px);
+  height: min(calc(100dvh - 150px - var(--safe-top) - var(--safe-bottom)), 780px);
+}
+/* A gun not unlocked: a black shape behind a padlock. */
+.lt-card.veiled .lt-pic { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.4)); }
+body.in-base .lab-head, body.in-base .ars-head { padding-top: 16px; }

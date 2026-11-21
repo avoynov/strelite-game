@@ -105,6 +105,7 @@ export class LevelSelect {
           <p class="lab-kicker">${t('building.muster')}</p>
           <h1 class="lab-title">${t('levels.title')}</h1>
         </div>
+        <button class="win-x" data-lv="close" aria-label="${t('action.close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </header>
       <div class="lv-modes" role="tablist">
         ${MODES.map((m) => `<button class="lv-mode${this.cb.mode() === m ? ' on' : ''}" role="tab" aria-selected="${this.cb.mode() === m}" data-lv="mode-${m}"><b>${t(`mode.${m}`)}</b><span>${t(`mode.${m}.hint`)}</span></button>`).join('')}
