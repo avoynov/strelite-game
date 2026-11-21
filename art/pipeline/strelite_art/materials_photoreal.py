@@ -61,6 +61,11 @@ SPEC = {
     # --- buildings (models/hq.py, lab.py): dressed and pale stone, roof slate, verdigris copper
     "stone_dressed": ("stone", dict(light=(0.56, 0.52, 0.46), dark=(0.44, 0.41, 0.37))),
     "stone_pale":    ("stone", dict(light=(0.74, 0.71, 0.64), dark=(0.63, 0.60, 0.54))),
+    # damage states (damage.py): burnt timber and ash/soot on the ground of a wreck
+    "timber_charred": ("timber", dict(light=(0.085, 0.07, 0.06), dark=(0.025, 0.02, 0.018), rough=0.92, weather=0.1,
+                                      dust=0.35, checks=1.6)),
+    "stone_soot":    ("stone", dict(light=(0.17, 0.16, 0.15), dark=(0.07, 0.066, 0.06))),   # scorched masonry
+    "ash":           ("plain", dict(color=(0.075, 0.07, 0.065), rough=0.95, dust=0.5)),
     "slate":         ("plain", dict(color=(0.11, 0.12, 0.13), rough=0.55, dust=0.35)),
     "verdigris":     ("plain", dict(color=(0.30, 0.50, 0.42), rough=0.6, dust=0.3)),
     "plaster":       ("plain", dict(color=(0.62, 0.58, 0.50), rough=0.85, dust=0.6)),
@@ -98,6 +103,8 @@ SPEC = {
     "uniform":       ("cloth", dict(color=(0.20, 0.21, 0.20), alt=(0.17, 0.18, 0.17), dust=0.4, wrinkle=9.0)),
     # people: lighter tunic over darker breeches, so the figure reads top-down (value hierarchy)
     "tunic_slate":   ("cloth", dict(color=(0.27, 0.285, 0.28), alt=(0.24, 0.25, 0.245), dust=0.35, wrinkle=9.0)),
+    "tunic_olive":   ("cloth", dict(color=(0.22, 0.25, 0.09), alt=(0.19, 0.22, 0.08), dust=0.35, wrinkle=9.0)),  # defenders
+    "cloth_blue":    ("cloth", dict(color=(0.06, 0.12, 0.30), alt=(0.05, 0.10, 0.26), dust=0.3, wrinkle=7.0)),  # defender scarf
     "breeches_dark": ("cloth", dict(color=(0.14, 0.145, 0.14), alt=(0.12, 0.125, 0.12), dust=0.5, wrinkle=9.0)),
     "webbing_pale":  ("plain", dict(color=(0.40, 0.37, 0.29), rough=0.8, dust=0.6)),
     "boot_sole":     ("plain", dict(color=(0.055, 0.045, 0.04), rough=0.7, dust=0.35)),
@@ -132,6 +139,7 @@ SPEC = {
     "silver":        ("metal", dict(color=(0.95, 0.95, 0.94), rough=0.17, dust=0.12)),
     "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
+    "gold_coins":    ("metal", dict(color=(1.0, 0.80, 0.36), rough=0.5, dust=0.0)),   # treasury hoard, no dust
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
     "ember":         ("ember", {}),
     "arc_glow":      ("arc", {}),
