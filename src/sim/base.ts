@@ -46,7 +46,7 @@ export const HQ_LEVELS: readonly HqLevel[] = [
 
 export interface LabLevel {
   hp: number;
-  /** Research items running at once. A higher laboratory opens deeper research; it never makes research faster. */
+  /** Research items running at once. A higher laboratory opens deeper research (the headquarters caps it); it never makes research faster. */
   slots: number;
   /** Building jobs (headquarters, laboratory) running at once. */
   builders: number;
@@ -232,6 +232,18 @@ export function baseHpFactor(attack: number): number {
   return Math.max(BASE_TUNING.hpMin, BASE_TUNING.hpFirst - BASE_TUNING.hpStep * (attack - 1));
 }
 
+/**
+ * A stronger headquarters draws stronger attackers, who pay more: per
+ * headquarters level (0-based) above the first, this much more health and
+ * gold per kill.
+ */
+export const HQ_THREAT = 0.15;
+
+/** Attackers' health and kill gold relative to a level-1 headquarters. */
+export function hqThreat(hqLevel: number): number {
+  return 1 + HQ_THREAT * Math.max(0, hqLevel);
+}
+
 /** Gold an attack adds to the treasury on top of what its kills already paid into it. */
 export function baseTakings(earned: number, won: boolean, attack: number): number {
   const bonus = won ? 100 + 40 * attack : 0;
@@ -264,11 +276,13 @@ export function jobPrice(b: BaseState, what: JobTarget): { cost: number; seconds
   return next ? { cost: next.cost, seconds: next.seconds } : null;
 }
 
-export type JobError = 'maxLevel' | 'running' | 'noBuilder' | 'noGold';
+/** `hqLevel`: the laboratory cannot rise above the headquarters' level. */
+export type JobError = 'maxLevel' | 'hqLevel' | 'running' | 'noBuilder' | 'noGold';
 
 export function jobError(b: BaseState, what: JobTarget, gold: number): JobError | null {
   const price = jobPrice(b, what);
   if (!price) return 'maxLevel';
+  if (what === 'lab' && b.lab && b.lab.level + 1 > b.hq.level) return 'hqLevel';
   if (b.jobs.some((j) => j.what === what)) return 'running';
   if (busyBuilders(b) >= builders(b)) return 'noBuilder';
   if (gold < price.cost) return 'noGold';

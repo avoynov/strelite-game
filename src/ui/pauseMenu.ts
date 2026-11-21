@@ -2,6 +2,7 @@ import { getLang, setLang, t, type Lang } from '../i18n';
 import type { AudioSettings } from '../audio/audio';
 import type { QualityChoice } from '../perf';
 import type { InstallWay } from '../pwa/install';
+import type { Cheats } from '../cheats';
 
 export interface PauseCallbacks {
   audio(): AudioSettings;
@@ -11,6 +12,9 @@ export interface PauseCallbacks {
   installWay(): InstallWay;
   install(): void;
   openLevels(): void;
+  /** Testing switches (temporary). */
+  cheats(): Cheats;
+  setCheats(c: Partial<Cheats>): void;
   /** The menu closed: play on. */
   resume(): void;
 }
@@ -62,6 +66,11 @@ export class PauseMenu {
           if (this.cb.installWay() === 'ios') this.iosHelp = !this.iosHelp;
           else this.cb.install();
           break;
+        case 'cheat': {
+          const key = value as keyof Cheats;
+          this.cb.setCheats({ [key]: !this.cb.cheats()[key] });
+          break;
+        }
         case 'levels':
           this.el.hidden = true;
           this.cb.openLevels();
@@ -159,6 +168,20 @@ export class PauseMenu {
           </div>
         </section>
         ${install}
+        <section class="pm-group pm-test">
+          <h2>${t('cheat.title')}</h2>
+          ${(['gold', 'instant'] as const)
+            .map((k) => {
+              const on = this.cb.cheats()[k];
+              return `<div class="pm-row">
+                <span>${t(`cheat.${k}`)}</span>
+                <button class="pm-toggle${on ? ' on' : ''}" data-pm="cheat:${k}" role="switch" aria-checked="${on}" aria-label="${t(`cheat.${k}`)}">
+                  <span>${t(on ? 'pause.on' : 'pause.off')}</span><i></i>
+                </button>
+              </div>`;
+            })
+            .join('')}
+        </section>
         <footer class="pm-foot">
           <button class="btn" data-pm="levels">${t('action.levels')}</button>
         </footer>

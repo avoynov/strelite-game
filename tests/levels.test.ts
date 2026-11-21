@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/sim/game';
-import { FIRST_LEVEL_WAVES, levelMap, levelPages, levelSwing, levelWaves, MAX_WAVES, MIN_SWING } from '../src/sim/levels';
+import { FIRST_LEVEL_WAVES, levelMap, levelPages, levelSwing, levelWaves, MAX_WAVES, MIN_RUN, MIN_SWING } from '../src/sim/levels';
 import { buildPathMap } from '../src/sim/maps';
 
 describe('generated levels', () => {
@@ -29,6 +29,24 @@ describe('generated levels', () => {
   it('is the same level every time for the same number', () => {
     expect(levelMap(37)).toEqual(levelMap(37));
     expect(levelMap(37)).not.toEqual(levelMap(38));
+  });
+
+  it('draws a different road shape on every level', () => {
+    const shape = (l: number) => JSON.stringify(levelMap(l).waypoints);
+    const shapes = new Set<string>();
+    for (let l = 1; l <= 60; l++) {
+      shapes.add(shape(l));
+      if (l > 1) expect(shape(l), `level ${l}`).not.toBe(shape(l - 1));
+    }
+    expect(shapes.size).toBeGreaterThanOrEqual(58);
+    // Runs keep pockets between them: every straight stretch but the last is at least MIN_RUN long.
+    for (let l = 2; l <= 300; l++) {
+      const w = levelMap(l).waypoints;
+      for (let i = 1; i < w.length - 1; i++) {
+        const len = Math.abs(w[i]![0] - w[i - 1]![0]) + Math.abs(w[i]![1] - w[i - 1]![1]);
+        expect(len, `level ${l} run ${i}`).toBeGreaterThanOrEqual(MIN_RUN);
+      }
+    }
   });
 
   it('builds a playable map for every level: a road from spawn to goal with room to build', () => {

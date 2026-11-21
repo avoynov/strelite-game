@@ -49,6 +49,12 @@ export class BaseStore {
     return null;
   }
 
+  /** Testing: every building job ends now. */
+  finishNow(now = Date.now()): void {
+    if (!this.s.jobs.some((j) => j.endsAt > now)) return;
+    this.set({ ...this.s, jobs: this.s.jobs.map((j) => ({ ...j, endsAt: Math.min(j.endsAt, now) })) });
+  }
+
   /** The base is lost: start over. */
   reset(): void {
     this.set(newBase());
