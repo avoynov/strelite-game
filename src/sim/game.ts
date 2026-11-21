@@ -309,7 +309,7 @@ export class Game {
   private events: GameEvent[] = [];
   /** Units dropped during this step (by destroyed APCs); join after it. */
   private dropped: Enemy[] = [];
-  private readonly waves: (n: number, level: number) => WaveSpec;
+  private readonly waves: (n: number, level: number, hq?: number) => WaveSpec;
   private readonly upgrades: Upgrades | null;
   /** Targeting mode the player last set per gun kind; new guns of that kind take it. */
   aimPrefs: Partial<Record<TowerId, Targeting>> = {};
@@ -442,7 +442,7 @@ export class Game {
     this.enemies = b.enemies;
     this.projectiles = b.projectiles;
     this.phase = b.phase;
-    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level) : null;
+    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0) : null;
     this.spawnState = b.phase === 'wave' ? b.spawnState : [];
     this.rebuildFlow();
     return true;
@@ -867,7 +867,7 @@ export class Game {
   startWave(): ActionResult {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
     this.wave++;
-    this.currentWave = this.waves(this.wave, this.level);
+    this.currentWave = this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0);
     this.spawnState = this.currentWave.groups.map((g) => ({ left: g.count, timer: g.delay }));
     this.phase = 'wave';
     this.events.push({ type: 'waveStart', wave: this.wave });

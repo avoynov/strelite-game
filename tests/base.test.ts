@@ -20,7 +20,7 @@ import {
 } from '../src/sim/base';
 import { Game } from '../src/sim/game';
 import { buildArcMap } from '../src/sim/maps';
-import type { WaveSpec } from '../src/sim/waves';
+import { waveSpec, type WaveSpec } from '../src/sim/waves';
 import { Campaign } from './helpers/baseBot';
 import { upTo } from './helpers/stages';
 import { TOWER_IDS } from '../src/sim/content';
@@ -252,6 +252,12 @@ describe('balance at the base', () => {
     const gold = (es: { reward: number }[]) => es.slice(0, 12).reduce((s, e) => s + e.reward, 0);
     expect(gold(high)).toBeGreaterThan(gold(low));
     expect(attackStrength(3, undefined, undefined, 2)).toBeGreaterThan(attackStrength(3));
+    // More of them, and kinds that would come only later.
+    const kinds = (hq: number) => new Set(waveSpec(1, 1, hq).groups.map((gr) => gr.enemy));
+    const count = (hq: number) => waveSpec(1, 1, hq).groups.reduce((s, gr) => s + gr.count, 0);
+    expect(kinds(2).size).toBeGreaterThan(kinds(0).size);
+    expect(count(2)).toBeGreaterThan(count(0) * 1.3);
+    for (const k of kinds(0)) expect(kinds(2).has(k)).toBe(true);
   });
 
   it('the strength shown before an attack points the right way when the sides are far apart', () => {
