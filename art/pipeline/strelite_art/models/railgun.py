@@ -33,7 +33,7 @@ LEVELS = (1, 2, 3, 4, 5)
 FRAME_M = 9.0
 TARGET_Z = 1.2
 SPRITE_FRAME_M = 11.0
-SWEEP_M = 3.6
+SWEEP_M = 4.6
 FOOTPRINT_M = 3.0        # 2x2 tiles of 4 m
 AXIS_Z = 1.75            # line of the rails
 
@@ -175,13 +175,13 @@ def _mount(k, t, level, s):
 def _barrel(k, t, level, s):
     """The rails (on a recoil slide) and whatever wraps them; returns the muzzle."""
     slide = k.empty("slide", (0, 0, 0), parent=t)
-    y0, y1 = -1.6, 3.4
+    y0, y1 = -1.6, (4.4 if level >= 3 else 3.4)       # levels 3-5: longer barrel, coils stand apart (user 2026-11-21)
     z = AXIS_Z
     parts = []
     for sx in (-1, 1):                                   # the two rails
         parts.append(k.box("rail", (0.08, y1 - y0, 0.22), (sx * 0.1, (y0 + y1) / 2, z), s["rail"], parent=t,
                            bevel=0.006))
-    n = 7
+    n = 9 if level >= 3 else 7
     for i in range(n):                                   # porcelain insulators holding them apart
         y = y0 + 0.3 + i * (y1 - y0 - 0.5) / (n - 1)
         parts.append(k.box("clamp", (0.42, 0.1, 0.4), (0, y, z), s["fit"], parent=t, bevel=0.01))
@@ -209,7 +209,7 @@ def _barrel(k, t, level, s):
                                parent=t, bevel=False))
     if level >= 4:                                       # booster coils
         for i in range(5):
-            y = y1 - 1.35 + i * 0.3
+            y = y1 - 2.55 + i * 0.6
             parts.append(k.torus("coil", 0.38, 0.08, (0, y, z), "copper", rot=(math.pi / 2, 0, 0), parent=t, segs=28,
                                  tube_segs=8))
             parts.append(k.torus("coil_glow", 0.38, 0.045, (0, y + 0.09, z), "arc_glow", rot=(math.pi / 2, 0, 0),

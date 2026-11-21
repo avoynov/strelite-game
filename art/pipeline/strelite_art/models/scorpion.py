@@ -131,7 +131,12 @@ def _trestle(k, root, level, s):
     W = s["wood"]
     top = 1.2 + H
     _beam(k, root, "column", (0, 0, 0.0), (0, 0, top), (0.28, 0.28), W)
-    for i in range(4):
+    if level == 1:                                        # prototype: one post set in the ground, wedged
+        for i in range(4):
+            a = math.radians(45 + 90 * i)
+            d = Vector((math.cos(a), math.sin(a), 0))
+            _beam(k, root, "wedge", d * 0.17 + Vector((0, 0, 0.0)), d * 0.36 + Vector((0, 0, -0.02)), (0.12, 0.08), W)
+    for i in range(4 if level > 1 else 0):
         a = math.radians(45 + 90 * i)
         foot = Vector((1.25 * math.cos(a), 1.25 * math.sin(a), 0.07))
         knee = Vector((0, 0, 0.85 + H))
@@ -141,7 +146,7 @@ def _trestle(k, root, level, s):
         if level > 1:
             k.box("foot_shoe", (0.2, 0.2, 0.04), foot + Vector((0, 0, -0.02)), s["fit"], parent=root,
                   bevel=0.004)
-    for i in range(4):                                    # a square of braces between the legs
+    for i in range(4 if level > 1 else 0):                # a square of braces between the legs
         a0, a1 = math.radians(45 + 90 * i), math.radians(135 + 90 * i)
         p0 = Vector((0.88 * math.cos(a0), 0.88 * math.sin(a0), 0.24))
         p1 = Vector((0.88 * math.cos(a1), 0.88 * math.sin(a1), 0.24))
@@ -283,7 +288,7 @@ def _capitulum(k, t, level, s):
     W = s["wood"]
     y = FRAME_Y
     zt, zb = _z(y) + 0.52, _z(y) - 0.44
-    for z in (zt, zb):
+    for z in ((zt, zb) if level > 1 else (zb,)):          # prototype (1): no top crossbeam (user 2026-11-21)
         _beam(k, t, "frame_beam", (-0.88, y, z), (0.88, y, z), (0.22, 0.14), W)
     zc = _z(y)
     for x in (-0.82, 0.82):
