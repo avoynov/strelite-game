@@ -138,6 +138,7 @@ SPEC = {
     "silver":        ("metal", dict(color=(0.95, 0.95, 0.94), rough=0.17, dust=0.12)),
     "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
+    "gold_coins":    ("metal", dict(color=(1.0, 0.80, 0.36), rough=0.5, dust=0.0)),   # treasury hoard, no dust
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
     "ember":         ("ember", {}),
     "arc_glow":      ("arc", {}),
