@@ -22,6 +22,7 @@ Front faces: -Y (screen lower left) and +X (screen lower right).
 Static object: one frame per level (render_buildings.py).
 """
 import math
+import random
 
 from mathutils import Vector
 
@@ -50,8 +51,14 @@ def build(style, level=1):
     rnd = bd.rnd_for(800 + level)
     {1: _l1, 2: _l2, 3: _l3, 4: _l4, 5: _l5}[level](k, root, rnd)
     rim, peak, t = TROUGH[level]
-    _hoard(k, root, level, rnd, X0 + t, X1 - t, Y0 + t, Y1 - t, rim, peak)
+    k.box("core", (X1 - X0 - 2 * t - 0.04, Y1 - Y0 - 2 * t - 0.04, rim - 0.4), ((X0 + X1) / 2, (Y0 + Y1) / 2,
+          0.2 + (rim - 0.4) / 2), "dirt_fill", parent=root, bevel=False)
+    _hoard(k, root, level, rnd)
     _gold(k, root, level, rnd)
+    import bpy
+    scene = bpy.context.scene
+    scene["treasury_level"] = level
+    _coins(scene, k, root, rnd, 600 + 80 * level, (X0 - 2.4, X1 + 2.4, Y0 - 2.4, Y1 + 2.4))
     return root, root
 
 
@@ -127,60 +134,188 @@ def _gear(k, root, c, normal, r, teeth, mat, w=0.06):
 
 
 # ---------------------------------------------------------------------------
-def _mound_h(u, v, peak, waves):
-    """Height of the coin mound above the rim line at normalised (u, v) in [-1, 1]."""
-    d = (abs(u) ** 4 + abs(v) ** 4) ** 0.25
-    base = peak * max(0.0, 1.0 - d * d) ** 0.85
-    w = sum(a * math.sin(fx * u + fy * v + ph) for a, fx, fy, ph in waves)
-    return base + w * min(1.0, (1.0 - d) * 4) if d < 1 else 0.0
+# the gold: one solid heap of coins filling the trough and pouring over the rim, with a skin of
+# loose coins laid on it by ray casting (each coin rests on the surface under it, nothing floats)
+SPILLS = {1: (("f", 0.2),), 2: (("f", 0.2), ("r", 1.0)), 3: (("f", 0.2), ("r", 1.0)),
+          4: (("f", 0.2), ("r", 0.3), ("r", 1.8)), 5: (("f", 0.3), ("r", 0.0), ("r", 1.6))}
 
 
-def _hoard(k, root, level, rnd, x0, x1, y0, y1, rim, peak):
-    """The gold: a heaped mound of coins filling the trough, loose coins on top and spilled over the rim.
-    The inner fill under it is `core` (damage.py breaches and slices it)."""
-    cx, cy, hx, hy = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
-    k.box("core", (x1 - x0 - 0.04, y1 - y0 - 0.04, rim - 0.4), (cx, cy, 0.2 + (rim - 0.4) / 2), "dirt_fill",
-          parent=root, bevel=False)
-    waves = [(rnd.uniform(0.03, 0.06), rnd.uniform(-7, 7), rnd.uniform(-7, 7), rnd.uniform(0, 6.3))
-             for _ in range(5)]
-    nx, ny = 56, 42
-    z0 = rim - 0.08
+def _waves(rnd, n=6, amp=(0.03, 0.07), f=7.0):
+    return [(rnd.uniform(*amp), rnd.uniform(-f, f), rnd.uniform(-f, f), rnd.uniform(0, 6.3)) for _ in range(n)]
+
+
+def _wave(w, x, y):
+    return sum(a * math.sin(fx * x + fy * y + ph) for a, fx, fy, ph in w)
+
+
+def _solid_grid(k, root, name, x0, x1, y0, y1, zf, nx, ny, mat="gold_coins"):
+    """A heightfield z = zf(x, y) closed down to the ground on all four sides (a solid, never a sheet)."""
     vs, fs = [], []
     for j in range(ny + 1):
         for i in range(nx + 1):
-            u, v = -1 + 2 * i / nx, -1 + 2 * j / ny
-            z = z0 + _mound_h(u, v, peak, waves)
-            if 0 < i < nx and 0 < j < ny:
-                z += rnd.uniform(-0.012, 0.012)          # coin grain
-            vs.append((cx + u * hx, cy + v * hy, z))
+            x, y = x0 + (x1 - x0) * i / nx, y0 + (y1 - y0) * j / ny
+            vs.append((x, y, zf(x, y)))
     for j in range(ny):
         for i in range(nx):
             a = j * (nx + 1) + i
             fs.append((a, a + 1, a + nx + 2, a + nx + 1))
-    o = k.mesh("gold_mound", vs, fs)
-    k._finish(o, "gold_coins", smooth=True, bevel=False, parent=root)
-    # loose coins lying at all angles on the mound
-    for _ in range(450 + 90 * level):
-        u, v = rnd.uniform(-0.95, 0.95), rnd.uniform(-0.95, 0.95)
-        z = z0 + _mound_h(u, v, peak, waves)
-        k.cylinder("coin", 0.1, 0.022, (cx + u * hx, cy + v * hy, z - 0.005), "gold_coins", segs=12,
-                   rot=(rnd.uniform(-0.6, 0.6), rnd.uniform(-0.6, 0.6), 0), parent=root, bevel=False)
-    # coins spilled over the front rim and lying on the ground
-    for _ in range(12 + 8 * level):
-        side = rnd.random()
-        if side < 0.6:
-            p = (rnd.uniform(X0, X1), Y0 - rnd.uniform(0.1, 0.9))
+    edge = [(i, 0) for i in range(nx)] + [(nx, j) for j in range(ny)] + [(i, ny) for i in range(nx, 0, -1)] + \
+           [(0, j) for j in range(ny, 0, -1)]
+    base = len(vs)
+    for i, j in edge:
+        x, y, _ = vs[j * (nx + 1) + i]
+        vs.append((x, y, -0.05))
+    m = len(edge)
+    for a in range(m):
+        (i0, j0), (i1, j1) = edge[a], edge[(a + 1) % m]
+        fs.append((j1 * (nx + 1) + i1, j0 * (nx + 1) + i0, base + a, base + (a + 1) % m))
+    fs.append(tuple(range(base + m - 1, base - 1, -1)))
+    o = k.mesh(name, vs, fs)
+    k._finish(o, mat, smooth=True, bevel=False, parent=root)
+    return o
+
+
+def _spill_sources(level, blob=None):
+    """(apex x, y, outward normal, along-wall direction) of every overflow, minus walls that are gone."""
+    out = []
+    for side, s in SPILLS[level]:
+        if side == "f":
+            p, n, t = Vector((s, Y0, 0)), Vector((0, -1, 0)), Vector((1, 0, 0))
         else:
-            p = (X1 + rnd.uniform(0.1, 0.9), rnd.uniform(Y0, Y1))
-        k.cylinder("coin", 0.085, 0.02, (p[0], p[1], 0.0), "gold_coins", segs=12,
-                   rot=(rnd.uniform(-0.25, 0.25), rnd.uniform(-0.25, 0.25), 0), parent=root, bevel=False)
-    for _ in range(2 + level):                           # a few small heaps where coins ran over the rim
-        if rnd.random() < 0.6:
-            p = (rnd.uniform(X0 + 0.5, X1 - 0.5), Y0 - rnd.uniform(0.2, 0.5))
+            p, n, t = Vector((X1, s, 0)), Vector((1, 0, 0)), Vector((0, 1, 0))
+        if blob is not None and blob.value(p + Vector((0, 0, TROUGH[level][0]))) < 1.15:
+            continue
+        out.append((p, n, t))
+    return out
+
+
+def _hoard(k, root, level, rnd, state="normal", info=None):
+    rim, peak, t = TROUGH[level]
+    ix0, ix1, iy0, iy1 = X0 + t, X1 - t, Y0 + t, Y1 - t
+    cx, cy, hx, hy = (ix0 + ix1) / 2, (iy0 + iy1) / 2, (ix1 - ix0) / 2, (iy1 - iy0) / 2
+    w = _waves(rnd)
+    w2 = _waves(rnd, n=4, amp=(0.04, 0.08), f=4.0)
+    blob = info["blob"] if info else None
+    z0 = rim - 0.08
+    if state == "rubble":                        # the trough is broken down; the gold lies low and spread
+        z0, peak = min(0.55, rim * 0.4), peak * 0.45
+    cones = []                                   # (apex, outward, along, height, reach, half width)
+    for p, n, a in _spill_sources(level, blob if state == "damaged" else None):
+        if state == "rubble":
+            cones.append((p, n, a, z0 + 0.1, 1.4, 0.9))
         else:
-            p = (X1 + rnd.uniform(0.2, 0.5), rnd.uniform(Y0 + 0.5, Y1 - 0.5))
-        coin_heap(k, root, (p[0], p[1], 0), rnd.uniform(0.15, 0.28), rnd.uniform(0.06, 0.12), mat="gold_coins")
-    return z0 + peak
+            cones.append((p, n, a, rim + 0.1, 0.8 + 0.1 * level, 0.75 + 0.08 * level))
+    slump = None
+    if state == "damaged" and blob is not None:  # the gold runs out through the breach
+        hit = info["hit"]
+        bp = Vector((min(max(hit.x, X0), X1), min(max(hit.y, Y0), Y1), 0))
+        n = Vector((0, -1, 0)) if abs(bp.y - Y0) < abs(bp.x - X1) else Vector((1, 0, 0))
+        a = Vector((-n.y, n.x, 0))
+        zb = max(0.35, rim * 0.45)
+        cones.append((bp, n, a, zb, 2.0, 1.2))
+
+        def slump(x, y, z):
+            d = math.hypot(x - bp.x, y - bp.y)
+            return min(z, zb + 0.45 * d)
+
+    def cone_z(x, y):
+        """Coins running over the rim: a wide lip over the wall top, a sheet down the wall face and a low
+        apron of coins spreading on the ground at its foot."""
+        best = -1.0
+        for p, n, a, h, reach, half in cones:
+            q = Vector((x - p.x, y - p.y, 0))
+            d = q.dot(n) + t                             # from the wall's inner face, outward
+            lip = t + 0.05
+            if d < -0.8 or d >= lip + 0.5 + reach:
+                continue
+            foot = h if h < rim * 0.8 else min(h, 0.3 + 0.05 * level)
+            fall = 0.22 + 0.1 * _wave(w2, x * 0.7, y * 0.7) / 0.25
+            if d <= lip:
+                z, f = h, 0.0
+            elif d <= lip + fall:
+                f = (d - lip) / fall
+                z = foot + (h - foot) * 0.5 * (1 + math.cos(math.pi * f))
+                f = 0.0
+            else:
+                f = (d - lip - fall) / reach
+                z = foot * 0.5 * (1 + math.cos(math.pi * f))
+            e = abs(q.dot(a)) / (half * (1 + 0.35 * f) * (1 + 0.6 * _wave(w2, x * 1.7, y * 1.7)))
+            if e >= 1 or f >= 1:
+                continue
+            z = z * (1 - e ** 6) ** 0.5 - 0.25 * max(0.0, -d)
+            best = max(best, z + 0.035 * _wave(w, x, y) * (1 - f))
+        return best
+
+    def mound_z(x, y):
+        u, v = (x - cx) / hx, (y - cy) / hy
+        d = (abs(u) ** 4 + abs(v) ** 4) ** 0.25
+        z = z0 + peak * max(0.0, 1.0 - d * d) ** 0.85 + _wave(w, x, y) * min(1.0, max(0.0, (1.0 - d) * 4))
+        if slump:
+            z = slump(x, y, z)
+        return max(z, cone_z(x, y))
+
+    _solid_grid(k, root, "gold_mound", ix0, ix1, iy0, iy1, mound_z, 60, 44)
+    if cones:
+        m = 2.4
+        _solid_grid(k, root, "gold_spill", X0 - m, X1 + m, Y0 - m, Y1 + m,
+                    lambda x, y: max(-0.04, cone_z(x, y)) if not (ix0 < x < ix1 and iy0 < y < iy1) else -0.04,
+                    96, 76)
+
+
+def _coins(scene, k, root, rnd, n, bounds):
+    """Lay loose coins on the gold surfaces: a ray straight down at random points; a coin goes where the
+    ray first meets gold, lying in the surface with a small tilt (never on air, never under debris)."""
+    import bpy
+    from mathutils import Matrix
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    x0, x1, y0, y1 = bounds
+    placed = 0
+    for _ in range(n * 3):
+        if placed >= n:
+            break
+        x, y = rnd.uniform(x0, x1), rnd.uniform(y0, y1)
+        ok, loc, nor, _, obj, _ = scene.ray_cast(dg, Vector((x, y, 12.0)), Vector((0, 0, -1)))
+        if not ok or not obj.name.startswith("gold_") or loc.z < 0.01:
+            continue
+        nor = nor.normalized()
+        tilt = Vector((rnd.gauss(0, 0.18), rnd.gauss(0, 0.18), 1.0)).normalized()
+        up = (Matrix.Rotation(0, 3, "Z") @ (nor.to_track_quat("Z", "Y").to_matrix() @ tilt)).normalized()
+        rot = up.to_track_quat("Z", "Y").to_matrix() @ Matrix.Rotation(rnd.uniform(0, 6.3), 3, "Z")
+        k.cylinder("coin", 0.1, 0.022, loc + up * rnd.uniform(-0.004, 0.008) - up * 0.011, "gold_coins", segs=12,
+                   rot=rot.to_euler(), parent=root, bevel=False)
+        placed += 1
+    # coins on the steep faces (the sheets running down the walls): rays from the two camera sides
+    for _ in range(n // 3):
+        if rnd.random() < 0.5:
+            o, d = Vector((rnd.uniform(x0, x1), y0 - 1.0, rnd.uniform(0.05, 2.6))), Vector((0, 1, 0))
+        else:
+            o, d = Vector((x1 + 1.0, rnd.uniform(y0, y1), rnd.uniform(0.05, 2.6))), Vector((-1, 0, 0))
+        ok, loc, nor, _, obj, _ = scene.ray_cast(dg, o, d)
+        if not ok or not obj.name.startswith("gold_") or abs(nor.z) > 0.75:
+            continue
+        nor = nor.normalized()
+        tilt = Vector((rnd.gauss(0, 0.2), rnd.gauss(0, 0.2), 1.0)).normalized()
+        up = (nor.to_track_quat("Z", "Y").to_matrix() @ tilt).normalized()
+        rot = up.to_track_quat("Z", "Y").to_matrix() @ Matrix.Rotation(rnd.uniform(0, 6.3), 3, "Z")
+        k.cylinder("coin", 0.1, 0.022, loc - up * 0.006, "gold_coins", segs=12, rot=rot.to_euler(), parent=root,
+                   bevel=False)
+
+
+def damage_hook(scene, state, info, phase):
+    """Rebuild the gold for a damage state: it pours out of the breach instead of being cut."""
+    import bpy
+    level = int(scene.get("treasury_level", 1))
+    root = next((o for o in scene.objects if o.name.startswith("treasury") and o.type == "EMPTY"), None)
+    k = info["kit"]
+    rnd = random.Random(int(scene.get("treasury_level", 1)) * 31 + (7 if state == "damaged" else 13))
+    if phase == "structure":
+        for o in [o for o in scene.objects if o.name.startswith(("gold_", "coin")) and not o.name.startswith("coin_heap")]:
+            bpy.data.objects.remove(o)
+        _hoard(k, root, level, rnd, state, info)
+    else:
+        _coins(scene, k, root, rnd, {"damaged": 650, "rubble": 450}.get(state, 600) + 60 * level,
+               (X0 - 2.4, X1 + 2.4, Y0 - 2.4, Y1 + 2.4))
 
 
 def _gold(k, root, level, rnd):
@@ -192,7 +327,7 @@ def _gold(k, root, level, rnd):
         chest(k, root, base + Vector((2.1, 1.0, 0)), (0.9, 0.55, 0.5), 0.9, "timber_oak" if level < 5 else
               "timber_red", "iron_black" if level < 5 else "gold_trim", open_=True)
     if level >= 4:                                       # ingots stacked crosswise
-        st = base + Vector((-0.6, 0.0, 0))
+        st = Vector((2.9, -2.75, 0))
         for L in range(3 if level == 4 else 5):
             for i in range(3):
                 if L % 2 == 0:

@@ -1,19 +1,30 @@
 """Damage states for any built model (buildings and guns), applied to the scene after
 build() and before materials_photoreal.stamp():
 
-  damaged  a shell breach in one upper front corner: every part above a bowl-shaped
-           cut surface around the hit is removed (blocks, planks and roof pieces are
-           really cut, the cut faces capped), glass in the breach is gone, wood near
-           the hit is charred, and the fallen material lies in a heap below the hole.
-  rubble   the whole object is cut down to a ragged stump 0.2 to 1.3 m high; what was
-           above lies around it as a heap of the same materials (stone chunks, broken
-           planks and beams, bent plates), with ash and charred timber.
-  wreck    the rubble state for a gun: a lower ragged cut that keeps the carriage and
-           the base, the turret knocked askew first (pass `tilt`).
+  damaged  a shell breach at the upper front-right corner (the side the camera sees).
+  rubble   the building knocked down to ragged stumps, its roof fallen in.
+  wreck    a gun torn open by a blast on one side, its turret knocked askew (`tilt`).
 
-The heap is built from the materials of the parts that were removed, in proportion to
-their volume, so a stone hall leaves stone rubble and a log hut leaves charred logs.
-Everything is deterministic for a seed. Uses only Kit primitives for the heap.
+How it stays real rather than modelled:
+  * The breach is a noisy blob (radial noise on a sphere), never a clean bowl. Small
+    pieces (masonry blocks, planks, shingles, panels, gun parts: anything under
+    UNIT_M) are taken out whole when their centre lies inside it, so masonry breaks
+    along its joints and the edge is stepped. Big pieces (inner fills, long logs and
+    beams, gables, decks) are cut by the same blob with a boolean, so their edges are
+    as ragged as the blob.
+  * The pieces taken out ARE the debris: stone blocks split in two or three along
+    random planes, planks and beams snap into lengths with slanted ends, and then
+    everything falls under rigid body physics (Bullet), pushed outward by a short
+    blast, onto the ground, the floor inside and the remaining walls. Gravel and
+    a ragged dust bed go with it. Nothing is placed in a heap by formula, nothing
+    floats.
+  * Shingles round the breach sag into it, two or three broken rafters fall in.
+  * Soot fades with distance from the hit: stone to stone_soot, wood to
+    timber_charred, paint to paint_soot.
+  * A model can rebuild its own contents for a state with damage_hook(scene, state,
+    info, phase) (the treasury's gold: it pours out of the breach rather than being cut).
+
+Everything is deterministic for a seed.
 """
 import math
 import random
@@ -27,6 +38,11 @@ from .geo import Kit
 WOOD = ("timber", "log", "wood", "plank")
 GLASSY = ("glass", "screen", "arc_glow", "ember")
 CLOTH = ("canvas", "flag", "burlap", "cloth", "rope", "hemp", "webbing", "leather", "uniform")
+STONE = ("stone", "brick", "concrete", "slate", "marble")
+HIDDEN = ("core", "roof_deck", "mortar", "gate_dark", "door_recess", "win_dark", "lock_back")
+ROOFING = ("shingle", "slate", "roof_tile")
+UNIT_M = 1.5            # pieces up to this size come out whole; bigger ones are cut
+KEEP = ("gold_", "coin")  # left to the model's damage_hook
 
 
 def _mat_name(obj):
@@ -102,226 +118,590 @@ def _cut(obj, co, no):
     obj.data.update()
 
 
+# ---------------------------------------------------------------------------
+# geometry helpers
+def _local_dims(obj):
+    vs = [v.co for v in obj.data.vertices]
+    if not vs:
+        return Vector((0, 0, 0)), Vector((0, 0, 0))
+    lo = Vector((min(v.x for v in vs), min(v.y for v in vs), min(v.z for v in vs)))
+    hi = Vector((max(v.x for v in vs), max(v.y for v in vs), max(v.z for v in vs)))
+    return lo, hi
+
+
+def _long_axis(obj):
+    """World direction and length of the object's longest local axis."""
+    lo, hi = _local_dims(obj)
+    d = hi - lo
+    mw = obj.matrix_world.to_3x3()
+    axes = [(mw.col[i] * d[i]) for i in range(3)]
+    i = max(range(3), key=lambda j: axes[j].length)
+    ln = [a.length for a in axes]
+    return axes[i].normalized(), ln[i], sorted(ln)
+
+
+def _manifold(obj):
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    ok = len(bm.faces) > 3 and all(e.is_manifold for e in bm.edges)
+    bm.free()
+    return ok
+
+
+def _empty_mesh(obj):
+    return obj.type == "MESH" and len(obj.data.polygons) == 0
+
+
+def _split(obj, co, no):
+    """Split a mesh object in two along a plane; returns the non-empty halves."""
+    dup = obj.copy()
+    dup.data = obj.data.copy()
+    for coll in obj.users_collection:
+        coll.objects.link(dup)
+    _cut(obj, co, no)
+    _cut(dup, co, -no)
+    out = []
+    for o in (obj, dup):
+        if _empty_mesh(o):
+            bpy.data.objects.remove(o)
+        else:
+            out.append(o)
+    return out
+
+
+def _unparent(obj):
+    mw = obj.matrix_world.copy()
+    obj.parent = None
+    obj.matrix_world = mw
+
+
+class _Blob:
+    """A lumpy closed region round a centre: radius R with radial noise, stretched by S."""
+
+    def __init__(self, rnd, centre, R, S=(1.0, 1.0, 1.0), amp=0.32):
+        self.c = Vector(centre)
+        self.R = R
+        self.S = Vector(S)
+        self.amp = amp
+        self.w = [(Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(1.5, 5.0),
+                   rnd.uniform(0, 2 * math.pi), rnd.uniform(0.4, 1.0)) for _ in range(9)]
+        self.w += [(Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(6.0, 11.0),
+                    rnd.uniform(0, 2 * math.pi), rnd.uniform(0.15, 0.3)) for _ in range(6)]
+        self.norm = sum(a for *_, a in self.w)
+
+    def shrunk(self, f):
+        """The same lumpy shape at f times the size (cuts hidden layers just behind the visible edge)."""
+        b = _Blob.__new__(_Blob)
+        b.c, b.R, b.S, b.amp, b.w, b.norm = self.c, self.R * f, self.S, self.amp, self.w, self.norm
+        return b
+
+    def radius(self, d):
+        s = sum(a * math.sin(k.dot(d) + p) for k, p, a in self.w) / self.norm
+        return self.R * (1.0 + self.amp * s)
+
+    def value(self, p):
+        """< 1 inside, 1 on the surface."""
+        q = Vector(p) - self.c
+        q = Vector((q.x / self.S.x, q.y / self.S.y, q.z / self.S.z))
+        if q.length < 1e-6:
+            return 0.0
+        return q.length / self.radius(q.normalized())
+
+    def cutter(self, name="damage_cutter"):
+        bm = bmesh.new()
+        bmesh.ops.create_icosphere(bm, subdivisions=4, radius=1.0)
+        for v in bm.verts:
+            d = v.co.normalized()
+            r = self.radius(d)
+            v.co = self.c + Vector((d.x * self.S.x, d.y * self.S.y, d.z * self.S.z)) * r
+        me = bpy.data.meshes.new(name)
+        bm.to_mesh(me)
+        bm.free()
+        o = bpy.data.objects.new(name, me)
+        bpy.context.scene.collection.objects.link(o)
+        o.hide_render = True
+        return o
+
+
+def _height_cutter(cut_z, x0, x1, y0, y1, n=48, name="damage_cutter"):
+    """Closed solid of everything above the surface z = cut_z(x, y) over a rectangle."""
+    top = 40.0
+    vs, fs = [], []
+    for j in range(n + 1):
+        for i in range(n + 1):
+            x, y = x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * j / n
+            vs.append((x, y, cut_z(x, y)))
+    off = len(vs)
+    for j in range(n + 1):
+        for i in range(n + 1):
+            x, y = x0 + (x1 - x0) * i / n, y0 + (y1 - y0) * j / n
+            vs.append((x, y, top))
+    idx = lambda i, j, t=0: t + j * (n + 1) + i  # noqa: E731
+    for j in range(n):
+        for i in range(n):
+            fs.append((idx(i, j), idx(i, j + 1), idx(i + 1, j + 1), idx(i + 1, j)))          # bottom (faces down)
+            fs.append((idx(i, j, off), idx(i + 1, j, off), idx(i + 1, j + 1, off), idx(i, j + 1, off)))
+    edge = [(i, 0) for i in range(n)] + [(n, j) for j in range(n)] + [(i, n) for i in range(n, 0, -1)] + \
+           [(0, j) for j in range(n, 0, -1)]
+    for a in range(len(edge)):
+        (i0, j0), (i1, j1) = edge[a], edge[(a + 1) % len(edge)]
+        fs.append((idx(i0, j0), idx(i1, j1), idx(i1, j1, off), idx(i0, j0, off)))
+    me = bpy.data.meshes.new(name)
+    me.from_pydata(vs, [], fs)
+    me.validate()
+    me.update()
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    o.hide_render = True
+    return o
+
+
+def _boolean(obj, cutter):
+    m = obj.modifiers.new("Damage", "BOOLEAN")
+    m.operation = "DIFFERENCE"
+    m.object = cutter
+    m.solver = "EXACT"
+    try:
+        m.use_hole_tolerant = True
+    except AttributeError:
+        pass
+
+
+def _bake_modifiers(objs):
+    """Apply every modifier (bevel and the damage boolean) so physics and stamp see the result."""
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    for o in objs:
+        if o.name not in bpy.data.objects or not o.modifiers:
+            continue
+        me = bpy.data.meshes.new_from_object(o.evaluated_get(dg))
+        mats = [m for m in o.data.materials]
+        o.modifiers.clear()
+        o.data = me
+        if not me.materials:
+            for m in mats:
+                me.materials.append(m)
+        if len(me.polygons) == 0:
+            bpy.data.objects.remove(o)
+
+
+def _bed(k, name, centre, rx, ry, h, rnd, mat, n=40, sink=0.03):
+    """A ragged low heightfield (dust bed, earth mound) with noisy edges, bottom below ground."""
+    nz = _Noise(rnd, n=7, scale=0.35)
+    nz2 = _Noise(rnd, n=5, scale=0.9)
+    cx, cy = centre[0], centre[1]
+    vs, fs = [], []
+    for j in range(n + 1):
+        for i in range(n + 1):
+            u, v = -1 + 2 * i / n, -1 + 2 * j / n
+            x, y = cx + u * rx, cy + v * ry
+            d = math.hypot(u, v) * (1 + 0.35 * nz2(x, y))
+            z = h * max(0.0, 1 - d * d) ** 0.9 * (0.7 + 0.3 * nz(x, y)) if d < 1 else 0.0
+            vs.append((x, y, z - sink if z <= 1e-4 else z + rnd.uniform(-0.01, 0.01)))
+    for j in range(n):
+        for i in range(n):
+            a = j * (n + 1) + i
+            fs.append((a, a + 1, a + n + 2, a + n + 1))
+    o = k.mesh(name, vs, fs)
+    k._finish(o, mat, bevel=False)
+    return o
+
+
+def _pebble(k, name, loc, s, mat, rnd):
+    bm = bmesh.new()
+    bmesh.ops.create_icosphere(bm, subdivisions=1, radius=1.0)
+    sc = Vector((s, s * rnd.uniform(0.55, 1.0), s * rnd.uniform(0.4, 0.8)))
+    for v in bm.verts:
+        v.co = Vector((v.co.x * sc.x, v.co.y * sc.y, v.co.z * sc.z)) * rnd.uniform(0.8, 1.15)
+    me = bpy.data.meshes.new(name)
+    bm.to_mesh(me)
+    bm.free()
+    o = bpy.data.objects.new(name, me)
+    bpy.context.scene.collection.objects.link(o)
+    o.location = loc
+    o.rotation_euler = (rnd.uniform(0, 6.3), rnd.uniform(0, 6.3), rnd.uniform(0, 6.3))
+    o.data.materials.append(_material(mat, k.style))
+    return o
+
+
+# ---------------------------------------------------------------------------
+# physics
+def _simulate(scene, active, passive, blast=None, frames=72):
+    """Drop `active` objects under gravity onto `passive` ones and the ground (Bullet rigid bodies),
+    optionally pushed outward by a short blast (centre, strength, radius). Leaves the objects at
+    their resting transforms with no simulation attached."""
+    if not active:
+        return
+    ctx = bpy.context
+    if scene.rigidbody_world is None:
+        bpy.ops.rigidbody.world_add()
+    rbw = scene.rigidbody_world
+    rbw.point_cache.frame_start = 1
+    rbw.point_cache.frame_end = frames
+    for attr, val in (("substeps_per_frame", 8), ("solver_iterations", 20)):
+        if hasattr(rbw, attr):
+            setattr(rbw, attr, val)
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(0, 0, -0.25))
+    ground = ctx.active_object
+    ground.name = "damage_ground"
+    ground.scale = (60, 60, 0.5)
+    ground.hide_render = True
+
+    def add(objs, typ):
+        bpy.ops.object.select_all(action="DESELECT")
+        for o in objs:
+            o.select_set(True)
+        ctx.view_layer.objects.active = objs[0]
+        bpy.ops.rigidbody.objects_add(type=typ)
+
+    for o in active:
+        if o.parent is not None:
+            _unparent(o)
+    add([ground] + passive, "PASSIVE")
+    ground.rigid_body.collision_shape = "BOX"
+    for o in passive:
+        rb = o.rigid_body
+        if rb is None:
+            continue
+        big = max(o.dimensions) > UNIT_M or o.name.startswith(("dust_bed", "rubble_bed", "gold_"))
+        rb.collision_shape = "MESH" if big else "CONVEX_HULL"
+        if big:
+            rb.mesh_source = "FINAL"
+        rb.collision_margin = 0.002
+        rb.friction = 0.9
+    add(active, "ACTIVE")
+    for o in active:
+        rb = o.rigid_body
+        d = o.dimensions
+        rb.collision_shape = "CONVEX_HULL"
+        rb.mass = max(0.02, d.x * d.y * d.z * 1.6)
+        rb.friction = 0.85
+        rb.restitution = 0.02
+        rb.linear_damping = 0.25
+        rb.angular_damping = 0.45
+        rb.collision_margin = 0.002
+    field = None
+    if blast is not None:
+        c, strength, radius = blast
+        bpy.ops.object.effector_add(type="FORCE", location=c)
+        field = ctx.active_object
+        field.field.falloff_type = "SPHERE"
+        field.field.use_max_distance = True
+        field.field.distance_max = radius
+        field.field.strength = strength
+        field.keyframe_insert("field.strength", frame=1)
+        field.keyframe_insert("field.strength", frame=3)
+        field.field.strength = 0.0
+        field.keyframe_insert("field.strength", frame=4)
+    for f in range(1, frames + 1):
+        scene.frame_set(f)
+    rest = {o: o.matrix_world.copy() for o in active}
+    bpy.ops.rigidbody.world_remove()
+    if field is not None:
+        bpy.data.objects.remove(field)
+    bpy.data.objects.remove(ground)
+    scene.frame_set(1)
+    for o, mw in rest.items():
+        o.matrix_world = mw
+    bpy.context.view_layer.update()
+
+
+# ---------------------------------------------------------------------------
+def _info_hit(boxes, rnd):
+    """The front-right upper corner of the main body (the corner the camera sees)."""
+    walls = [b for o, b in boxes.items() if o.name.startswith("core")] or list(boxes.values())
+    hx = max(b[1].x for b in walls)
+    hy = min(b[0].y for b in walls)
+    top = max(b[1].z for b in walls)
+    return Vector((hx - 0.6 + rnd.uniform(-0.2, 0.2), hy + 0.6 + rnd.uniform(-0.2, 0.2), top * 0.95)), walls, top
+
+
 def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photoreal", heap_scale=1.0,
-          keep=()):
-    """Damage everything in the scene (except terrain) in place. Returns the heap root."""
+          keep=(), hook=None):
+    """Damage everything in the scene (except terrain) in place."""
     rnd = random.Random(seed)
+    k = Kit(style)
     _curves_to_meshes(scene)
-    objs = [o for o in scene.objects if o.type == "MESH" and not o.get("terrain") and o.name not in keep]
-    if tilt is not None:                        # knock a turret askew before cutting (guns)
+    if tilt is not None:                        # knock a turret askew first (guns)
         node, rot = tilt
         node.rotation_euler = (node.rotation_euler[0] + rot[0], node.rotation_euler[1] + rot[1],
                                node.rotation_euler[2] + rot[2])
-        bpy.context.view_layer.update()
-    boxes = {o: _world_bbox(o) for o in objs}
-    boxes = {o: b for o, b in boxes.items() if b is not None}
+    bpy.context.view_layer.update()
+    objs = [o for o in scene.objects if o.type == "MESH" and not o.get("terrain") and o.name not in keep
+            and not o.name.startswith(KEEP)]
+    boxes = {o: b for o, b in ((o, _world_bbox(o)) for o in objs) if b is not None}
     if not boxes:
         return None
     zmax = max(b[1].z for b in boxes.values())
-    noise = _Noise(rnd, scale=1.2)
-    noise2 = _Noise(rnd, scale=0.4)
 
-    if state == "wreck":                        # a gun: one blast tears a side away, the rest is burnt
+    # --- the region that is destroyed -------------------------------------------------
+    cut_z = None
+    if state == "wreck":
         ang = rnd.uniform(0, 2 * math.pi)
-        rr = footprint * rnd.uniform(0.4, 0.6)
-        hit = Vector((math.cos(ang) * rr, math.sin(ang) * rr, max(1.0, zmax * 0.55)))
-        R = max(1.0, min(2.2, footprint * 0.4))
-
-        def cut_z(x, y):
-            d = math.hypot(x - hit.x, y - hit.y) / R
-            if d >= 1.0:
-                return 1e9
-            return max(0.15, hit.z + 0.4 - (1.0 - d * d) * (hit.z + 0.4) * (1 + 0.3 * noise2(x, y)))
+        rr = footprint * rnd.uniform(0.35, 0.55)
+        hit = Vector((math.cos(ang) * rr, math.sin(ang) * rr, max(0.9, zmax * 0.5)))
+        R = max(1.0, min(2.0, footprint * 0.38))
+        blob = _Blob(rnd, hit, R, (1.0, 1.0, 1.1))
+        blob_hidden = blob
     elif state == "damaged":
-        if hit is None:                         # the front-right corner of the main body (camera side)
-            walls = [b for o, b in boxes.items() if o.name.startswith("core")] or list(boxes.values())
-            hx = max(b[1].x for b in walls)
-            hy = min(b[0].y for b in walls)
-            top = max(b[1].z for b in walls)
-            hit = Vector((hx - 0.5 + rnd.uniform(-0.2, 0.2), hy + 0.5 + rnd.uniform(-0.2, 0.2), top * 0.85))
-        hit = Vector(hit)
-        R = max(2.0, min(2.6, hit.z * 0.6))
+        auto, walls, top = _info_hit(boxes, rnd)
+        hit = Vector(hit) if hit is not None else auto
+        R = max(1.7, min(2.5, top * 0.5))
+        blob = _Blob(rnd, hit, R, (1.0, 1.0, 1.45), amp=0.5)
+        blob_hidden = blob.shrunk(1.12)
+    else:                                       # rubble
+        noise, noise2, noise3 = _Noise(rnd, scale=1.2), _Noise(rnd, scale=0.45), _Noise(rnd, scale=0.18)
+        cores = [b for o, b in boxes.items() if o.name.startswith("core")] or list(boxes.values())
+        top = max(b[1].z for b in cores)
+        cx0, cx1 = min(b[0].x for b in cores), max(b[1].x for b in cores)
+        cy0, cy1 = min(b[0].y for b in cores), max(b[1].y for b in cores)
+        corner = Vector((rnd.choice((cx0, cx1)), rnd.choice((cy0, cy1)), 0))
+        bonus = top * rnd.uniform(0.35, 0.6)
+        lo_z, hi_z = 0.25, min(1.6, 0.35 * top + 0.5)
 
         def cut_z(x, y):
-            d = math.hypot(x - hit.x, y - hit.y) / R
-            if d >= 1.0:
-                return 1e9
-            depth = (1.0 - d * d) * (hit.z * 0.8 + 0.6) * (1 + 0.25 * noise2(x, y))
-            return hit.z + 0.6 - depth
-    else:
-        lo_z, hi_z = (0.2, 1.3) if state == "rubble" else (0.45, 1.25)
+            t = 0.5 + 0.5 * noise(x, y) + 0.3 * noise2(x, y)
+            z = lo_z + (hi_z - lo_z) * max(0.0, min(1.0, t)) + 0.12 * noise3(x, y)
+            d = math.hypot(x - corner.x, y - corner.y)
+            return z + bonus * max(0.0, 1 - d / 2.6) ** 1.6
 
-        def cut_z(x, y):
-            t = 0.5 + 0.5 * noise(x, y) + 0.25 * noise2(x, y)
-            return lo_z + (hi_z - lo_z) * max(0.0, min(1.0, t))
+        hit = Vector(((cx0 + cx1) / 2, (cy0 + cy1) / 2, top * 0.5))
+        R = footprint
+        blob = blob_hidden = None
 
-    removed = []                                # (material, volume, centre, size)
+    blob_roof = None
+    if state == "damaged":                      # the roof over the breach falls in, so light reaches the room
+        blob_roof = _Blob(rnd, hit, R * 0.9, (1.0, 1.0, 5.0), amp=0.45)
+    zones = {"main": blob, "hidden": blob_hidden, "roof": blob_roof or blob,
+             "roof_hidden": (blob_roof or blob).shrunk(1.12) if blob is not None else None}
+
+    def gone(p, key):
+        if cut_z is not None:
+            return p.z > cut_z(p.x, p.y) - (0.35 if "hidden" in key else 0.0)
+        return zones[key].value(p) < 1.0
+
+    # --- take pieces out, cut the big ones --------------------------------------------
+    removed = []
+    big = []
+    cutters = {}
     for o, (lo, hi) in list(boxes.items()):
         c = (lo + hi) / 2
         mat = _mat_name(o)
-        if state == "damaged" and any(g in mat for g in GLASSY):
-            if math.hypot(c.x - hit.x, c.y - hit.y) < R * 1.1:
-                bpy.data.objects.remove(o)
-            continue
-        z = cut_z(c.x, c.y)
-        hidden = o.name.startswith(("core", "roof_deck", "mortar", "gate_dark", "door_recess"))
-        if state == "damaged" and hidden and max(hi.x - lo.x, hi.y - lo.y) > 1.5:
-            # big inner fill: slice a wedge off toward the hit, through the bottom of the bowl
-            out = Vector((hit.x - c.x, hit.y - c.y, 0))
-            if out.length > 1e-3:
-                bottom = cut_z(hit.x, hit.y)
-                no = (out.normalized() * 0.8 + Vector((0, 0, 0.6))).normalized()
-                p0 = Vector((hit.x, hit.y, bottom)) - out.normalized() * R * 0.45
-                _cut(o, p0, no)
-                if o.name.startswith("core"):
-                    o.data.materials[0] = _material("ash", style)
-            continue
-        if lo.z >= z:
-            size = hi - lo
-            if not hidden:
-                removed.append((mat, size.x * size.y * size.z, c, size))
-            bpy.data.objects.remove(o)
-            continue
-        if hi.z <= z:
-            continue
-        # gradient of the cut surface gives the plane's tilt (ragged, not flat)
-        e = 0.15
-        gx = (cut_z(c.x + e, c.y) - cut_z(c.x - e, c.y)) / (2 * e)
-        gy = (cut_z(c.x, c.y + e) - cut_z(c.x, c.y - e)) / (2 * e)
-        gx = max(-2.5, min(2.5, gx)) if abs(gx) < 1e8 else 0.0
-        gy = max(-2.5, min(2.5, gy)) if abs(gy) < 1e8 else 0.0
-        no = Vector((-gx, -gy, 1.0)).normalized()
         size = hi - lo
-        if hidden or max(size.x, size.y) > 2.0:     # big inner fills and long members: cut level, lower
-            if state != "damaged":
-                z = min(z, lo.z + 0.25 + 0.3 * rnd.random()) if hidden else z
-                no = Vector((rnd.uniform(-0.05, 0.05), rnd.uniform(-0.05, 0.05), 1.0)).normalized()
+        hidden = o.name.startswith(HIDDEN)
+        key = "roof" if o.name.startswith(ROOFING + ("roof", "ridge")) else "main"
+        if hidden:
+            key = "roof_hidden" if key == "roof" else "hidden"
+        if state in ("rubble", "damaged") and o.name.startswith("core"):
+            bpy.data.objects.remove(o)                       # the room inside shows; the walls close it
+            continue
+        if any(g in mat for g in GLASSY) and (state != "damaged" or blob.value(c) < 1.4):
+            bpy.data.objects.remove(o)                       # glass shattered
+            continue
+        unit = max(size) <= UNIT_M and not hidden
+        if unit or not _manifold(o):
+            if gone(c, key):
+                if hidden or any(cl in mat for cl in CLOTH) and state != "wreck":
+                    bpy.data.objects.remove(o)               # hidden fill / burnt cloth: nothing falls
+                else:
+                    removed.append(o)
+            continue
+        # a big piece: does the region touch it at all?
+        if cut_z is not None:
+            touch = hi.z > min(cut_z(x, y) for x in (lo.x, c.x, hi.x) for y in (lo.y, c.y, hi.y)) - 0.4
         else:
-            jag = Vector((rnd.uniform(-0.25, 0.25), rnd.uniform(-0.25, 0.25), 0))
-            no = (no + jag).normalized()
-        frac = (hi.z - z) / max(size.z, 1e-3)
-        if not hidden:
-            removed.append((mat, size.x * size.y * size.z * frac, Vector((c.x, c.y, z)), size))
-        _cut(o, Vector((c.x, c.y, z)), no)
-        if hidden and o.name.startswith("core"):
-            o.data.materials[0] = _material("ash", style)
-        if any(w in mat for w in WOOD) and rnd.random() < (0.85 if state != "damaged" else 0.5):
-            o.data.materials[0] = _material("timber_charred", style)
+            bl = zones[key]
+            q = Vector((max(lo.x, min(bl.c.x, hi.x)), max(lo.y, min(bl.c.y, hi.y)), max(lo.z, min(bl.c.z, hi.z))))
+            touch = (q - bl.c).length < bl.R * 1.4 * max(bl.S)
+        if not touch:
+            continue
+        if key not in cutters:
+            if cut_z is not None:
+                off = 0.35 if "hidden" in key else 0.0
+                cutters[key] = _height_cutter(lambda x, y, off=off: cut_z(x, y) - off, -12, 12, -12, 12)
+            else:
+                cutters[key] = zones[key].cutter("damage_cutter_" + key)
+        _boolean(o, cutters[key])
+        big.append(o)
+    _bake_modifiers(big)
+    for c in cutters.values():
+        bpy.data.objects.remove(c)
 
-    if state == "wreck":                        # burnt: paint scorched, wood charred, cloth gone
-        for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain")]:
-            if not o.data.materials or o.data.materials[0] is None:
-                continue
+    # --- roof round a breach sags into it; rafters fall in ------------------------------
+    rafters = []
+    if state == "damaged":
+        for o in [o for o in scene.objects if o.type == "MESH" and o.name.startswith(ROOFING)]:
+            c = o.matrix_world.translation
+            v = blob.value(c)
+            if 1.0 <= v < 1.4:
+                t = (1.4 - v) / 0.4
+                to = Vector((hit.x - c.x, hit.y - c.y, 0))
+                if to.length > 1e-3:
+                    axis = to.normalized().cross(Vector((0, 0, 1)))
+                    mw = o.matrix_world.copy()
+                    rot = Matrix.Rotation(-0.45 * t * rnd.uniform(0.6, 1.2), 4, axis)
+                    loc = mw.translation.copy()
+                    mw.translation = (0, 0, 0)
+                    mw = rot @ mw
+                    mw.translation = loc - Vector((0, 0, 0.35 * t))
+                    o.matrix_world = mw
+        if any(o.name.startswith(ROOFING + ("ridge", "roof")) for o in removed):
+            for i in range(rnd.randint(2, 3)):
+                L = rnd.uniform(1.8, 2.8)
+                yaw = rnd.uniform(0, math.pi)
+                p = hit + Vector((rnd.uniform(-0.6, 0.6), rnd.uniform(-0.6, 0.6), 0.3 + 0.35 * i))
+                b = k.box("rafter_broken", (L, 0.12, 0.16), p, "timber_charred",
+                          rot=(rnd.uniform(-0.3, 0.3), rnd.uniform(-0.2, 0.2), yaw), bevel=0.01)
+                rafters.append(b)
+
+    # --- break the pieces that fell -----------------------------------------------------
+    cap = {"damaged": 520, "rubble": 420, "wreck": 160}[state]
+    rnd.shuffle(removed)
+    if len(removed) > cap:
+        for o in removed[cap:]:
+            bpy.data.objects.remove(o)
+        removed = removed[:cap]
+    debris = []
+    for o in removed:
+        mat = _mat_name(o)
+        axis, L, dims = _long_axis(o)
+        pieces = [o]
+        if any(w in mat for w in WOOD) and L > 0.7 and L > 3 * dims[1]:     # planks and beams snap
+            n = min(3, max(1, int(L / 0.8)))
+            ts = sorted(rnd.uniform(0.25, 0.75) for _ in range(n)) if n > 1 else [rnd.uniform(0.3, 0.7)]
+            c = o.matrix_world.translation.copy()
+            lo, hi = _local_dims(o)
+            mid = o.matrix_world @ ((lo + hi) / 2)
+            for t in ts:
+                p = mid + axis * (t - 0.5) * L
+                tilt_v = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))) * 0.55
+                no = (axis + tilt_v).normalized()
+                nxt = []
+                for q in pieces:
+                    nxt.extend(_split(q, p, no))
+                pieces = nxt
+        elif any(s_ in mat for s_ in STONE) and dims[2] > 0.15:           # blocks shatter unevenly
+            for _ in range(rnd.choice((2, 2, 3))):
+                nxt = []
+                for q in pieces:
+                    lo, hi = _local_dims(q)
+                    mid = q.matrix_world @ ((lo + hi) / 2)
+                    if max(q.dimensions) < 0.14:
+                        nxt.append(q)
+                        continue
+                    no = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 0.8))).normalized()
+                    off = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1))) * 0.25 * min(q.dimensions)
+                    nxt.extend(_split(q, mid + off, no))
+                pieces = nxt
+        debris.extend(pieces)
+
+    # --- what the debris lands on ------------------------------------------------------
+    beds = []
+    if state == "damaged":
+        out = Vector((hit.x, hit.y, 0))
+        beds.append(_bed(k, "dust_bed", out + Vector((0.4, -0.4, 0)), R * 0.95, R * 0.95, 0.18 * heap_scale, rnd,
+                         "dirt_fill"))
+    elif state == "rubble":
+        mr = Vector(((cx1 - cx0) / 2 + 0.9, (cy1 - cy0) / 2 + 0.9, 0))
+        mh = min(1.1, 0.25 + 0.18 * top) * heap_scale
+        beds.append(_bed(k, "rubble_bed", ((cx0 + cx1) / 2, (cy0 + cy1) / 2), mr.x, mr.y, mh, rnd, "dirt_fill"))
+        beds.append(_bed(k, "dust_bed", ((cx0 + cx1) / 2, (cy0 + cy1) / 2), mr.x + 0.7, mr.y + 0.7, 0.06, rnd, "ash",
+                         n=30))
+    else:
+        beds.append(_bed(k, "dust_bed", (0, 0), footprint * 0.85, footprint * 0.85, 0.03, rnd, "ash", n=30))
+
+    # gravel: small stones of the removed materials
+    mats = [_mat_name(o) for o in debris] or ["stone"]
+    n_gravel = {"damaged": 220, "rubble": 450, "wreck": 60}[state]
+    for i in range(n_gravel):
+        m = rnd.choice(mats)
+        if any(w in m for w in WOOD):
+            m = "timber_charred" if rnd.random() < 0.5 else m
+        elif not any(s_ in m for s_ in STONE):
+            m = "dirt_fill" if rnd.random() < 0.6 else "ash"
+        if state == "rubble":
+            p = Vector((rnd.uniform(cx0 - 0.5, cx1 + 0.5), rnd.uniform(cy0 - 0.5, cy1 + 0.5), rnd.uniform(1.0, 3.0)))
+        else:
+            d = Vector((rnd.gauss(0, 1), rnd.gauss(0, 1), rnd.gauss(0, 1))).normalized() * rnd.uniform(0, R * 0.7)
+            p = hit + d
+            p.z = max(0.3, p.z)
+        debris.append(_pebble(k, "gravel", p, rnd.uniform(0.02, 0.09), m, rnd))
+    debris.extend(rafters)
+
+    if hook is not None:
+        hook(scene, state, {"hit": hit, "R": R, "blob": blob, "cut_z": cut_z, "rnd": rnd, "kit": k}, "structure")
+
+    # --- soot and char fading out from the hit ------------------------------------------
+    for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain") and o.data.materials
+              and o.data.materials[0] is not None and not o.name.startswith(KEEP)]:
+        mat = _mat_name(o)
+        c = o.matrix_world.translation
+        if state == "rubble":
+            p = 0.45
+        else:
+            d = blob.value(c)
+            p = max(0.0, 1.0 - (d - 0.8) / 0.9) * 0.8
+        if p <= 0 or rnd.random() > p:
+            continue
+        if any(w in mat for w in WOOD):
+            o.data.materials[0] = _material("timber_charred", style)
+        elif any(s_ in mat for s_ in STONE) and mat != "slate":
+            o.data.materials[0] = _material("stone_soot", style)
+        elif mat.startswith("paint_"):
+            o.data.materials[0] = _material("paint_soot", style)
+    if state == "wreck":                        # burnt right through: bright metal tarnished, cloth gone
+        for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain") and o.data.materials
+                  and o.data.materials[0] is not None]:
             mat = _mat_name(o)
-            if any(w in mat for w in WOOD) and rnd.random() < 0.75:
-                o.data.materials[0] = _material("timber_charred", style)
-            elif mat.startswith("paint_") and rnd.random() < 0.7:
-                o.data.materials[0] = _material("paint_soot", style)
-            elif mat in ("silver", "silver_satin", "gold_trim", "chrome", "brass", "enamel_white") and rnd.random() < 0.6:
+            if mat in ("silver", "silver_satin", "gold_trim", "chrome", "brass", "enamel_white") and rnd.random() < 0.6:
                 o.data.materials[0] = _material("iron_black", style)
             elif any(cl in mat for cl in CLOTH) and mat not in ("rope", "leather") and rnd.random() < 0.8:
+                if o in debris:
+                    debris.remove(o)
                 bpy.data.objects.remove(o)
 
-    if state == "damaged":                      # char the wood around the breach
-        for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain")]:
-            if not o.data.materials or o.data.materials[0] is None:
-                continue
-            mat = _mat_name(o)
-            if any(w in mat for w in WOOD):
-                b = _world_bbox(o)
-                if b and ((b[0] + b[1]) / 2 - hit).length < R * 1.15 and rnd.random() < 0.7:
-                    o.data.materials[0] = _material("timber_charred", style)
+    # --- let it fall -------------------------------------------------------------------
+    active = [o for o in debris if o.name in bpy.data.objects]
+    aset = set(active)
+    reach = (R + 4.0) if state != "rubble" else footprint * 2
+    passive = []
+    for o in scene.objects:
+        if o.type != "MESH" or o in aset or o.get("terrain") or o.hide_render or not o.data.polygons:
+            continue
+        if o.name.startswith(("mortar", "coin")):
+            continue
+        b = _world_bbox(o)
+        if b is None:
+            continue
+        c = (b[0] + b[1]) / 2
+        if (Vector((c.x, c.y, 0)) - Vector((hit.x, hit.y, 0))).length - max(b[1] - b[0]) / 2 < reach:
+            passive.append(o)
+    blast = None
+    if state == "damaged":
+        blast = (hit - Vector((0.6, -0.6, 0.2)), 14.0, R * 1.5)
+    elif state == "wreck":
+        blast = (hit * 0.6, 40.0, R * 2.0)
+    _simulate(scene, active, passive, blast=blast)
+    for o in active:                            # anything that fell through or flew off the patch
+        if o.name not in bpy.data.objects:
+            continue
+        p = o.matrix_world.translation
+        if p.z < -0.4 or p.xy.length > footprint + 1.0:
+            bpy.data.objects.remove(o)
 
-    return _heap(scene, state, removed, rnd, footprint, hit, style, heap_scale)
+    if hook is not None:
+        hook(scene, state, {"hit": hit, "R": R, "blob": blob, "cut_z": cut_z, "rnd": rnd, "kit": k}, "settled")
+    return None
 
 
 def _material(name, style):
     from . import materials
     return materials.get(name, style)
-
-
-def _heap(scene, state, removed, rnd, footprint, hit, style, heap_scale):
-    """Lay the removed volume on the ground as rubble of the same materials."""
-    k = Kit(style)
-    root = k.empty("rubble_heap")
-    root["damage"] = state
-    vol = {}
-    where = {}
-    for mat, v, c, size in removed:
-        if any(g in mat for g in GLASSY):
-            continue
-        key = "timber_charred" if (any(w in mat for w in WOOD) and rnd.random() < 0.6) else mat
-        if any(cl in mat for cl in CLOTH):
-            key = "ash" if rnd.random() < 0.5 else mat
-        vol[key] = vol.get(key, 0.0) + v
-        where.setdefault(key, []).append(c)
-    total = sum(vol.values())
-    if total <= 0:
-        return root
-    # the heap is shallower than the solid volume (debris is loose) and kept inside the footprint
-    budget = {"rubble": 900, "wreck": 160}.get(state, 260)
-    if state in ("damaged", "wreck"):
-        centre = Vector((hit.x, hit.y, 0))
-        spread = 2.0 if state == "damaged" else min(2.0, footprint * 0.5)
-    else:
-        centre = Vector((0, 0, 0))
-        spread = footprint * 0.85
-    # earth and ash mound under the chunks
-    if state == "rubble":
-        mr = spread * 0.9
-        mh = min(1.0, 0.25 + total ** (1 / 3) * 0.12) * heap_scale
-        k.lathe("rubble_mound", [(0, 0.0), (0, mr), (mh * 0.25, mr * 0.75), (mh * 0.6, mr * 0.45), (mh, mr * 0.12),
-                                 (mh, 0.0)], "dirt_fill", segs=40, loc=centre, rot=(math.pi / 2, 0, 0), parent=root)
-        k.lathe("ash_bed", [(0, 0.0), (0, mr * 1.08), (0.04, mr * 1.0), (0.05, 0.0)], "ash", segs=40,
-                loc=centre, rot=(math.pi / 2, 0, 0), parent=root)
-    else:
-        mr, mh = spread, (max(0.5, hit.z * 0.35) if state == "damaged" else 0.15) * heap_scale
-        k.lathe("rubble_mound", [(0, 0.0), (0, mr), (mh * 0.4, mr * 0.6), (mh, 0.0)], "dirt_fill", segs=28,
-                loc=centre, rot=(math.pi / 2, 0, 0), parent=root)
-        if state == "wreck":                    # scorched ground under the whole gun
-            fr = footprint * 0.85
-            k.lathe("ash_bed", [(0, 0.0), (0, fr), (0.02, fr * 0.9), (0.03, 0.0)], "ash", segs=40,
-                    loc=Vector((0, 0, 0)), rot=(math.pi / 2, 0, 0), parent=root)
-
-    def mound_z(x, y):
-        d = math.hypot(x - centre.x, y - centre.y) / mr
-        return max(0.0, mh * (1 - d * d)) if d < 1 else 0.0
-
-    for mat, v in sorted(vol.items(), key=lambda kv: -kv[1]):
-        n = max(3, int(budget * v / total))
-        pts = where[mat]
-        wood = any(w in mat for w in WOOD) or mat == "timber_charred"
-        metal = any(m in mat for m in ("iron", "steel", "brass", "bronze", "copper", "gold", "silver", "gunmetal",
-                                       "chrome", "paint"))
-        for i in range(n):
-            src = pts[rnd.randrange(len(pts))]
-            if state in ("damaged", "wreck"):
-                ang = rnd.uniform(0, 2 * math.pi)
-                r = spread * math.sqrt(rnd.random())
-                x, y = centre.x + math.cos(ang) * r, centre.y + math.sin(ang) * r
-            else:
-                x = src.x * 0.6 + rnd.gauss(0, 0.7)
-                y = src.y * 0.6 + rnd.gauss(0, 0.7)
-                lim = footprint - 0.4
-                x, y = max(-lim, min(lim, x)), max(-lim, min(lim, y))
-            z = mound_z(x, y)
-            rot = (rnd.uniform(-0.6, 0.6), rnd.uniform(-0.6, 0.6), rnd.uniform(0, math.pi))
-            if wood:
-                L = rnd.uniform(0.5, 2.2)
-                w = rnd.uniform(0.06, 0.2)
-                k.box("debris_beam", (L, w, w * rnd.uniform(0.4, 1.0)), (x, y, z + w * 0.4), mat,
-                      rot=(rnd.uniform(-0.25, 0.25), rnd.uniform(-0.35, 0.35), rnd.uniform(0, math.pi)),
-                      parent=root, bevel=0.01)
-            elif metal:
-                s = rnd.uniform(0.2, 0.7)
-                k.box("debris_plate", (s, s * rnd.uniform(0.4, 1.0), 0.03), (x, y, z + 0.05), mat,
-                      rot=(rnd.uniform(-0.5, 0.5), rnd.uniform(-0.5, 0.5), rnd.uniform(0, math.pi)), parent=root,
-                      bevel=0.005)
-            else:
-                s = rnd.uniform(0.12, 0.42)
-                k.box("debris_chunk", (s, s * rnd.uniform(0.6, 1.1), s * rnd.uniform(0.5, 0.9)),
-                      (x, y, z + s * 0.25), mat, rot=rot, parent=root, bevel=0.02 + s * 0.05)
-    return root
 
 
 def occupy(scene, style="photoreal", seed=1):

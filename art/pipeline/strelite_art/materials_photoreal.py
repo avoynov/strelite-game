@@ -64,6 +64,7 @@ SPEC = {
     # damage states (damage.py): burnt timber and ash/soot on the ground of a wreck
     "timber_charred": ("timber", dict(light=(0.085, 0.07, 0.06), dark=(0.025, 0.02, 0.018), rough=0.92, weather=0.1,
                                       dust=0.35, checks=1.6)),
+    "stone_soot":    ("stone", dict(light=(0.17, 0.16, 0.15), dark=(0.07, 0.066, 0.06))),   # scorched masonry
     "ash":           ("plain", dict(color=(0.075, 0.07, 0.065), rough=0.95, dust=0.5)),
     "slate":         ("plain", dict(color=(0.11, 0.12, 0.13), rough=0.55, dust=0.35)),
     "verdigris":     ("plain", dict(color=(0.30, 0.50, 0.42), rough=0.6, dust=0.3)),

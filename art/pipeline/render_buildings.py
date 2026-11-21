@@ -59,7 +59,7 @@ def render(a):
                 if state == "occupied":
                     damage.occupy(scene, seed=seed)
                 damage.apply(scene, "damaged" if state == "occupied" else state, seed=seed,
-                             footprint=model.FOOTPRINT_M)
+                             footprint=model.FOOTPRINT_M, hook=getattr(model, "damage_hook", None))
             materials_photoreal.stamp(scene)
             patch.build(scene)
             scene.render.filepath = path
