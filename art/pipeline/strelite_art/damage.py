@@ -331,7 +331,7 @@ def _pebble(k, name, loc, s, mat, rnd):
 
 # ---------------------------------------------------------------------------
 # physics
-def _simulate(scene, active, passive, blast=None, frames=72):
+def _simulate(scene, active, passive, blast=None, frames=72):  # noqa: C901
     """Drop `active` objects under gravity onto `passive` ones and the ground (Bullet rigid bodies),
     optionally pushed outward by a short blast (centre, strength, radius). Leaves the objects at
     their resting transforms with no simulation attached."""
@@ -379,11 +379,11 @@ def _simulate(scene, active, passive, blast=None, frames=72):
         rb = o.rigid_body
         d = o.dimensions
         rb.collision_shape = "CONVEX_HULL"
-        rb.mass = max(0.02, d.x * d.y * d.z * 1.6)
-        rb.friction = 0.85
+        rb.mass = o.get("rb_mass", max(0.02, d.x * d.y * d.z * 1.6))
+        rb.friction = o.get("rb_friction", 0.85)
         rb.restitution = 0.02
         rb.linear_damping = 0.25
-        rb.angular_damping = 0.45
+        rb.angular_damping = o.get("rb_damping", 0.45)
         rb.collision_margin = 0.002
     field = None
     if blast is not None:
@@ -633,8 +633,13 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
         debris.append(_pebble(k, "gravel", p, rnd.uniform(0.02, 0.09), m, rnd))
     debris.extend(rafters)
 
+    frames = 72
     if hook is not None:
-        hook(scene, state, {"hit": hit, "R": R, "blob": blob, "cut_z": cut_z, "rnd": rnd, "kit": k}, "structure")
+        extra = hook(scene, state, {"hit": hit, "R": R, "blob": blob, "cut_z": cut_z, "rnd": rnd, "kit": k},
+                     "structure")
+        if extra:
+            debris.extend(extra)
+            frames = 120
 
     # --- soot and char fading out from the hit ------------------------------------------
     for o in [o for o in scene.objects if o.type == "MESH" and not o.get("terrain") and o.data.materials
@@ -686,7 +691,7 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
         blast = (hit - Vector((0.6, -0.6, 0.2)), 14.0, R * 1.5)
     elif state == "wreck":
         blast = (hit * 0.6, 40.0, R * 2.0)
-    _simulate(scene, active, passive, blast=blast)
+    _simulate(scene, active, passive, blast=blast, frames=frames)
     for o in active:                            # anything that fell through or flew off the patch
         if o.name not in bpy.data.objects:
             continue
