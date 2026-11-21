@@ -17,7 +17,7 @@ describe('research sets', () => {
   });
 
   it('the starting guns count as one piece done, so the tree never starts at zero', () => {
-    // The crossbow's set also holds its sight (aiming at the smallest target).
+    // The crossbow's set also holds its sight (aiming at the most vulnerable target).
     expect(setProgress(set('crossbow'), [])).toEqual({ done: 1, total: 5 });
     expect(setProgress(set('zis3'), [])).toEqual({ done: 1, total: 4 });
     expect(setProgress(set('howitzer'), [])).toEqual({ done: 0, total: 4 });

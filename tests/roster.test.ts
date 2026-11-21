@@ -91,10 +91,10 @@ describe('armour', () => {
 });
 
 describe('targeting', () => {
-  it('research opens the crossbow\'s "smallest target" mode, which the player sets per gun', () => {
+  it('research opens the crossbow\'s "most vulnerable" mode, which the player sets per gun', () => {
     const groups: Partial<WaveGroup>[] = [
       { enemy: 'truck', hp: 1e6 },
-      { enemy: 'infantry', count: 6, hp: 1e6, interval: 0.4, delay: 0.6 },
+      { enemy: 'infantry', count: 6, hp: 1e5, interval: 0.4, delay: 0.6 },
     ];
     const kinds = (g: Game) => {
       const kindOf = new Map<number, EnemyId>();
@@ -111,19 +111,19 @@ describe('targeting', () => {
     const plain = scenario(groups, 8, []);
     buildNear(plain, 'crossbow', 3, 3);
     expect(plain.aimModes('crossbow')).toEqual(['first']);
-    expect(plain.setAim(plain.towers[0]!.id, 'smallest')).toEqual({ ok: false, reason: 'locked' });
+    expect(plain.setAim(plain.towers[0]!.id, 'weakest')).toEqual({ ok: false, reason: 'locked' });
     expect(kinds(plain)[0]).toBe('truck');
-    // With it: set to the smallest, it lets the truck by and shoots the soldiers.
+    // With it: set to the most vulnerable, it lets the tough truck by and shoots the soldiers.
     const g = scenario(groups, 8, ['lvl4.crossbow', 'aim.crossbow']);
     buildNear(g, 'crossbow', 3, 3);
-    expect(g.aimModes('crossbow')).toEqual(['first', 'smallest']);
-    expect(g.setAim(g.towers[0]!.id, 'smallest')).toEqual({ ok: true });
+    expect(g.aimModes('crossbow')).toEqual(['first', 'weakest']);
+    expect(g.setAim(g.towers[0]!.id, 'weakest')).toEqual({ ok: true });
     const hits = kinds(g);
     expect(hits.length).toBeGreaterThan(5);
     expect(hits.filter((k) => k === 'infantry').length).toBeGreaterThan(hits.length * 0.8);
     // A new crossbow takes the mode the player last set.
     buildNear(g, 'crossbow', 12, 8);
-    expect(g.aimOf(g.towers[1]!)).toBe('smallest');
+    expect(g.aimOf(g.towers[1]!)).toBe('weakest');
   });
 
   it('ЗИС-3 prefers the most armoured target up to armour 10, then falls back to the first', () => {

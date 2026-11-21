@@ -43,10 +43,10 @@ export type ProjectileKind = 'direct' | 'shell' | 'beam' | 'rail';
  * `armored`: the most armour up to `maxArmor`. `crowd`: the one with most
  * others inside the blast. `strongest`: highest health now.
  * `line`: the direction whose line holds the most total health.
- * `smallest`: the smallest unit (infantry and riders before vehicles); a
+ * `weakest`: the most vulnerable, the one with the least health left; a
  * mode research opens, which the player sets per gun.
  */
-export type Targeting = 'first' | 'airFast' | 'armored' | 'crowd' | 'strongest' | 'line' | 'smallest';
+export type Targeting = 'first' | 'airFast' | 'armored' | 'crowd' | 'strongest' | 'line' | 'weakest';
 
 export interface TowerDef {
   id: string;

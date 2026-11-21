@@ -1410,9 +1410,9 @@ export class Game {
     if (!list.length) return undefined;
     const mode = this.aimOf(t);
     const kept = t.targetId ? list.find((e) => e.id === t.targetId) : undefined;
-    // Set to the smallest, a gun leaves its target for a smaller one that comes in range.
-    const smaller = mode === 'smallest' && kept && list.some((e) => ENEMIES[e.def].radius < ENEMIES[kept.def].radius);
-    if (kept && !smaller) return kept;
+    // Set to the most vulnerable, a gun leaves its target for one in range with less health left.
+    const weaker = mode === 'weakest' && kept && list.some((e) => e.hp < kept.hp);
+    if (kept && !weaker) return kept;
     const def: TowerDef = this.defOf(t.def);
     const first = (es: Enemy[]) => es.reduce<Enemy | undefined>((b, e) => (!b || e.remaining < b.remaining ? e : b), undefined);
     /** Highest score wins; ties go to the one closest to the goal. */
@@ -1429,8 +1429,8 @@ export class Game {
       return pick;
     };
     switch (mode) {
-      case 'smallest':
-        return best((e) => -ENEMIES[e.def].radius);
+      case 'weakest':
+        return best((e) => -e.hp);
       case 'airFast': {
         const air = list.filter((e) => e.air);
         if (air.length) return first(air);

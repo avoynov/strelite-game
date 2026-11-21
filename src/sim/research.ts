@@ -139,7 +139,7 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('fx.railgun', 'effects', 5000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
 
   // Aiming: targeting modes the player can set on a gun.
-  item('aim.crossbow', 'effects', 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'smallest' }),
+  item('aim.crossbow', 'effects', 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'weakest' }),
 ];
 
 const BY_ID = new Map(RESEARCH.map((r) => [r.id, r]));
