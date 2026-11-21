@@ -33,7 +33,7 @@ export class ResearchStore {
   }
 
   upgrades(): Upgrades {
-    return upgrades(this.state.done, TOWER_IDS);
+    return upgrades(this.state.done, TOWER_IDS, this.labInfo);
   }
 
   /** Complete the running item if its time is up; true when it just finished. */

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { TOWER_IDS } from '../src/sim/content';
-import { bank, completeSets, GUN_ORDER, MASTERY_DAMAGE, MASTERY_GOLD, newResearch, RESEARCH, RESEARCH_SETS, setOf, setProgress, start, suggestNext, treeProgress, upgrades } from '../src/sim/research';
+import { bank, completeSets, GUN_ORDER, MASTERY_DAMAGE, MASTERY_GOLD, newResearch, RESEARCH, RESEARCH_SETS, setItems, setOf, setProgress, start, suggestNext, treeProgress, upgrades } from '../src/sim/research';
 
 const set = (id: string) => RESEARCH_SETS.find((s) => s.id === id)!;
 
@@ -39,6 +39,27 @@ describe('research sets', () => {
     expect(crossbow.gun.zis3.damage).toBe(1);
     expect(none.goldBonus).toBe(0);
     expect(upgrades(set('fortress').items, TOWER_IDS).goldBonus).toBe(MASTERY_GOLD);
+  });
+
+  it('the headquarters sets how far the tree reaches: a set full now opens again when it grows', () => {
+    const hq0 = { level: 0, standing: true, hq: 0 };
+    const hq1 = { ...hq0, hq: 1 };
+    // Level I: the crossbow's cheap pieces only (level V comes later).
+    expect(setItems(set('crossbow'), hq0)).toEqual(['lvl4.crossbow', 'fx.crossbow', 'aim.crossbow']);
+    const done = ['lvl4.crossbow', 'fx.crossbow', 'aim.crossbow'];
+    expect(completeSets(done, hq0)).toContain('crossbow');
+    expect(upgrades(done, TOWER_IDS, hq0).gun.crossbow.damage).toBeCloseTo(1 + MASTERY_DAMAGE);
+    // Level II brings level V into the tree: the set is open again, its bonus waits for it.
+    expect(setItems(set('crossbow'), hq1)).toContain('lvl5.crossbow');
+    expect(completeSets(done, hq1)).not.toContain('crossbow');
+    expect(upgrades(done, TOWER_IDS, hq1).gun.crossbow.damage).toBe(1);
+    // The whole tree grows with every level, and nothing finished ever leaves it.
+    const sizes = [0, 1, 2, 3, 4].map((hq) => treeProgress([], { ...hq0, hq }).total);
+    for (let i = 1; i < sizes.length; i++) expect(sizes[i]!).toBeGreaterThan(sizes[i - 1]!);
+    expect(sizes[4]).toBe(treeProgress([]).total);
+    expect(treeProgress(['gun.railgun'], hq0).done).toBe(3);
+    // A set with nothing in the tree yet earns no medal.
+    expect(completeSets([], hq0)).not.toContain('railgun');
   });
 
   it('suggests what brings a set closest to its medal, then the cheapest', () => {

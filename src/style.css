@@ -849,3 +849,10 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .lt *, .lt *::before, .lt *::after { animation: none !important; transition: none !important; }
 }
+
+/* What the next headquarters level adds to the research tree. */
+.lt-grow {
+  display: flex; align-items: center; gap: 10px; margin: 4px 16px 0; padding: 12px 14px;
+  border: 1px dashed rgba(211, 154, 63, 0.4); border-radius: 16px; color: var(--muted); font-size: 13px;
+}
+.lt-grow svg { flex: none; width: 26px; height: 26px; fill: none; stroke: var(--brass); stroke-width: 1.6; stroke-linejoin: round; }

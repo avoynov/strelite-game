@@ -46,7 +46,7 @@ export const HQ_LEVELS: readonly HqLevel[] = [
 
 export interface LabLevel {
   hp: number;
-  /** Research items running at once. A higher laboratory opens deeper research; it never makes research faster. */
+  /** Research items running at once (the headquarters decides how far the tree reaches); it never makes research faster. */
   slots: number;
   /** Building jobs (headquarters, laboratory) running at once. */
   builders: number;

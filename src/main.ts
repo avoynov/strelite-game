@@ -150,7 +150,7 @@ async function start(): Promise<void> {
   /** Research follows the laboratory in the base: its level, and whether it stands. */
   const syncLab = () => {
     const l = baseStore.state.lab;
-    research.setLab({ level: l?.level ?? 0, standing: l !== null });
+    research.setLab({ level: l?.level ?? 0, standing: l !== null, hq: baseStore.state.hq.level });
   };
   baseStore.settle();
   syncLab();

@@ -3,6 +3,9 @@ import type { GunPortrait } from '../render/towers/spriteTowerView';
 import type { TowerId } from '../sim/content';
 import {
   completeSets,
+  inTree,
+  RESEARCH,
+  setItems,
   itemSeconds,
   labSlots,
   MASTERY_DAMAGE,
@@ -47,7 +50,7 @@ export interface LabCallbacks {
   close(): void;
 }
 
-const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', labLevel: 'lab.labLevelHint' };
+const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', hqLevel: 'lab.hqLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
@@ -326,7 +329,7 @@ export class Lab {
     const seen = readList(SEEN_KEY);
     const medals = readList(MEDALS_KEY);
     this.seen = new Set(seen ?? done);
-    this.medals = new Set(medals ?? completeSets(done));
+    this.medals = new Set(medals ?? this.medalKeys(done));
     if (!seen) writeList(SEEN_KEY, this.seen);
     if (!medals) writeList(MEDALS_KEY, this.medals);
     this.stamped.clear();
@@ -424,7 +427,7 @@ export class Lab {
   }
 
   private dismissCelebration(): void {
-    if (this.celebrating) this.medals.add(this.celebrating);
+    if (this.celebrating) this.medals.add(this.medalKey(this.celebrating));
     writeList(MEDALS_KEY, this.medals);
     this.celebrating = null;
     this.cele.innerHTML = '';
@@ -433,11 +436,24 @@ export class Lab {
 
   // ------------------------------------------------------------- state
 
+  /**
+   * A medal's ceremony is once per set and headquarters level: when a higher
+   * headquarters widens the tree, finishing the set again earns it again.
+   */
+  private medalKey(id: SetId): string {
+    const hq = this.cb.lab().hq;
+    return hq === undefined ? id : `${id}@${hq}`;
+  }
+
+  private medalKeys(done: readonly string[]): string[] {
+    return completeSets(done, this.cb.lab()).map((id) => this.medalKey(id));
+  }
+
   private nodeState(s: ResearchState, lab: LabInfo, id: string): NodeState {
     const st = status(s, id);
     if (st !== 'ready') return st;
     const err = startError(s, id, lab);
-    return err === null ? 'go' : err === 'labLevel' ? 'lab' : 'ready';
+    return err === null ? 'go' : err === 'hqLevel' ? 'lab' : 'ready';
   }
 
   /** The gun shown on a set's card: the highest level researched, or level 1 while locked. */
@@ -456,7 +472,7 @@ export class Lab {
     const lab = this.cb.lab();
     // A set just completed: its medal ceremony, once.
     if (!this.celebrating) {
-      const owed = completeSets(s.done).find((id) => !this.medals.has(id));
+      const owed = completeSets(s.done, lab).find((id) => !this.medals.has(this.medalKey(id)));
       if (owed) {
         this.celebrating = owed;
         this.cele.innerHTML = this.celebrationHtml(owed);
@@ -512,11 +528,12 @@ export class Lab {
   }
 
   private pageHtml(s: ResearchState, lab: LabInfo, next: string | null): string {
-    const tree = treeProgress(s.done);
-    const won = new Set(completeSets(s.done));
+    const tree = treeProgress(s.done, lab);
+    const won = new Set(completeSets(s.done, lab));
+    const shown = RESEARCH_SETS.filter((set) => setItems(set, lab, s.done).length > 0);
     const ratio = tree.done / tree.total;
     const C = 2 * Math.PI * 22;
-    const medals = RESEARCH_SETS.map((set) => {
+    const medals = shown.map((set) => {
       const ok = won.has(set.id);
       const name = setName(set.id);
       const pic =
@@ -540,7 +557,7 @@ export class Lab {
           </div>
           <div class="lt-sum-text">
             <strong>${t('lab.progress', { n: tree.done, total: tree.total })}</strong>
-            <span>${tree.done === tree.total ? t('lab.allDone') : t('lab.medals', { n: won.size, total: RESEARCH_SETS.length })}</span>
+            <span>${tree.done === tree.total ? t('lab.allDone') : t('lab.medals', { n: won.size, total: shown.length })}</span>
           </div>
         </div>
         <ol class="lt-medals">${medals}</ol>
@@ -548,8 +565,18 @@ export class Lab {
       <div class="lt-status">${this.statusHtml(s, lab, next)}</div>
       <div class="lt-tree">
         <svg class="lt-wires" aria-hidden="true"></svg>
-        ${RESEARCH_SETS.map((set) => this.setHtml(set, s, lab, won.has(set.id))).join('')}
-      </div>`;
+        ${shown.map((set) => this.setHtml(set, s, lab, won.has(set.id))).join('')}
+      </div>
+      ${this.growHtml(s, lab)}`;
+  }
+
+  /** What the next headquarters level adds to the tree. */
+  private growHtml(s: ResearchState, lab: LabInfo): string {
+    if (lab.hq === undefined) return '';
+    const next = lab.hq + 2;
+    const more = RESEARCH.filter((r) => !inTree(r.id, lab, s.done) && (r.hq ?? 1) === next).length;
+    if (!more) return '';
+    return `<p class="lt-grow">${ICON.castle}<span>${t('lab.grow', { n: next, k: more })}</span></p>`;
   }
 
   /** What runs now, and what to do next. */
@@ -576,7 +603,7 @@ export class Lab {
       const item = researchItem(next)!;
       const err = startError(s, next, lab);
       const set = setOf(next);
-      const p = set ? setProgress(set, s.done) : null;
+      const p = set ? setProgress(set, s.done, lab) : null;
       const toMedal = p ? p.total - p.done : 0;
       const why = err === 'noGold' ? `<span class="lt-run-sub poor">${t('lab.needGold', { n: item.cost - s.gold })}</span>` : p ? `<span class="lt-run-sub">${esc(setName(set!.id))} ${p.done}/${p.total} · ${t('lab.toMedal', { n: toMedal })}</span>` : '';
       nextHtml = `
@@ -600,7 +627,7 @@ export class Lab {
   }
 
   private setHtml(set: ResearchSet, s: ResearchState, lab: LabInfo, complete: boolean): string {
-    const p = setProgress(set, s.done);
+    const p = setProgress(set, s.done, lab);
     const name = setName(set.id);
     const left = p.total - p.done;
     const pips = Array.from({ length: p.total }, (_, i) => `<i${i < p.done ? ' class="on"' : ''}></i>`).join('');
@@ -669,7 +696,7 @@ export class Lab {
     let strip = '';
     if (!unlock) strip = `<span class="lt-strip starter">${t('lab.starter')}</span>`;
     else if (st === 'active' && active) strip = `<span class="lt-strip time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
-    else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.labShort', { n: ROMAN[unlock.lab ?? 1]! })}</span>`;
+    else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.hqShort', { n: ROMAN[unlock.hq ?? 1]! })}</span>`;
     else if (!known) strip = `<span class="lt-strip${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < unlock.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${unlock.cost}</span>`;
     const label = `${name}. ${t(`lab.state.${st}` as MessageKey)}`;
     const attrs = unlock ? `data-lt="node" data-id="${unlock.id}"` : 'disabled';
@@ -686,13 +713,15 @@ export class Lab {
 
   /** One research node and the line under it (time, price or what it waits for). */
   private slotHtml(item: ResearchItem, s: ResearchState, lab: LabInfo, place: string): string {
+    // Not in the tree yet: the headquarters will add it.
+    if (!inTree(item.id, lab, s.done)) return '';
     const st = this.nodeState(s, lab, item.id);
     const active = s.active.find((a) => a.id === item.id);
     const total = itemSeconds(item, this.cb.speed);
     const fresh = this.freshClass(item.id, st);
     let cap: string;
     if (st === 'active' && active) cap = `<span class="lt-cap time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
-    else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.labShort', { n: ROMAN[item.lab ?? 1]! })}</span>`;
+    else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.hqShort', { n: ROMAN[item.hq ?? 1]! })}</span>`;
     else if (st !== 'done') cap = `<span class="lt-cap${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < item.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>`;
     else cap = '<span class="lt-cap"></span>';
     const label = `${itemName(item)}. ${t(`lab.state.${st}` as MessageKey)}`;
@@ -731,14 +760,14 @@ export class Lab {
     const st = this.nodeState(s, lab, id);
     const err = startError(s, id, lab);
     const set = setOf(id);
-    const p = set ? setProgress(set, s.done) : null;
+    const p = set ? setProgress(set, s.done, lab) : null;
     const reqs = item.requires.map((r) => {
       const ok = s.done.includes(r);
       return `<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(itemName(researchItem(r)!))}</li>`;
     });
-    if ((item.lab ?? 1) > 1) {
-      const ok = item.lab! <= lab.level + 1;
-      reqs.push(`<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(t('lab.labLevelReq', { n: item.lab! }))}</li>`);
+    if ((item.hq ?? 1) > 1) {
+      const ok = inTree(id, lab, s.done);
+      reqs.push(`<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(t('lab.hqLevelReq', { n: item.hq! }))}</li>`);
     }
     const active = s.active.find((a) => a.id === id);
     const total = itemSeconds(item, this.cb.speed);

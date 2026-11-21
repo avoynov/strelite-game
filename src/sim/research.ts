@@ -64,8 +64,12 @@ export interface ResearchItem {
   /** Items that must be finished first. */
   requires: readonly string[];
   effect: ItemEffect;
-  /** Laboratory level (1-based) it needs, when above 1. */
-  lab?: number;
+  /**
+   * Headquarters level (1-based) at which it joins the tree, when above 1.
+   * Raising the headquarters widens the tree; the laboratory only decides how
+   * many items run at once.
+   */
+  hq?: number;
 }
 
 const MIN = 60;
@@ -73,14 +77,14 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 type Effect = ResearchItem['effect'];
-/** Laboratory level (1-based) an item of this price needs: the deeper (dearer) the item, the higher the laboratory. */
-export function labFor(cost: number): number {
+/** Headquarters level (1-based) at which an item of this price joins the tree: the deeper (dearer) the item, the higher the headquarters. */
+export function hqFor(cost: number): number {
   return cost < 1000 ? 1 : cost < 2000 ? 2 : cost < 3500 ? 3 : cost < 5500 ? 4 : 5;
 }
 
 const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => {
-  const lab = labFor(cost);
-  return { id, branch, cost, seconds, requires, effect, ...(lab > 1 ? { lab } : {}) };
+  const hq = hqFor(cost);
+  return { id, branch, cost, seconds, requires, effect, ...(hq > 1 ? { hq } : {}) };
 };
 const gun = (g: TowerId): Effect => ({ kind: 'gun', gun: g });
 const lvl = (g: TowerId, level: number): Effect => ({ kind: 'maxLevel', gun: g, level });
@@ -160,13 +164,27 @@ export interface ResearchState {
   pausedAt: number | null;
 }
 
-/** The laboratory as research sees it: its 0-based level, and whether it stands. */
+/**
+ * The base as research sees it: the laboratory's 0-based level and whether it
+ * stands, and the headquarters' 0-based level (how far the tree reaches).
+ */
 export interface LabInfo {
   level: number;
   standing: boolean;
+  /** Headquarters level, 0-based. Absent: the whole tree (tests, tools). */
+  hq?: number;
 }
 
-export const FIRST_LAB: LabInfo = { level: 0, standing: true };
+export const FIRST_LAB: LabInfo = { level: 0, standing: true, hq: 0 };
+/** Every item in the tree (pure tests and tools). */
+export const WHOLE_TREE: LabInfo = { level: 0, standing: true };
+
+/** Whether an item is part of the tree at this headquarters level; finished items always stay. */
+export function inTree(id: string, lab: LabInfo, done: readonly string[] = []): boolean {
+  const item = BY_ID.get(id);
+  if (!item) return false;
+  return lab.hq === undefined || (item.hq ?? 1) <= lab.hq + 1 || done.includes(id);
+}
 
 export function newResearch(): ResearchState {
   return { gold: 0, done: [], active: [], pausedAt: null };
@@ -201,7 +219,7 @@ export function status(s: ResearchState, id: string): ResearchStatus {
   return item && item.requires.every((r) => s.done.includes(r)) ? 'ready' : 'locked';
 }
 
-export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'labLevel';
+export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'hqLevel';
 
 /** Items the laboratory runs at once. */
 export const labSlots = (lab: LabInfo): number => LAB_LEVELS[lab.level]?.slots ?? 1;
@@ -213,7 +231,7 @@ export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LA
   if (st === 'locked') return 'locked';
   const item = BY_ID.get(id)!;
   if (!lab.standing) return 'noLab';
-  if ((item.lab ?? 1) > lab.level + 1) return 'labLevel';
+  if (!inTree(id, lab, s.done)) return 'hqLevel';
   if (s.active.length >= labSlots(lab)) return 'busy';
   if (s.gold < item.cost) return 'noGold';
   return null;
@@ -278,7 +296,7 @@ export function battleTakings(moneyLeft: number, earned: number, won: boolean, l
 const NO_MODS: GunMods = { damage: 1, reload: 1, range: 0, splash: 0, pierce: 0, passThrough: 0, rampTime: 1 };
 
 /** The upgrades a set of finished items gives. */
-export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): Upgrades {
+export function upgrades(done: readonly string[], gunIds: readonly TowerId[], lab: LabInfo = WHOLE_TREE): Upgrades {
   const guns = new Set<TowerId>(START_GUNS);
   let damage = 1;
   let reload = 1;
@@ -316,7 +334,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): U
     m.reload *= reload;
   }
   // A full set: a small bonus on top (see RESEARCH_SETS).
-  const full = new Set(completeSets(done));
+  const full = new Set(completeSets(done, lab));
   for (const id of gunIds) if (full.has(id)) per[id]!.damage *= 1 + MASTERY_DAMAGE;
   return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0, aims };
 }
@@ -361,22 +379,35 @@ export interface Progress {
 }
 
 /** How far a set is: a starting gun counts as one done. */
-export function setProgress(set: ResearchSet, done: readonly string[]): Progress {
+/** A set's pieces in the tree at this headquarters level. */
+export function setItems(set: ResearchSet, lab: LabInfo = WHOLE_TREE, done: readonly string[] = []): string[] {
+  return set.items.filter((id) => inTree(id, lab, done));
+}
+
+/** How far a set is, counting only the pieces in the tree now: a starting gun counts as one done. */
+export function setProgress(set: ResearchSet, done: readonly string[], lab: LabInfo = WHOLE_TREE): Progress {
   const extra = set.starter ? 1 : 0;
-  return { done: extra + set.items.filter((id) => done.includes(id)).length, total: extra + set.items.length };
+  const items = setItems(set, lab, done);
+  return { done: extra + items.filter((id) => done.includes(id)).length, total: extra + items.length };
 }
 
-/** The sets with every piece done. */
-export function completeSets(done: readonly string[]): SetId[] {
-  return RESEARCH_SETS.filter((set) => set.items.every((id) => done.includes(id))).map((set) => set.id);
+/**
+ * The sets with every piece in the tree done. A set can be full at one
+ * headquarters level and open again at the next, when the tree has grown.
+ */
+export function completeSets(done: readonly string[], lab: LabInfo = WHOLE_TREE): SetId[] {
+  return RESEARCH_SETS.filter((set) => {
+    const items = setItems(set, lab, done);
+    return items.length > 0 && items.every((id) => done.includes(id));
+  }).map((set) => set.id);
 }
 
-/** The whole tree: every set's pieces together. */
-export function treeProgress(done: readonly string[]): Progress {
+/** The tree at this headquarters level: every set's pieces in it together. */
+export function treeProgress(done: readonly string[], lab: LabInfo = WHOLE_TREE): Progress {
   let d = 0;
   let total = 0;
   for (const set of RESEARCH_SETS) {
-    const p = setProgress(set, done);
+    const p = setProgress(set, done, lab);
     d += p.done;
     total += p.total;
   }
@@ -398,12 +429,12 @@ export function suggestNext(s: ResearchState, lab: LabInfo = FIRST_LAB): string 
   const left = (id: string) => {
     const set = setOf(id);
     if (!set) return Infinity;
-    const p = setProgress(set, s.done);
+    const p = setProgress(set, s.done, lab);
     return p.total - p.done;
   };
   const byGoal = (a: ResearchItem, b: ResearchItem) => left(a.id) - left(b.id) || a.cost - b.cost;
   const now = RESEARCH.filter((r) => startError(s, r.id, lab) === null).sort(byGoal);
   if (now.length) return now[0]!.id;
-  const later = RESEARCH.filter((r) => status(s, r.id) === 'ready' && (r.lab ?? 1) <= lab.level + 1).sort((a, b) => a.cost - b.cost);
+  const later = RESEARCH.filter((r) => status(s, r.id) === 'ready' && inTree(r.id, lab, s.done)).sort((a, b) => a.cost - b.cost);
   return later[0]?.id ?? null;
 }

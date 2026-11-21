@@ -320,7 +320,7 @@ export class Hud {
     // The saved base knows the level being built towards.
     const level = what === 'hq' ? st.hq.level : (st.lab?.level ?? b.level);
     const fx = what === 'hq'
-      ? t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun })
+      ? t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun, n: level + 1 })
       : t('building.labFx', { n: level + 1, slots: LAB_LEVELS[level]!.slots, b: LAB_LEVELS[level]!.builders });
     const jobBtn = (target: JobTarget, label: string) => {
       const job = st.jobs.find((j) => j.what === target);
