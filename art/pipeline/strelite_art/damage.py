@@ -600,6 +600,14 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
                 pieces = nxt
         debris.extend(pieces)
 
+    # a ruin is not all of its material: much was carried off, burnt or blown away
+    keep_frac = {"damaged": 0.5, "rubble": 0.4, "wreck": 0.6}[state]
+    rnd.shuffle(debris)
+    n_keep = int(len(debris) * keep_frac)
+    for o in debris[n_keep:]:
+        bpy.data.objects.remove(o)
+    debris = debris[:n_keep]
+
     # --- what the debris lands on ------------------------------------------------------
     beds = []
     if state == "damaged":
@@ -608,7 +616,7 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
                          "dirt_fill"))
     elif state == "rubble":
         mr = Vector(((cx1 - cx0) / 2 + 0.9, (cy1 - cy0) / 2 + 0.9, 0))
-        mh = min(1.1, 0.25 + 0.18 * top) * heap_scale
+        mh = min(0.7, 0.15 + 0.11 * top) * heap_scale
         beds.append(_bed(k, "rubble_bed", ((cx0 + cx1) / 2, (cy0 + cy1) / 2), mr.x, mr.y, mh, rnd, "dirt_fill"))
         beds.append(_bed(k, "dust_bed", ((cx0 + cx1) / 2, (cy0 + cy1) / 2), mr.x + 0.7, mr.y + 0.7, 0.06, rnd, "ash",
                          n=30))
@@ -617,7 +625,7 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
 
     # gravel: small stones of the removed materials
     mats = [_mat_name(o) for o in debris] or ["stone"]
-    n_gravel = {"damaged": 220, "rubble": 450, "wreck": 60}[state]
+    n_gravel = {"damaged": 140, "rubble": 280, "wreck": 45}[state]
     for i in range(n_gravel):
         m = rnd.choice(mats)
         if any(w in m for w in WOOD):
