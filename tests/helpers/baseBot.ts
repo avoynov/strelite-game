@@ -65,8 +65,9 @@ export class Campaign {
 
   /**
    * Between attacks (hours pass while the player plays elsewhere): raise the
-   * headquarters, then the laboratory, when that takes no more than a share of
-   * the treasury; then mend everything and spend the rest, one builder's job at a time.
+   * headquarters, then the laboratory (never above the headquarters), when that
+   * takes no more than a share of the treasury. Then mend
+   * everything and spend the rest, one builder's job at a time.
    */
   prepare(): void {
     this.save();
@@ -74,6 +75,7 @@ export class Campaign {
     for (const [what, share] of [['hq', 0.5], ['lab', 0.25]] as const) {
       const price = jobPrice(this.base, what);
       if (!price || price.cost > this.wallet.gold * share) continue;
+      if (what === 'lab' && this.base.lab && this.base.lab.level >= this.base.hq.level) continue;
       this.wallet.gold -= price.cost;
       if (what === 'hq') this.base = { ...this.base, hq: { level: this.base.hq.level + 1, hp: HQ_LEVELS[this.base.hq.level + 1]!.hp } };
       else if (this.base.lab) this.base = { ...this.base, lab: { level: this.base.lab.level + 1, hp: LAB_LEVELS[this.base.lab.level + 1]!.hp } };

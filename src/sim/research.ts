@@ -65,9 +65,9 @@ export interface ResearchItem {
   requires: readonly string[];
   effect: ItemEffect;
   /**
-   * Headquarters level (1-based) at which it joins the tree, when above 1.
-   * Raising the headquarters widens the tree; the laboratory only decides how
-   * many items run at once.
+   * Headquarters level (1-based) at which it joins the tree, when above 1;
+   * the laboratory must stand at least as high to research it. Raising the
+   * headquarters widens the tree and lets the laboratory rise further.
    */
   hq?: number;
 }
@@ -219,7 +219,7 @@ export function status(s: ResearchState, id: string): ResearchStatus {
   return item && item.requires.every((r) => s.done.includes(r)) ? 'ready' : 'locked';
 }
 
-export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'hqLevel';
+export type StartError = 'busy' | 'locked' | 'noGold' | 'done' | 'noLab' | 'hqLevel' | 'labLevel';
 
 /** Items the laboratory runs at once. */
 export const labSlots = (lab: LabInfo): number => LAB_LEVELS[lab.level]?.slots ?? 1;
@@ -232,6 +232,8 @@ export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LA
   const item = BY_ID.get(id)!;
   if (!lab.standing) return 'noLab';
   if (!inTree(id, lab, s.done)) return 'hqLevel';
+  // The deepest items also need a laboratory raised as far (and the headquarters caps the laboratory).
+  if ((item.hq ?? 1) > lab.level + 1) return 'labLevel';
   if (s.active.length >= labSlots(lab)) return 'busy';
   if (s.gold < item.cost) return 'noGold';
   return null;
@@ -435,6 +437,6 @@ export function suggestNext(s: ResearchState, lab: LabInfo = FIRST_LAB): string 
   const byGoal = (a: ResearchItem, b: ResearchItem) => left(a.id) - left(b.id) || a.cost - b.cost;
   const now = RESEARCH.filter((r) => startError(s, r.id, lab) === null).sort(byGoal);
   if (now.length) return now[0]!.id;
-  const later = RESEARCH.filter((r) => status(s, r.id) === 'ready' && inTree(r.id, lab, s.done)).sort((a, b) => a.cost - b.cost);
+  const later = RESEARCH.filter((r) => status(s, r.id) === 'ready' && inTree(r.id, lab, s.done) && (r.hq ?? 1) <= lab.level + 1).sort((a, b) => a.cost - b.cost);
   return later[0]?.id ?? null;
 }

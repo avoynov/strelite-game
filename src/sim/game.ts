@@ -14,6 +14,7 @@ import {
   HQ_BASE_VALUE,
   HQ_LEVELS,
   HQ_SPOT,
+  hqThreat,
   inBuildArea,
   LAB_BASE_VALUE,
   LAB_LEVELS,
@@ -312,6 +313,8 @@ export class Game {
   private readonly upgrades: Upgrades | null;
   /** Targeting mode the player last set per gun kind; new guns of that kind take it. */
   aimPrefs: Partial<Record<TowerId, Targeting>> = {};
+  /** Kill gold not yet paid out as a whole coin (stronger attackers pay fractions more). */
+  private rewardCarry = 0;
   /** Gun stats with research applied, per gun and level. */
   private readonly levelCache = new Map<string, TowerLevel>();
   private readonly defCache = new Map<TowerId, TowerDef>();
@@ -1023,8 +1026,14 @@ export class Game {
       while (st.left > 0 && st.timer <= 0) {
         const s = this.spawnCell();
         const siege = this.base ? baseHpFactor(this.level) : this.mode === 'siege' ? siegeHpFactor(this.level) : 1;
-        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * siege);
-        this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
+        // The player's base: a stronger headquarters draws stronger attackers, who pay more.
+        const threat = this.base ? hqThreat(this.hq?.level ?? 0) : 1;
+        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * siege * threat);
+        // Kill gold stays whole: the fractions carry over to the next unit.
+        this.rewardCarry += g.reward * threat;
+        const reward = Math.floor(this.rewardCarry + 1e-9);
+        this.rewardCarry -= reward;
+        this.enemies.push(this.makeEnemy(g.enemy, hp, reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
       }

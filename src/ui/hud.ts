@@ -19,7 +19,7 @@ export interface BaseHud {
   speed: number;
 }
 
-const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney' };
+const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', hqLevel: 'reason.labOverHq', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney' };
 
 export interface HudCallbacks {
   getSelection(): Selection | null;

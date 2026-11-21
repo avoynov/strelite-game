@@ -25,7 +25,7 @@ import { Campaign } from './helpers/baseBot';
 import { upTo } from './helpers/stages';
 import { TOWER_IDS } from '../src/sim/content';
 import { upgrades } from '../src/sim/research';
-import { baseTakings } from '../src/sim/base';
+import { baseTakings, hqThreat } from '../src/sim/base';
 import { attackStrength, defenceStrength } from '../src/sim/strength';
 
 const only = (enemy: keyof typeof ENEMIES, count: number, hp = 50): WaveSpec => ({ groups: [{ enemy, count, hp, interval: 0.8, delay: 0, reward: 1 }], clearBonus: 0 });
@@ -151,10 +151,15 @@ describe('the base', () => {
     let b = newBase();
     expect(builders(b)).toBe(1);
     expect(jobError(b, 'hq', 0)).toBe('noGold');
+    // The laboratory never rises above the headquarters.
+    expect(jobError(b, 'lab', 1e9)).toBe('hqLevel');
     b = startJob(b, 'hq', 0);
-    expect(jobError(b, 'lab', 1e9)).toBe('noBuilder');
     b = settleJobs(b, HQ_LEVELS[1]!.seconds * 1000);
     expect(b.hq.level).toBe(1);
+    expect(jobError(b, 'lab', 1e9)).toBeNull();
+    b = startJob(b, 'lab', 0);
+    expect(jobError(b, 'hq', 1e9)).toBe('noBuilder');
+    b = { ...b, jobs: [] };
     expect(b.hq.hp).toBe(HQ_LEVELS[1]!.hp);
     // The headquarters caps gun levels on top of research.
     const g3 = baseGame(1e6, undefined, { ...b, hq: { level: 2, hp: HQ_LEVELS[2]!.hp } }).g;
@@ -211,7 +216,7 @@ describe('balance at the base', () => {
       c.prepare();
       const attack = c.game.level;
       const you = defenceStrength(c.game);
-      const enemy = attackStrength(attack);
+      const enemy = attackStrength(attack, undefined, undefined, c.game.hq?.level ?? 0);
       const before = c.wallet.gold;
       const won = c.fight();
       c.wallet.gold += baseTakings(Math.max(0, c.wallet.gold - before), won, attack);
@@ -233,6 +238,21 @@ describe('balance at the base', () => {
     expect(furthest(campaign(3, 300, 400, 10))).toBeGreaterThanOrEqual(5);
     expect(furthest(campaign(6, 500, 800, 10))).toBeGreaterThanOrEqual(10);
   }, SLOW);
+
+  it('a stronger headquarters draws stronger attackers who pay more', () => {
+    const at = (hq: number) => {
+      const g = baseGame(0, undefined, { ...newBase(), hq: { level: hq, hp: HQ_LEVELS[hq]!.hp } }).g;
+      g.startWave();
+      for (let i = 0; i < 4000 && g.enemies.length < 12; i++) g.step(TICK);
+      return g.enemies;
+    };
+    const low = at(0);
+    const high = at(2);
+    expect(high[0]!.maxHp).toBeCloseTo(low[0]!.maxHp * hqThreat(2), -1);
+    const gold = (es: { reward: number }[]) => es.slice(0, 12).reduce((s, e) => s + e.reward, 0);
+    expect(gold(high)).toBeGreaterThan(gold(low));
+    expect(attackStrength(3, undefined, undefined, 2)).toBeGreaterThan(attackStrength(3));
+  });
 
   it('the strength shown before an attack points the right way when the sides are far apart', () => {
     const all = [...campaign(1, 200, 200, 4), ...campaign(3, 300, 400, 8)];

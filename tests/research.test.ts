@@ -81,7 +81,7 @@ describe('research', () => {
     expect(g.defOf('greekfire').rampTime).toBe(1);
   });
 
-  it('the laboratory: a higher one runs two at once (no faster); the headquarters opens the deeper items; destroyed, it stops the clocks', () => {
+  it('the laboratory: a higher one runs two at once (no faster); the headquarters brings deeper items into the tree, the laboratory opens them; destroyed, it stops the clocks', () => {
     const rich = bank(newResearch(), 100000);
     // Level 1: one at a time.
     let s = start(rich, 'boost.gold1', 0);
@@ -94,11 +94,13 @@ describe('research', () => {
     s = start(s, 'fx.crossbow', 0, 1, lab4);
     expect(s.active).toHaveLength(2);
     expect(startError(s, 'lvl4.crossbow', lab4)).toBe('busy');
-    // The headquarters decides how far the tree reaches; the laboratory's level does not.
+    // The headquarters decides how far the tree reaches.
     const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.trebuchet', 'gun.greekfire'] };
     expect(startError(railReady, 'gun.railgun')).toBe('hqLevel');
     expect(startError(railReady, 'gun.railgun', { level: 4, standing: true, hq: 2 })).toBe('hqLevel');
-    expect(startError(railReady, 'gun.railgun', { level: 0, standing: true, hq: 3 })).toBeNull();
+    // In the tree, it also needs a laboratory raised as far.
+    expect(startError(railReady, 'gun.railgun', { level: 0, standing: true, hq: 3 })).toBe('labLevel');
+    expect(startError(railReady, 'gun.railgun', { level: 3, standing: true, hq: 3 })).toBeNull();
     // The deeper (dearer) the item, the higher the headquarters that brings it into the tree.
     for (const r of RESEARCH) for (const req of r.requires) expect(r.hq ?? 1, r.id).toBeGreaterThanOrEqual(RESEARCH.find((x) => x.id === req)!.hq ?? 1);
     expect(RESEARCH.filter((r) => (r.hq ?? 1) === 5).length).toBeGreaterThan(0);

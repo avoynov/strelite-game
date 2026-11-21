@@ -50,7 +50,7 @@ export interface LabCallbacks {
   close(): void;
 }
 
-const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', hqLevel: 'lab.hqLevelHint' };
+const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', hqLevel: 'lab.hqLevelHint', labLevel: 'lab.labLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
@@ -453,7 +453,7 @@ export class Lab {
     const st = status(s, id);
     if (st !== 'ready') return st;
     const err = startError(s, id, lab);
-    return err === null ? 'go' : err === 'hqLevel' ? 'lab' : 'ready';
+    return err === null ? 'go' : err === 'labLevel' ? 'lab' : 'ready';
   }
 
   /** The gun shown on a set's card: the highest level researched, or level 1 while locked. */
@@ -696,7 +696,7 @@ export class Lab {
     let strip = '';
     if (!unlock) strip = `<span class="lt-strip starter">${t('lab.starter')}</span>`;
     else if (st === 'active' && active) strip = `<span class="lt-strip time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
-    else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.hqShort', { n: ROMAN[unlock.hq ?? 1]! })}</span>`;
+    else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.labShort', { n: ROMAN[unlock.hq ?? 1]! })}</span>`;
     else if (!known) strip = `<span class="lt-strip${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < unlock.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${unlock.cost}</span>`;
     const label = `${name}. ${t(`lab.state.${st}` as MessageKey)}`;
     const attrs = unlock ? `data-lt="node" data-id="${unlock.id}"` : 'disabled';
@@ -721,7 +721,7 @@ export class Lab {
     const fresh = this.freshClass(item.id, st);
     let cap: string;
     if (st === 'active' && active) cap = `<span class="lt-cap time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
-    else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.hqShort', { n: ROMAN[item.hq ?? 1]! })}</span>`;
+    else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.labShort', { n: ROMAN[item.hq ?? 1]! })}</span>`;
     else if (st !== 'done') cap = `<span class="lt-cap${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < item.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>`;
     else cap = '<span class="lt-cap"></span>';
     const label = `${itemName(item)}. ${t(`lab.state.${st}` as MessageKey)}`;
@@ -768,6 +768,8 @@ export class Lab {
     if ((item.hq ?? 1) > 1) {
       const ok = inTree(id, lab, s.done);
       reqs.push(`<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(t('lab.hqLevelReq', { n: item.hq! }))}</li>`);
+      const labOk = item.hq! <= lab.level + 1;
+      reqs.push(`<li class="${labOk ? 'ok' : 'no'}">${labOk ? ICON.check : ICON.lock}${esc(t('lab.labLevelReq', { n: item.hq! }))}</li>`);
     }
     const active = s.active.find((a) => a.id === id);
     const total = itemSeconds(item, this.cb.speed);

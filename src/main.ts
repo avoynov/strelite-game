@@ -207,7 +207,7 @@ async function start(): Promise<void> {
     const lab = st.lab && snap.lab ? { level: st.lab.level, hp: carry(snap.lab.hp, LAB_LEVELS[snap.lab.level]!.hp, LAB_LEVELS[st.lab.level]!.hp) } : st.lab;
     baseStore.set({ ...st, hq, lab, guns: snap.guns, fences: snap.fences });
   };
-  let enemyStrength = { attack: 0, value: 0 };
+  let enemyStrength = { attack: 0, hq: -1, value: 0 };
   const baseHud: BaseHud = {
     state: () => baseStore.state,
     startJob: (what) => {
@@ -217,7 +217,8 @@ async function start(): Promise<void> {
       return err;
     },
     strength: () => {
-      if (enemyStrength.attack !== game.level) enemyStrength = { attack: game.level, value: attackStrength(game.level) };
+      const hq = game.hq?.level ?? 0;
+      if (enemyStrength.attack !== game.level || enemyStrength.hq !== hq) enemyStrength = { attack: game.level, hq, value: attackStrength(game.level, undefined, undefined, hq) };
       return { you: defenceStrength(game), enemy: enemyStrength.value };
     },
     result: () => baseResult,
