@@ -22,6 +22,7 @@ import {
   type SetId,
   type StartError,
 } from '../sim/research';
+import { PanZoom } from './panZoom';
 
 /**
  * "Лаборатория": the research tree as eight sets to complete. Each gun is a
@@ -94,6 +95,8 @@ export function itemEffect(item: ResearchItem): string {
       return t('lab.fx.startGold', { n: e.add });
     case 'lives':
       return t('lab.fx.lives', { n: e.add });
+    case 'aim':
+      return t('lab.fx.aim', { gun: t(`tower.${e.gun}` as MessageKey), mode: t(`target.${e.mode}` as MessageKey) });
     case 'gunMod': {
       const m = e.mods;
       const parts: string[] = [];
@@ -143,13 +146,14 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/></svg>',
   flask: '<svg viewBox="0 0 24 24"><path d="M9.5 3h5M10.5 3v5.5L5 18.5A1.7 1.7 0 0 0 6.5 21h11a1.7 1.7 0 0 0 1.5-2.5L13.5 8.5V3"/><path d="M7.5 15h9"/></svg>',
+  sight: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.6" class="dot"/><path d="M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5"/></svg>',
   castle:
     '<svg viewBox="0 0 24 24"><path d="M3.5 21V8.5h3V11h2.5V8.5h3V11h2.5V8.5h3V11h3V21z"/><path d="M10 21v-4.5a2 2 0 0 1 4 0V21"/><path d="M3.5 21h17"/></svg>',
 } as const;
 
 function shapeOf(item: ResearchItem): Shape {
   const k = item.effect.kind;
-  return k === 'maxLevel' ? 'oct' : k === 'gunMod' ? 'circle' : 'hex';
+  return k === 'maxLevel' ? 'oct' : k === 'gunMod' || k === 'aim' ? 'circle' : 'hex';
 }
 
 function glyphOf(item: ResearchItem): string {
@@ -169,6 +173,8 @@ function glyphOf(item: ResearchItem): string {
       return ICON.reload;
     case 'gun':
       return ICON.flask;
+    case 'aim':
+      return ICON.sight;
   }
 }
 
@@ -177,6 +183,18 @@ function shapeSvg(d: string, active: boolean, ends = 0, total = 1, box = '0 0 56
   const prog = active ? `<path class="p" d="${d}" pathLength="100" stroke-dasharray="0 100" data-ends="${ends}" data-total="${total}"/>` : '';
   return `<svg class="sh" viewBox="${box}" aria-hidden="true"><path class="f" d="${d}"/><path class="r" d="${d}"/>${prog}</svg>`;
 }
+
+/** Each set's colour, as "r, g, b": wood, olive, steel, bronze, stone, ember, arc light, brass. */
+const SET_TINT: Record<SetId, string> = {
+  crossbow: '196, 140, 82',
+  zis3: '138, 160, 96',
+  howitzer: '128, 150, 176',
+  scorpion: '182, 132, 92',
+  trebuchet: '176, 162, 132',
+  greekfire: '214, 108, 62',
+  railgun: '96, 184, 222',
+  fortress: '211, 168, 92',
+};
 
 const CARD = 'M14 1.5H60A12.5 12.5 0 0 1 72.5 14V70A12.5 12.5 0 0 1 60 82.5H14A12.5 12.5 0 0 1 1.5 70V14A12.5 12.5 0 0 1 14 1.5Z';
 
@@ -241,7 +259,15 @@ export class Lab {
   private celebrating: SetId | null = null;
   private readonly reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
   private offArt: (() => void) | null = null;
-  private readonly resize = typeof ResizeObserver === 'function' ? new ResizeObserver(() => this.drawWires()) : null;
+  /** One finger moves the tree, two zoom it (the tree grows past one screen). */
+  private readonly pz: PanZoom;
+  private readonly resize =
+    typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => {
+          this.pz.refit();
+          this.drawWires();
+        })
+      : null;
 
   constructor(private readonly cb: LabCallbacks) {
     this.el = document.createElement('div');
@@ -266,9 +292,21 @@ export class Lab {
     this.foot = this.el.querySelector('.lt-foot')!;
     this.sheet = this.el.querySelector('.lt-sheet-wrap')!;
     this.cele = this.el.querySelector('.lt-cele-wrap')!;
+    this.pz = new PanZoom(this.scroller, this.page);
     this.resize?.observe(this.page);
+    this.resize?.observe(this.scroller);
     this.el.addEventListener('click', (ev) => this.onClick(ev));
     this.el.addEventListener('keydown', (ev) => {
+      const pan = { ArrowUp: 60, ArrowDown: -60, PageUp: 400, PageDown: -400 }[ev.key];
+      if (pan && !this.openId && !this.celebrating) {
+        this.pz.panBy(0, pan);
+        ev.preventDefault();
+        return;
+      }
+      if (ev.key === '+' || ev.key === '-') {
+        this.pz.zoomAt(this.scroller.clientWidth / 2, this.scroller.clientHeight / 2, ev.key === '+' ? 1.2 : 1 / 1.2);
+        return;
+      }
       if (ev.key !== 'Escape') return;
       if (this.celebrating) this.dismissCelebration();
       else if (this.openId) this.closeSheet();
@@ -294,8 +332,8 @@ export class Lab {
     this.stamped.clear();
     this.el.hidden = false;
     this.pageKey = '';
-    this.scroller.scrollTop = 0;
     this.render();
+    this.pz.reset();
     window.clearInterval(this.timer);
     this.timer = window.setInterval(() => this.render(), 1000);
     this.offArt?.();
@@ -378,8 +416,8 @@ export class Lab {
   private scrollToSet(id: string): void {
     const lane = this.page.querySelector<HTMLElement>(`.lt-set[data-set="${id}"]`);
     if (!lane) return;
-    const top = lane.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top + this.scroller.scrollTop - 12;
-    this.scroller.scrollTo({ top, behavior: this.reduceMotion ? 'auto' : 'smooth' });
+    const y = (lane.getBoundingClientRect().top - this.page.getBoundingClientRect().top) / this.pz.scale;
+    this.pz.showY(y, 12, !this.reduceMotion);
     lane.classList.remove('flash');
     void lane.offsetWidth;
     lane.classList.add('flash');
@@ -433,6 +471,7 @@ export class Lab {
       this.pageKey = key;
       this.page.innerHTML = this.pageHtml(s, lab, next);
       this.paintPictures(this.page);
+      this.pz.refit();
       requestAnimationFrame(() => this.drawWires());
     }
     const sheetKey = this.openId ? JSON.stringify([key, this.openId, this.note]) : '';
@@ -585,7 +624,8 @@ export class Lab {
       const rows = [1, 1, 1, 1, 2, 2, 2];
       const nodes = set.items.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, `grid-column:${cols[i]};grid-row:${rows[i]}`)).join('');
       return `
-        <section class="lt-set fortress${complete ? ' complete' : ''}" data-set="fortress">
+        <section class="lt-set fortress${complete ? ' complete' : ''}" data-set="fortress" style="--tint:${SET_TINT.fortress}">
+          <span class="lt-set-bg" aria-hidden="true"><span class="lt-ghost">${ICON.castle}</span></span>
           <div class="lt-card lt-emblem${complete ? ' st-done' : ''}" aria-hidden="true">${shapeSvg(CARD, false, 0, 1, '0 0 74 84')}<span class="lt-emblem-ico">${ICON.castle}</span></div>
           ${head}
           <div class="lt-nodes snake">${nodes}</div>
@@ -597,8 +637,14 @@ export class Lab {
     const lv4 = researchItem(`lvl4.${gun}`)!;
     const lv5 = researchItem(`lvl5.${gun}`)!;
     const fx = researchItem(`fx.${gun}`)!;
+    // Aiming modes: a second row, under the level each grows from.
+    const aims = set.items
+      .filter((id) => researchItem(id)?.effect.kind === 'aim')
+      .map((id, i) => this.slotHtml(researchItem(id)!, s, lab, `grid-column:${1 + i};grid-row:2`))
+      .join('');
     return `
-      <section class="lt-set${complete ? ' complete' : ''}" data-set="${gun}">
+      <section class="lt-set${complete ? ' complete' : ''}" data-set="${gun}" style="--tint:${SET_TINT[gun]}">
+        <span class="lt-set-bg" aria-hidden="true"><span class="lt-pic" data-pic="${gun}" data-lv="${this.gunLevel(gun, s)}" data-w="190" data-h="150" data-z="1.3"></span></span>
         ${this.cardHtml(gun, unlock, s, lab)}
         ${head}
         <div class="lt-nodes">
@@ -606,6 +652,7 @@ export class Lab {
           ${this.slotHtml(lv5, s, lab, 'grid-column:2')}
           <span class="lt-split" aria-hidden="true"></span>
           ${this.slotHtml(fx, s, lab, 'grid-column:4')}
+          ${aims}
         </div>
         ${foot}
       </section>`;
@@ -754,11 +801,17 @@ export class Lab {
     if (!svg || this.el.hidden) return;
     const tree = svg.parentElement!;
     const base = tree.getBoundingClientRect();
+    // Measured on screen, drawn in the tree's own (unzoomed) pixels.
+    const k = tree.offsetWidth ? base.width / tree.offsetWidth : 1;
     const box = (id: string) => {
       const el = tree.querySelector<HTMLElement>(`[data-id="${id}"], [data-set="${id}"] .lt-card`);
       if (!el) return null;
       const r = el.getBoundingClientRect();
-      return { l: r.left - base.left, r: r.right - base.left, t: r.top - base.top, b: r.bottom - base.top, cx: r.left - base.left + r.width / 2, cy: r.top - base.top + r.height / 2 };
+      const l = (r.left - base.left) / k;
+      const t = (r.top - base.top) / k;
+      const w = r.width / k;
+      const h = r.height / k;
+      return { l, r: l + w, t, b: t + h, cx: l + w / 2, cy: t + h / 2 };
     };
     const s = this.cb.state();
     const lab = this.cb.lab();
@@ -789,6 +842,10 @@ export class Lab {
       const g = gunKey(set);
       line(g, `lvl4.${set.id}`, cls(g, `lvl4.${set.id}`));
       line(`lvl4.${set.id}`, `lvl5.${set.id}`, cls(`lvl4.${set.id}`, `lvl5.${set.id}`));
+      for (const id of set.items) {
+        const from = researchItem(id)?.effect.kind === 'aim' ? researchItem(id)!.requires[0] : undefined;
+        if (from) line(from, id, cls(from, id));
+      }
       const after = guns[i + 1];
       if (after) {
         line(g, gunKey(after), cls(g, gunKey(after)));
@@ -799,7 +856,7 @@ export class Lab {
     for (let i = 1; i < boosts.length; i++) line(boosts[i - 1]!, boosts[i]!, cls(boosts[i - 1]!, boosts[i]!));
     // Only when something moved, so the moving dashes do not restart.
     const html = paths.join('');
-    const view = `0 0 ${base.width} ${base.height}`;
+    const view = `0 0 ${tree.offsetWidth} ${tree.offsetHeight}`;
     if (svg.getAttribute('viewBox') !== view) svg.setAttribute('viewBox', view);
     if (svg.dataset.d !== html) {
       svg.dataset.d = html;

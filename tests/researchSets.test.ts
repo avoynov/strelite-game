@@ -17,7 +17,9 @@ describe('research sets', () => {
   });
 
   it('the starting guns count as one piece done, so the tree never starts at zero', () => {
-    expect(setProgress(set('crossbow'), [])).toEqual({ done: 1, total: 4 });
+    // The crossbow's set also holds its sight (aiming at the smallest target).
+    expect(setProgress(set('crossbow'), [])).toEqual({ done: 1, total: 5 });
+    expect(setProgress(set('zis3'), [])).toEqual({ done: 1, total: 4 });
     expect(setProgress(set('howitzer'), [])).toEqual({ done: 0, total: 4 });
     expect(treeProgress([])).toEqual({ done: 2, total: RESEARCH.length + 2 });
     expect(treeProgress(RESEARCH.map((r) => r.id))).toEqual({ done: RESEARCH.length + 2, total: RESEARCH.length + 2 });
@@ -25,13 +27,14 @@ describe('research sets', () => {
 
   it('a set is complete only with every piece', () => {
     expect(completeSets(['lvl4.crossbow', 'lvl5.crossbow'])).toEqual([]);
-    expect(completeSets(['lvl4.crossbow', 'lvl5.crossbow', 'fx.crossbow'])).toEqual(['crossbow']);
+    expect(completeSets(['lvl4.crossbow', 'lvl5.crossbow', 'fx.crossbow'])).toEqual([]);
+    expect(completeSets(['lvl4.crossbow', 'lvl5.crossbow', 'fx.crossbow', 'aim.crossbow'])).toEqual(['crossbow']);
     expect(setOf('boost.reload1')?.id).toBe('fortress');
   });
 
   it('a full set gives its bonus: more damage for that gun, more banked gold for the Fortress', () => {
     const none = upgrades([], TOWER_IDS);
-    const crossbow = upgrades(['lvl4.crossbow', 'lvl5.crossbow', 'fx.crossbow'], TOWER_IDS);
+    const crossbow = upgrades(set('crossbow').items, TOWER_IDS);
     expect(crossbow.gun.crossbow.damage).toBeCloseTo(1 + MASTERY_DAMAGE);
     expect(crossbow.gun.zis3.damage).toBe(1);
     expect(none.goldBonus).toBe(0);
@@ -40,12 +43,12 @@ describe('research sets', () => {
 
   it('suggests what brings a set closest to its medal, then the cheapest', () => {
     const rich = bank(newResearch(), 100000);
-    // Fresh: the crossbow set has a piece already; of its two open pieces the cheaper.
-    expect(suggestNext(rich)).toBe('fx.crossbow');
-    // Two crossbow pieces done: its last open piece comes first, once the laboratory is high enough.
-    const s = { ...rich, done: ['fx.crossbow', 'lvl4.crossbow'] };
-    expect(suggestNext(s, { level: 1, standing: true })).toBe('lvl5.crossbow');
-    expect(suggestNext(s)).not.toBe('lvl5.crossbow');
+    // Fresh: the ZIS-3 set is the shortest with a piece already; of its open pieces the one that can start.
+    expect(suggestNext(rich)).toBe('lvl4.zis3');
+    // Three ZIS-3 pieces done: its last open piece comes first, once the laboratory is high enough.
+    const s = { ...rich, done: ['fx.crossbow', 'fx.zis3', 'lvl4.zis3'] };
+    expect(suggestNext(s, { level: 1, standing: true })).toBe('lvl5.zis3');
+    expect(suggestNext(s)).not.toBe('lvl5.zis3');
     // Busy laboratory: nothing can start, so the cheapest ready item to save for.
     expect(suggestNext(start(rich, 'boost.gold1', 0))).toBe('fx.crossbow');
     // Poor: still points at the cheapest ready item.

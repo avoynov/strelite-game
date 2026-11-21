@@ -5,11 +5,12 @@ import { BoardRenderer, type Armed, type Selection } from './render/boardRendere
 import { PALETTE } from './render/palette';
 import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
-import { TICK, TOWERS } from './sim/content';
+import { ENEMIES, TICK, TOWERS } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
 import { buildArcMap, buildPathMap, type Mode } from './sim/maps';
 import { levelArcMap, levelMap } from './sim/levels';
+import { readAimPrefs } from './aimPrefs';
 import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
@@ -165,6 +166,7 @@ async function start(): Promise<void> {
       return new Game(buildArcMap(BASE_MAP, 'siege'), {
         level: baseStore.state.attack,
         upgrades: research.upgrades(),
+        aimPrefs: readAimPrefs(),
         base: {
           get state() {
             return baseStore.state;
@@ -174,7 +176,7 @@ async function start(): Promise<void> {
         },
       });
     }
-    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
+    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades(), aimPrefs: readAimPrefs() });
   };
   // A battle left running last time picks up where it stopped (unless a level was asked for in the address).
   const saved = params.has('level') ? null : readBattle();
@@ -504,7 +506,7 @@ async function start(): Promise<void> {
         playAt('burst', ev.x, ev.y, Math.min(1, 0.6 + ev.radius * 0.2));
       }
       else if (ev.type === 'impact') {
-        board.onImpact(ev.x, ev.y);
+        board.onImpact(ev.x, ev.y, ev.air);
         playAt('impact', ev.x, ev.y);
       }
       else if (ev.type === 'rail') {
@@ -513,7 +515,7 @@ async function start(): Promise<void> {
       }
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
-        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c, 'air' in ENEMIES[ev.def]);
         playAt(DEATH_SOUND[ev.def], ev.x, ev.y, ev.def === 'moto' ? 0.6 : 1);
       }
       else if (ev.type === 'leak') audio.play('leak');

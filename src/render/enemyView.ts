@@ -32,7 +32,7 @@ export const FLY_HEIGHT = 1.2;
 /** A unit counts as standing once it has not moved for this long. */
 const STAND_AFTER_MS = 250;
 /** Added to a flyer's depth so it draws over everything on the ground. */
-const FLYER_Z = 10_000;
+export const FLYER_Z = 10_000;
 
 /** Stand-in enemies until style В sprites exist: a squad, a truck, a tank, drawn flat. */
 export class PlaceholderEnemyView implements EnemyView {

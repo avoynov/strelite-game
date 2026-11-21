@@ -1,5 +1,5 @@
 import { LAB_LEVELS } from './base';
-import type { TowerId } from './content';
+import type { Targeting, TowerId } from './content';
 
 /**
  * Research tree: gold banked from battles buys guns, boosts and effects. Each
@@ -36,6 +36,8 @@ export interface Upgrades {
   gun: Record<TowerId, GunMods>;
   /** Share added to the gold a battle banks (the full Fortress set). */
   goldBonus: number;
+  /** Targeting modes research opened per gun, on top of the gun's own. */
+  aims: Record<TowerId, Targeting[]>;
 }
 
 type ItemEffect =
@@ -45,7 +47,8 @@ type ItemEffect =
   | { kind: 'startGold'; add: number }
   | { kind: 'lives'; add: number }
   | { kind: 'gunMod'; gun: TowerId; mods: Partial<GunMods> }
-  | { kind: 'maxLevel'; gun: TowerId; level: number };
+  | { kind: 'maxLevel'; gun: TowerId; level: number }
+  | { kind: 'aim'; gun: TowerId; mode: Targeting };
 
 export type Branch = 'guns' | 'levels' | 'boosts' | 'effects';
 
@@ -130,6 +133,9 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('fx.trebuchet', 'effects', 2600, 12 * HOUR, ['gun.trebuchet', 'fx.scorpion'], mod('trebuchet', { splash: 0.5, pierce: 0.3 })),
   item('fx.greekfire', 'effects', 3500, DAY, ['gun.greekfire', 'fx.trebuchet'], mod('greekfire', { rampTime: 0.5, range: 0.5 })),
   item('fx.railgun', 'effects', 5000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
+
+  // Aiming: targeting modes the player can set on a gun.
+  item('aim.crossbow', 'effects', 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'smallest' }),
 ];
 
 const BY_ID = new Map(RESEARCH.map((r) => [r.id, r]));
@@ -280,6 +286,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): U
   let lives = 0;
   const per = Object.fromEntries(gunIds.map((id) => [id, { ...NO_MODS }])) as Record<TowerId, GunMods>;
   const maxLevel = Object.fromEntries(gunIds.map((id) => [id, FREE_LEVELS])) as Record<TowerId, number>;
+  const aims = Object.fromEntries(gunIds.map((id) => [id, [] as Targeting[]])) as Record<TowerId, Targeting[]>;
   for (const id of done) {
     const e = BY_ID.get(id)?.effect;
     if (!e) continue;
@@ -289,6 +296,9 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): U
     else if (e.kind === 'startGold') startGold += e.add;
     else if (e.kind === 'lives') lives += e.add;
     else if (e.kind === 'maxLevel') maxLevel[e.gun] = Math.max(maxLevel[e.gun] ?? FREE_LEVELS, e.level);
+    else if (e.kind === 'aim') {
+      if (aims[e.gun] && !aims[e.gun]!.includes(e.mode)) aims[e.gun]!.push(e.mode);
+    }
     else {
       const m = per[e.gun];
       if (!m) continue;
@@ -308,7 +318,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[]): U
   // A full set: a small bonus on top (see RESEARCH_SETS).
   const full = new Set(completeSets(done));
   for (const id of gunIds) if (full.has(id)) per[id]!.damage *= 1 + MASTERY_DAMAGE;
-  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0 };
+  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0, aims };
 }
 
 // ------------------------------------------------------------------- sets
@@ -320,7 +330,7 @@ export type SetId = TowerId | 'fortress';
 
 /**
  * A set the player completes for a medal: each gun (the gun, levels 4 and 5,
- * its effect) and the Fortress (every boost). A starting gun's unlock is no
+ * its effect, any aiming modes) and the Fortress (every boost). A starting gun's unlock is no
  * research item but counts as done, so the tree never starts at zero.
  */
 export interface ResearchSet {
@@ -334,7 +344,8 @@ export interface ResearchSet {
 export const RESEARCH_SETS: readonly ResearchSet[] = [
   ...GUN_ORDER.map((g): ResearchSet => {
     const starter = START_GUNS.includes(g);
-    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, `fx.${g}`] };
+    const aims = RESEARCH.filter((r) => r.effect.kind === 'aim' && r.effect.gun === g).map((r) => r.id);
+    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, `fx.${g}`, ...aims] };
   }),
   { id: 'fortress', starter: false, items: RESEARCH.filter((r) => r.branch === 'boosts').map((r) => r.id) },
 ];

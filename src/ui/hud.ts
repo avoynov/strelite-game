@@ -1,9 +1,10 @@
 import { t, type MessageKey } from '../i18n';
-import { TOWER_IDS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
+import { TOWER_IDS, type Targeting, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import type { ActionResult, Building, Game, Structure } from '../sim/game';
 import type { Armed, Selection } from '../render/boardRenderer';
 import { builders, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, type BaseState, type JobError, type JobTarget } from '../sim/base';
 import { formatDuration } from './lab';
+import { writeAimPrefs } from '../aimPrefs';
 
 /** What the HUD needs of the player's base (siege mode). */
 export interface BaseHud {
@@ -241,6 +242,7 @@ export class Hud {
             <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
             ${tower.job ? `<div class="stats job"><span>${t(tower.job.kind === 'build' ? 'job.build' : 'job.upgrade', { n: tower.level + 2, time: formatDuration((tower.job.endsAt - Date.now()) / 1000) })}</span></div>` : ''}
             ${this.statsHtml(g.defOf(tower.def), lvl)}
+            ${this.aimHtml(tower)}
             <div class="stats muted">
               ${g.mode === 'siege' ? `<span>${t('stat.hp')} ${Math.ceil(tower.hp)}/${tower.maxHp}</span>` : ''}
               <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
@@ -365,6 +367,18 @@ export class Hud {
     </div>`;
   }
 
+  /** What the gun aims at, as a switch once research opened a second mode. */
+  private aimHtml(tower: { id: number; def: TowerId }): string {
+    const g = this.game;
+    const modes = g.aimModes(tower.def);
+    if (modes.length < 2) return '';
+    const now = g.aimOf(g.towerById(tower.id)!);
+    const opts = modes
+      .map((m) => `<button class="aim-opt" data-action="aim" data-def="${m}" aria-pressed="${m === now}">${escapeHtml(t(`aim.${m}` as MessageKey))}</button>`)
+      .join('');
+    return `<div class="aim" role="group" aria-label="${escapeHtml(t('target.label'))}"><span>${t('target.label')}</span>${opts}</div>`;
+  }
+
   private onAction(action: string, def?: string): void {
     const g = this.game;
     const sel = this.cb.getSelection();
@@ -392,6 +406,14 @@ export class Hud {
         this.cb.setSelection(null);
         this.cb.setArmed(null);
         break;
+      case 'aim': {
+        const tower = sel?.kind === 'tower' ? g.towerById(sel.id) : undefined;
+        if (!tower || !def) break;
+        const r = g.setAim(tower.id, def as Targeting);
+        if (r.ok) writeAimPrefs(g.aimPrefs);
+        else this.showResult(r);
+        break;
+      }
       case 'upgrade':
       case 'sell': {
         const tower = sel?.kind === 'tower' ? g.towerById(sel.id) : undefined;
