@@ -32,8 +32,8 @@ from .trebuchet import _ball
 LEVELS = (1, 2, 3, 4, 5)
 FRAME_M = 9.0
 TARGET_Z = 1.2
-SPRITE_FRAME_M = 11.0
-SWEEP_M = 3.6
+SPRITE_FRAME_M = 12.5     # room for the long barrel of levels 3-5
+SWEEP_M = 5.4
 FOOTPRINT_M = 3.0        # 2x2 tiles of 4 m
 AXIS_Z = 1.75            # line of the rails
 
@@ -175,13 +175,13 @@ def _mount(k, t, level, s):
 def _barrel(k, t, level, s):
     """The rails (on a recoil slide) and whatever wraps them; returns the muzzle."""
     slide = k.empty("slide", (0, 0, 0), parent=t)
-    y0, y1 = -1.6, 3.4
+    y0, y1 = -1.6, (5.2 if level >= 3 else 3.4)       # levels 3-5: long barrel, coils stand apart (user 2026-11-22)
     z = AXIS_Z
     parts = []
     for sx in (-1, 1):                                   # the two rails
         parts.append(k.box("rail", (0.08, y1 - y0, 0.22), (sx * 0.1, (y0 + y1) / 2, z), s["rail"], parent=t,
                            bevel=0.006))
-    n = 7
+    n = 10 if level >= 3 else 7
     for i in range(n):                                   # porcelain insulators holding them apart
         y = y0 + 0.3 + i * (y1 - y0 - 0.5) / (n - 1)
         parts.append(k.box("clamp", (0.42, 0.1, 0.4), (0, y, z), s["fit"], parent=t, bevel=0.01))
@@ -209,11 +209,29 @@ def _barrel(k, t, level, s):
                                parent=t, bevel=False))
     if level >= 4:                                       # booster coils
         for i in range(5):
-            y = y1 - 1.35 + i * 0.3
+            y = y1 - 2.55 + i * 0.6
             parts.append(k.torus("coil", 0.38, 0.08, (0, y, z), "copper", rot=(math.pi / 2, 0, 0), parent=t, segs=28,
                                  tube_segs=8))
             parts.append(k.torus("coil_glow", 0.38, 0.045, (0, y + 0.09, z), "arc_glow", rot=(math.pi / 2, 0, 0),
                                  parent=t, segs=28, tube_segs=6))
+    if level >= 3:                                       # automatic sight: an angular armoured head, opaque
+        ys, zs, G = -1.15, z + 0.72, 1.7                 # G: head scale, big enough to read at game zoom
+        hm = s["house"]
+        parts.append(k.cylinder("sight_post", 0.1, 0.4, (0, ys, zs - 0.36), s["fit"], segs=12, parent=t))
+        parts.append(k.cylinder("sight_ring", 0.16, 0.05, (0, ys, zs - 0.02), s["fit"], segs=20, parent=t))
+        prof = [(-0.42, 0.0), (0.28, 0.0), (0.46, 0.1), (0.34, 0.27), (-0.26, 0.3), (-0.44, 0.16)]
+        parts.append(k.plate("sight_head", [(ys + a * G, zs + b * G) for a, b in prof], 0.36 * G, 0.0, hm, parent=t))
+        for sx in (-1, 1):                               # sloped side cheeks make the head read as faceted
+            cheek = [(-0.3, 0.03), (0.22, 0.03), (0.3, 0.12), (0.2, 0.24), (-0.22, 0.25), (-0.34, 0.14)]
+            parts.append(k.plate("sight_cheek", [(ys + a * G, zs + b * G) for a, b in cheek], 0.06, sx * 0.21 * G, hm,
+                                 parent=t))
+        face = [(0.29, 0.03), (0.45, 0.1), (0.35, 0.25), (0.3, 0.24), (0.39, 0.11), (0.27, 0.06)]
+        parts.append(k.plate("sight_face", [(ys + a * G, zs + b * G) for a, b in face], 0.26 * G, 0.0, "gunmetal",
+                             parent=t))
+        parts.append(k.box("sight_brow", (0.4 * G, 0.08, 0.05), (0, ys + 0.3 * G, zs + 0.29 * G), s["fit"], parent=t,
+                           bevel=0.005))
+        parts.append(k.hose("sight_cable", [(0.12, ys - 0.35, zs + 0.05), (0.2, ys - 0.6, z + 0.35),
+                                            (0.2, y0 + 0.1, z + 0.28)], 0.02, "rubber", parent=t))
     # breech block with the cable terminals
     parts.append(k.box("breech", (0.6, 0.55, 0.6), (0, y0 - 0.15, z), s["body"] if level > 1 else "iron_forged",
                        parent=t, bevel=0.03))
