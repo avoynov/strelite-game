@@ -84,9 +84,9 @@ FIRE = [
     (27, 0.57, True, None, 180),
     (32, 0.36, True, None, 225),
     (36, 0.16, True, None, 270),
-    (38, 0.0, True, None, 315),    # 11 cocked
-    (38, 0.0, True, 0.0, 360),     # 12 the next bolt laid in
-]
+    (38, 0.0, True, 0.0, 315),     # 11 cocked; the loader lays the next bolt in
+    (38, 0.0, True, 0.0, 360),     # 12
+] + [(38, 0.0, True, 0.0, 360)] * 6   # 13-18 the loader fetches the one after (levels 2-5)
 FIRE_FRAMES = len(FIRE)
 RELEASE_FRAME = 2
 RELOAD_FROM = 3
@@ -102,6 +102,7 @@ def build(style, level=1):
     k = Kit(style)
     s = STYLE[level]
     root = k.empty("scorpion")
+    _RIG_LOADER.clear()
     _trestle(k, root, level, s)
     _bolt_rack(k, root, level, s)
     turret = k.empty("turret", (0, 0, 0), parent=root)
@@ -348,31 +349,111 @@ def _loader(k, t, level, s):
         d = Vector((math.cos(a), math.sin(a), 0)) * 0.3
         k.beam("loader_strut", P + d + Vector((0, 0, 0.14)), P + Vector((0, 0, 0.9)), (0.04, 0.05), F, parent=t,
                bevel=False)
-    # a small rack of bolts on the column, tips up
-    for i in range(3):
-        a = math.pi * 0.9 + i * 0.35
-        b0 = P + Vector((math.cos(a) * 0.13, math.sin(a) * 0.13, 0.35))
-        _bolt(k, t, b0, Vector((0, 0, 1)), level, s, length=1.2)
-    k.torus("rack_band", 0.16, 0.015, P + Vector((0, 0, 0.6)), J, parent=t, segs=20, tube_segs=4)
-    # the slewing head, the boom over the stock, the drop link and the pincer
-    top = P + Vector((0, 0, H))
-    k.cylinder("loader_head", 0.11, 0.14, top - Vector((0, 0, 0.04)), J, segs=18, parent=t)
-    ym = CLAW_Y0 + 0.9
-    zbolt = _z(ym) + 0.42
-    el = Vector((0.34, ym, zbolt + 0.5))
-    k.beam("loader_boom", top + Vector((0, 0, 0.06)), el, (0.08, 0.1), col if not col.startswith("timber") else F,
-           parent=t, bevel=0.008)
-    k.beam("loader_tie", P + Vector((0, 0, H - 0.5)), top.lerp(el, 0.6), (0.035, 0.035), F, parent=t, bevel=False)
-    k.tube("loader_elbow", el + Vector((0, -0.07, 0)), el + Vector((0, 0.07, 0)), 0.06, J, parent=t, segs=14)
-    wr = Vector((el.x, ym, zbolt + 0.17))
-    k.beam("loader_drop", el, wr, (0.05, 0.06), F, parent=t, bevel=0.006)
-    k.box("loader_wrist", (0.13, 0.18, 0.07), wr, J, parent=t, bevel=0.008)
-    for sx in (-1, 1):                                   # the pincer jaws closed round the bolt
-        k.beam("loader_jaw", wr + Vector((sx * 0.055, 0, -0.03)), Vector((el.x + sx * 0.03, ym, zbolt - 0.06)),
-               (0.03, 0.09), F, parent=t, bevel=0.004)
+    # the crane: a slewing head on the column, a boom out over the stock, a cable down to a
+    # pincer. It holds the next bolt just above the channel and lays it in; between shots it
+    # swings round to a magazine stand of its own for the next one.
+    ax = Vector((P.x, P.y, 0))
+    slew = k.empty("loader_slew", ax, parent=t)
+    top = Vector((0, 0, H))
+    k.cylinder("loader_head", 0.11, 0.14, top - Vector((0, 0, 0.04)), J, segs=18, parent=slew)
     d = Vector((0, 1, math.tan(TILT))).normalized()
-    tail = Vector((el.x, ym, zbolt)) - d * (BOLT_LEN * 0.5)
-    _bolt(k, t, tail, d, level, s)
+    tail0 = Vector((0, CLAW_Y0 - 0.02, _RIG_ZS(level) + 0.09))         # where the laid bolt lies (as the rig's)
+    mid = tail0 + d * (BOLT_LEN * 0.5) - ax
+    hover = LOADER_HOVER
+    el = Vector((mid.x, mid.y, mid.z + hover + 0.55))
+    k.beam("loader_boom", top + Vector((0, 0, 0.06)), el + Vector((0, 0, 0.04)), (0.08, 0.1),
+           col if not col.startswith("timber") else F, parent=slew, bevel=0.008)
+    k.beam("loader_tie", Vector((0, 0, H - 0.5)), top.lerp(el, 0.6), (0.035, 0.035), F, parent=slew, bevel=False)
+    k.cylinder("loader_sheave", 0.07, 0.05, el - Vector((0.025, 0, 0)), J, segs=16, rot=(0, math.pi / 2, 0),
+               parent=slew)
+    cable = k.cylinder("loader_cable", 0.012, 1.0, el, "steel_cable" if level > 2 else "hemp", segs=6,
+                       rot=(math.pi, 0, 0), parent=slew, bevel=False)
+    hand = k.empty("loader_hand", mid + Vector((0, 0, hover)), parent=slew)
+    hb = mid + Vector((0, 0, hover))                     # the hand is built in slew space, then parented
+    objs = [k.box("loader_block", (0.13, 0.18, 0.09), hb + Vector((0, 0, 0.19)), J, parent=slew, bevel=0.008)]
+    jaws = []
+    for sx in (-1, 1):                                   # the pincer jaws, closed round the bolt
+        o = k.beam("loader_jaw", hb + Vector((sx * 0.055, 0, 0.15)), hb + Vector((sx * 0.03, 0, -0.06)),
+                   (0.03, 0.09), F, parent=slew, bevel=0.004)
+        objs.append(o)
+        jaws.append((sx, o))
+    held = set(bpy.data.objects)
+    _bolt(k, slew, mid + Vector((0, 0, hover)) - d * (BOLT_LEN * 0.5), d, level, s)
+    held = list(set(bpy.data.objects) - held)
+    for o in objs + held:
+        _keep_world(o, hand)
+    jaw_rest = {o: o.location.copy() for _, o in jaws}
+    # the magazine stand where it picks the next bolt: a little trestle with a stack of bolts,
+    # placed where the swung pincer comes down
+    tray = k.empty("loader_tray", ax, parent=t)
+    tray.rotation_euler = (0, 0, math.radians(LOADER_TRAY_DEG))
+    zt = mid.z + hover - LOADER_TRAY_DROP                # bolt height on the stand
+    tb = mid + Vector((0, 0, hover - LOADER_TRAY_DROP))
+    dd = Vector((d.x, d.y, 0)).normalized()
+    for e in (-0.55, 0.55):                              # two trestles under the bolts
+        c = tb + dd * e
+        for sx in (-1, 1):
+            k.beam("tray_leg", Vector((c.x + sx * 0.22, c.y, -0.0)), c + Vector((sx * 0.06, 0, -0.07)), (0.05, 0.05),
+                   col, parent=tray, bevel=False)
+        k.beam("tray_bar", c + Vector((-0.12, 0, -0.07)), c + Vector((0.12, 0, -0.07)), (0.06, 0.06), J if level > 2
+               else col, parent=tray, bevel=False)
+    stack = []
+    for i, (dx, dz) in enumerate(((0.0, 0.0), (-0.05, -0.0), (0.05, -0.0))):
+        before = set(bpy.data.objects)
+        _bolt(k, tray, tb + Vector((dx, 0, dz - (0.0 if i == 0 else 0.0))) - d * (BOLT_LEN * 0.5)
+              + Vector((0, 0, 0 if i == 0 else -0.045)), d, level, s)
+        if i == 0:
+            stack = list(set(bpy.data.objects) - before)
+    _RIG_LOADER.clear()
+    _RIG_LOADER.update(slew=slew, hand=hand, hand_rest=hand.location.copy(), cable=cable, el=el, jaws=jaws,
+                       jaw_rest=jaw_rest, held=held, top_bolt=stack, hover=hover)
+
+
+LOADER_HOVER = 0.5           # the held bolt waits this far over the channel
+LOADER_TRAY_DEG = -120       # slew angle of the magazine stand
+LOADER_TRAY_DROP = 1.25      # how far the pincer comes down to the stand
+_RIG_LOADER = {}
+
+
+def _RIG_ZS(level):
+    return _z(CLAW_Y0) + 0.06
+
+
+# Loader motion per firing frame: slew (deg), lift (0 = over the channel, -1 = down at the
+# channel or the stand), jaws open (0/1), held bolt shown, top bolt on the stand shown. It runs
+# on through extra frames after the scorpion is cocked; it does not have to match the rate.
+LOADER_FIRE = [(0, 0, 0, True, True)] * 8 + [
+    (0, -0.5, 0, True, True),       # 9  lowering the next bolt
+    (0, -1, 0, True, True),         # 10 in the channel
+    (0, -1, 1, False, True),        # 11 let go: the bolt is laid
+    (0, -0.3, 1, False, True),      # 12 up
+    (-60, 0, 1, False, True),       # 13 swing to the stand
+    (-120, 0, 1, False, True),      # 14
+    (-120, -1, 1, False, True),     # 15 down to the stand
+    (-120, -1, 0, True, False),     # 16 grip the top bolt
+    (-120, 0, 0, True, False),      # 17 lift it
+    (-60, 0, 0, True, False),       # 18 swing back over the channel
+]
+
+
+def _apply_loader(slew, lift, jaw, held, top):
+    L = _RIG_LOADER
+    if not L:
+        return
+    L["slew"].rotation_euler = (0, 0, math.radians(slew))
+    drop = L["hover"] if slew == 0 else LOADER_TRAY_DROP
+    dz = lift * drop if lift < 0 else 0.0
+    if slew not in (0, LOADER_TRAY_DEG):
+        dz = 0.0
+    L["hand"].location = L["hand_rest"] + Vector((0, 0, dz))
+    length = (L["el"].z - (L["hand_rest"].z + dz + 0.24))
+    L["cable"].scale = (1, 1, max(length, 0.02))
+    for sx, o in L["jaws"]:
+        o.location = L["jaw_rest"][o] + Vector((sx * 0.06 * jaw, 0, 0))
+    for o in L["held"]:
+        o.hide_render = not held
+    for o in L["top_bolt"]:
+        o.hide_render = not top
 
 
 def _vsides(level):
@@ -705,12 +786,26 @@ def _apply(sweep, slide, hooked, bolt, wheel_deg):
         o.scale = (1, 1, max(d.length, 0.01))
 
 
+def _loader_pose(f):
+    return LOADER_FIRE[f - 1] if f > 0 else (0, 0, 0, True, True)
+
+
 def key_fire_animation(scene):
     prefs = bpy.context.preferences.edit
     old = prefs.keyframe_new_interpolation_type
     prefs.keyframe_new_interpolation_type = "LINEAR"
     for f in range(FIRE_FRAMES + 1):
         _apply(*_pose(f))
+        _apply_loader(*_loader_pose(f))
+        L = _RIG_LOADER
+        if L:
+            L["slew"].keyframe_insert("rotation_euler", frame=f)
+            L["hand"].keyframe_insert("location", frame=f)
+            L["cable"].keyframe_insert("scale", frame=f)
+            for _, o in L["jaws"]:
+                o.keyframe_insert("location", frame=f)
+            for o in L["held"] + L["top_bolt"]:
+                o.keyframe_insert("hide_render", frame=f)
         for piv in list(_RIG["arms"].values()) + list(_RIG["varms"].values()):
             piv.keyframe_insert("rotation_euler", frame=f)
         for o, p in ((_RIG["slider"], "location"), (_RIG["wheels"], "rotation_euler"),
@@ -729,8 +824,15 @@ def set_fire_frame(f, scene=None):
         scene.frame_set(f)
     else:
         _apply(sweep, slide, hooked, bolt, wheel_deg)
+        _apply_loader(*_loader_pose(f))
     for o in _RIG["carrier"].children:
         o.hide_render = bolt is None
+    if _RIG_LOADER:
+        _, _, _, held, top = _loader_pose(f)
+        for o in _RIG_LOADER["held"]:
+            o.hide_render = not held
+        for o in _RIG_LOADER["top_bolt"]:
+            o.hide_render = not top
     bpy.context.view_layer.update()
 
 
