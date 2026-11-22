@@ -32,8 +32,16 @@ const SWARM = new Set<EnemyId>(['infantry', 'moto', 'drone']);
 export const TUNING = { hpScale: 1.7, firstStrength: 4, strengthStep: 0.5, maxFirstStrength: 10 };
 /** …and by this fraction of the base for each map level above the first… */
 export const LEVEL_HP_GROWTH = 0.04;
-/** …up to this map level; past it only the number of waves keeps growing. */
+/** …up to this map level… */
 export const LEVEL_HP_CAP = 20;
+/** …then by this fraction ("Средно") for each map level up to LATE_HP_CAP; past it only the number of waves keeps growing. */
+export const LATE_HP_GROWTH = 0.03;
+export const LATE_HP_CAP = 80;
+
+/** Every enemy's health on a map level, relative to its base (before the wave's own growth). */
+export function levelHpScale(level: number): number {
+  return TUNING.hpScale * (1 + LEVEL_HP_GROWTH * (Math.min(level, LEVEL_HP_CAP) - 1) + LATE_HP_GROWTH * Math.max(0, Math.min(level, LATE_HP_CAP) - LEVEL_HP_CAP));
+}
 /** Gold per kill grows by this fraction of the base each step of strength. */
 export const REWARD_GROWTH = 0.08;
 /** No wave gets stronger than this; longer levels repeat their strongest. */
@@ -71,7 +79,7 @@ export const HQ_WAVES = { count: 0.2, earlier: 1, unlock: 2 };
 
 /** A wave of strength k on a map level (see waveSpec); `hq` is the base's headquarters level, 0-based. */
 export function waveOfStrength(k: number, level: number, hq = 0): WaveSpec {
-  const levelScale = TUNING.hpScale * (1 + LEVEL_HP_GROWTH * (Math.min(level, LEVEL_HP_CAP) - 1));
+  const levelScale = levelHpScale(level);
   // Light units grow mostly in numbers, so overkill keeps biting late in the game.
   const grow = (enemy: EnemyId) => Math.pow(SWARM.has(enemy) ? SWARM_HP_GROWTH : HP_GROWTH, k - 1) * levelScale;
   const more = 1 + HQ_WAVES.count * hq;

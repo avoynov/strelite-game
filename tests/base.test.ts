@@ -282,7 +282,11 @@ describe('the base', () => {
     b = { ...b, buildings: { ...b.buildings, lab: { level: 2, hp: LAB_LEVELS[2]!.hp } } };
     expect(builders(b)).toBe(2);
     // The laboratory is slow: its top levels take days.
-    expect(LAB_LEVELS[4]!.seconds).toBeGreaterThanOrEqual(3 * 24 * 3600);
+    expect(LAB_LEVELS[8]!.seconds).toBeGreaterThanOrEqual(3 * 24 * 3600);
+    // Nine levels each; the laboratory's timings are its own, not the headquarters'.
+    expect(HQ_LEVELS).toHaveLength(9);
+    expect(LAB_LEVELS).toHaveLength(9);
+    expect(LAB_LEVELS.map((l) => l.seconds)).not.toEqual(HQ_LEVELS.map((l) => l.seconds));
     // Destroyed, it keeps its level and is rebuilt in a time that grows with it.
     b = { ...b, buildings: { ...b.buildings, lab: { level: 2, hp: 0 } } };
     expect(jobPrice(b, 'lab')?.kind).toBe('rebuild');

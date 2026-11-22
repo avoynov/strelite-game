@@ -54,7 +54,7 @@ export interface LabCallbacks {
 const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', hqLevel: 'lab.hqLevelHint', labLevel: 'lab.labLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
-const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
 const SEEN_KEY = 'strelite.lab.seen';
 const MEDALS_KEY = 'strelite.lab.medals';
 

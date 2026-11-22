@@ -77,69 +77,83 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
 type Effect = ResearchItem['effect'];
-/** Headquarters level (1-based) at which an item of this price joins the tree: the deeper (dearer) the item, the higher the headquarters. */
-export function hqFor(cost: number): number {
-  return cost < 1000 ? 1 : cost < 2000 ? 2 : cost < 3500 ? 3 : cost < 5500 ? 4 : 5;
-}
 
-const item = (id: string, branch: Branch, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => {
-  const hq = hqFor(cost);
-  return { id, branch, cost, seconds, requires, effect, ...(hq > 1 ? { hq } : {}) };
-};
+/**
+ * The tree comes in nine acts, one per headquarters level: an item joins the
+ * tree with its act's headquarters, and the laboratory must stand at least as
+ * high to research it. A gun's level IV also needs laboratory 3 and its level
+ * V laboratory 6, so nobody researches a level the headquarters cannot allow yet.
+ */
+export const ACTS = 9;
+export const LEVEL4_LAB = 3;
+export const LEVEL5_LAB = 6;
+
+const item = (id: string, branch: Branch, act: number, cost: number, seconds: number, requires: string[], effect: Effect): ResearchItem => ({
+  id,
+  branch,
+  cost,
+  seconds,
+  requires,
+  effect,
+  ...(act > 1 ? { hq: act } : {}),
+});
 const gun = (g: TowerId): Effect => ({ kind: 'gun', gun: g });
 const lvl = (g: TowerId, level: number): Effect => ({ kind: 'maxLevel', gun: g, level });
 const mod = (g: TowerId, mods: Partial<GunMods>): Effect => ({ kind: 'gunMod', gun: g, mods });
+const lvl4 = (g: TowerId, act: number, cost: number, seconds: number, requires: string[]) => item(`lvl4.${g}`, 'levels', Math.max(act, LEVEL4_LAB), cost, seconds, requires, lvl(g, 4));
+const lvl5 = (g: TowerId, act: number, cost: number, seconds: number) => item(`lvl5.${g}`, 'levels', Math.max(act, LEVEL5_LAB), cost, seconds, [`lvl4.${g}`], lvl(g, 5));
 
 /**
- * The tree. Guns come one by one in the agreed order; levels 4 and 5 of a gun
- * once the gun is known; each boost and effect leans on the one before it.
- * Cost and time grow the deeper an item sits. Prices follow what battles pay
- * at the map levels where an item is needed (see tests/balance.test.ts STAGES).
+ * The tree. Guns come one by one in the agreed order, each in its act; levels
+ * 4 and 5 of a gun once the gun is known; each boost and effect leans on the
+ * one before it. Cost and time grow the deeper an item sits. Prices follow
+ * what battles pay at the map levels where an item is needed (see
+ * tests/balance.test.ts STAGES).
  */
 export const RESEARCH: readonly ResearchItem[] = [
-  // Guns: the agreed unlock order.
-  item('gun.howitzer', 'guns', 500, 20 * MIN, [], gun('howitzer')),
-  item('gun.scorpion', 'guns', 800, HOUR, ['gun.howitzer'], gun('scorpion')),
-  item('gun.trebuchet', 'guns', 1500, 4 * HOUR, ['gun.scorpion'], gun('trebuchet')),
-  item('gun.greekfire', 'guns', 2200, 8 * HOUR, ['gun.trebuchet'], gun('greekfire')),
-  item('gun.railgun', 'guns', 4000, DAY, ['gun.greekfire'], gun('railgun')),
+  // Guns: the agreed unlock order, act by act.
+  item('gun.howitzer', 'guns', 1, 500, 20 * MIN, [], gun('howitzer')),
+  item('gun.scorpion', 'guns', 1, 800, HOUR, ['gun.howitzer'], gun('scorpion')),
+  item('gun.trebuchet', 'guns', 3, 1500, 4 * HOUR, ['gun.scorpion'], gun('trebuchet')),
+  item('gun.greekfire', 'guns', 5, 3200, 14 * HOUR, ['gun.trebuchet'], gun('greekfire')),
+  item('gun.railgun', 'guns', 7, 4600, DAY, ['gun.greekfire'], gun('railgun')),
 
   // Gun levels 4 and 5 (1–3 are open from the start).
-  item('lvl4.crossbow', 'levels', 400, 20 * MIN, [], lvl('crossbow', 4)),
-  item('lvl4.zis3', 'levels', 450, 25 * MIN, [], lvl('zis3', 4)),
-  item('lvl4.howitzer', 'levels', 900, 2 * HOUR, ['gun.howitzer'], lvl('howitzer', 4)),
-  item('lvl5.crossbow', 'levels', 1200, 4 * HOUR, ['lvl4.crossbow'], lvl('crossbow', 5)),
-  item('lvl5.zis3', 'levels', 1300, 4 * HOUR, ['lvl4.zis3'], lvl('zis3', 5)),
-  item('lvl4.scorpion', 'levels', 1800, 8 * HOUR, ['gun.scorpion'], lvl('scorpion', 4)),
-  item('lvl4.trebuchet', 'levels', 2600, 12 * HOUR, ['gun.trebuchet'], lvl('trebuchet', 4)),
-  item('lvl5.howitzer', 'levels', 2800, 12 * HOUR, ['lvl4.howitzer'], lvl('howitzer', 5)),
-  item('lvl4.greekfire', 'levels', 3500, DAY, ['gun.greekfire'], lvl('greekfire', 4)),
-  item('lvl5.scorpion', 'levels', 3800, DAY, ['lvl4.scorpion'], lvl('scorpion', 5)),
-  item('lvl4.railgun', 'levels', 5000, 2 * DAY, ['gun.railgun'], lvl('railgun', 4)),
-  item('lvl5.trebuchet', 'levels', 5000, 2 * DAY, ['lvl4.trebuchet'], lvl('trebuchet', 5)),
-  item('lvl5.greekfire', 'levels', 5500, 2 * DAY, ['lvl4.greekfire'], lvl('greekfire', 5)),
-  item('lvl5.railgun', 'levels', 7000, 3 * DAY, ['lvl4.railgun'], lvl('railgun', 5)),
+  lvl4('crossbow', 1, 400, 20 * MIN, []),
+  lvl4('zis3', 1, 450, 25 * MIN, []),
+  lvl4('howitzer', 1, 900, 2 * HOUR, ['gun.howitzer']),
+  lvl5('crossbow', 1, 1200, 4 * HOUR),
+  lvl5('zis3', 1, 1300, 4 * HOUR),
+  lvl4('scorpion', 1, 1800, 8 * HOUR, ['gun.scorpion']),
+  lvl4('trebuchet', 3, 2600, 12 * HOUR, ['gun.trebuchet']),
+  lvl5('howitzer', 1, 2800, 12 * HOUR),
+  lvl4('greekfire', 5, 4500, DAY, ['gun.greekfire']),
+  lvl5('scorpion', 1, 3800, DAY),
+  lvl4('railgun', 7, 6000, 2 * DAY, ['gun.railgun']),
+  lvl5('trebuchet', 3, 5000, 2 * DAY),
+  lvl5('greekfire', 5, 6500, 2.5 * DAY),
+  lvl5('railgun', 7, 8000, 3.5 * DAY),
 
   // Boosts: for every gun.
-  item('boost.gold1', 'boosts', 200, 2 * MIN, [], { kind: 'startGold', add: 100 }),
-  item('boost.damage1', 'boosts', 350, 10 * MIN, ['boost.gold1'], { kind: 'damage', add: 0.1 }),
-  item('boost.lives1', 'boosts', 600, 45 * MIN, ['boost.damage1'], { kind: 'lives', add: 5 }),
-  item('boost.damage2', 'boosts', 1000, 2 * HOUR, ['boost.lives1'], { kind: 'damage', add: 0.1 }),
-  item('boost.reload1', 'boosts', 1600, 4 * HOUR, ['boost.damage2'], { kind: 'reload', mul: 0.9 }),
-  item('boost.gold2', 'boosts', 2000, 8 * HOUR, ['boost.reload1'], { kind: 'startGold', add: 150 }),
-  item('boost.damage3', 'boosts', 3000, 16 * HOUR, ['boost.gold2'], { kind: 'damage', add: 0.1 }),
+  item('boost.gold1', 'boosts', 1, 200, 2 * MIN, [], { kind: 'startGold', add: 100 }),
+  item('boost.damage1', 'boosts', 1, 350, 10 * MIN, ['boost.gold1'], { kind: 'damage', add: 0.1 }),
+  item('boost.lives1', 'boosts', 1, 600, 45 * MIN, ['boost.damage1'], { kind: 'lives', add: 5 }),
+  item('boost.damage2', 'boosts', 2, 1000, 2 * HOUR, ['boost.lives1'], { kind: 'damage', add: 0.1 }),
+  item('boost.reload1', 'boosts', 3, 1600, 4 * HOUR, ['boost.damage2'], { kind: 'reload', mul: 0.9 }),
+  item('boost.gold2', 'boosts', 3, 2000, 8 * HOUR, ['boost.reload1'], { kind: 'startGold', add: 150 }),
+  item('boost.damage3', 'boosts', 4, 3000, 16 * HOUR, ['boost.gold2'], { kind: 'damage', add: 0.1 }),
 
   // Effects: one per gun, once the gun is known.
-  item('fx.crossbow', 'effects', 300, 5 * MIN, [], mod('crossbow', { pierce: 0.25 })),
-  item('fx.zis3', 'effects', 600, 45 * MIN, ['fx.crossbow'], mod('zis3', { range: 1, reload: 0.85 })),
-  item('fx.howitzer', 'effects', 900, 2 * HOUR, ['gun.howitzer', 'fx.zis3'], mod('howitzer', { splash: 0.4 })),
-  item('fx.scorpion', 'effects', 1800, 8 * HOUR, ['gun.scorpion', 'fx.howitzer'], mod('scorpion', { passThrough: 1, pierce: 0.2 })),
-  item('fx.trebuchet', 'effects', 2600, 12 * HOUR, ['gun.trebuchet', 'fx.scorpion'], mod('trebuchet', { splash: 0.5, pierce: 0.3 })),
-  item('fx.greekfire', 'effects', 3500, DAY, ['gun.greekfire', 'fx.trebuchet'], mod('greekfire', { rampTime: 0.5, range: 0.5 })),
-  item('fx.railgun', 'effects', 5000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
+  item('fx.crossbow', 'effects', 1, 300, 5 * MIN, [], mod('crossbow', { pierce: 0.25 })),
+  item('fx.zis3', 'effects', 1, 600, 45 * MIN, ['fx.crossbow'], mod('zis3', { range: 1, reload: 0.85 })),
+  item('fx.howitzer', 'effects', 1, 900, 2 * HOUR, ['gun.howitzer', 'fx.zis3'], mod('howitzer', { splash: 0.4 })),
+  item('fx.scorpion', 'effects', 2, 1800, 8 * HOUR, ['gun.scorpion', 'fx.howitzer'], mod('scorpion', { passThrough: 1, pierce: 0.2 })),
+  item('fx.trebuchet', 'effects', 3, 2600, 12 * HOUR, ['gun.trebuchet', 'fx.scorpion'], mod('trebuchet', { splash: 0.5, pierce: 0.3 })),
+  item('fx.greekfire', 'effects', 5, 4500, DAY, ['gun.greekfire', 'fx.trebuchet'], mod('greekfire', { rampTime: 0.5, range: 0.5 })),
+  item('fx.railgun', 'effects', 7, 6000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
 
   // Aiming: targeting modes the player can set on a gun.
-  item('aim.crossbow', 'effects', 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'weakest' }),
+  item('aim.crossbow', 'effects', 3, 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'weakest' }),
 ];
 
 const BY_ID = new Map(RESEARCH.map((r) => [r.id, r]));

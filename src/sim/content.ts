@@ -121,7 +121,8 @@ export interface Assault {
 
 const deg = (d: number) => (d * Math.PI) / 180;
 
-const DAMAGE_GROWTH = [1, 1.5, 2.2, 3.2, 4.6];
+/** Level 5 hits ×5.5 (not ×4.6), to answer the enemies that keep growing up to map 80. */
+export const DAMAGE_GROWTH = [1, 1.5, 2.2, 3.2, 5.5];
 const INTERVAL_GROWTH = [1, 0.95, 0.9, 0.85, 0.8];
 const COST_GROWTH = [1, 0.9, 1.6, 2.6, 4];
 
