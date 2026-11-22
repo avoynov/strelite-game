@@ -87,7 +87,7 @@ function groundLengthPx(tiles: number, a: number): number {
   return Math.hypot(isoX(Math.cos(a), Math.sin(a)), isoY(Math.cos(a), Math.sin(a))) * tiles;
 }
 /** Size of the burst a destroyed vehicle goes up in; units not listed just fall. */
-const VEHICLE_BURST: Record<string, number> = { drone: 0.6, truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
+const VEHICLE_BURST: Record<string, number> = { drone: 0.6, truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4, wagon: 0.6, glider: 0.4, armorcar: 0.65, shield: 0.85, boat: 1.1, dreadnought: 1.7 };
 /** Units drawn up in the air: their hits and wrecks burst at flying height. */
 const AIR_KINDS = new Set<string>(Object.values(ENEMIES).filter((e) => 'air' in e && e.air).map((e) => e.id));
 const BURST_LIFE = 0.45;

@@ -42,7 +42,10 @@ const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = {
   crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet',
   zadnoper: 'scorpion', rockets: 'crossbow', tarkan: 'zis3', ricochet: 'howitzer', harpoon: 'scorpion',
 };
-const DEATH_SOUND: Record<EnemyId, SoundName> = { infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig' };
+const DEATH_SOUND: Record<EnemyId, SoundName> = {
+  infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig',
+  wagon: 'deathVehicle', rider: 'deathSoft', glider: 'deathAir', armorcar: 'deathVehicle', sapper: 'deathSoft', shield: 'deathVehicle', boat: 'deathAir', dreadnought: 'deathBig',
+};
 
 const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
 const asMode = (v: string | null): Mode | null => MODES.find((m) => m === v) ?? null;
@@ -615,6 +618,8 @@ async function start(): Promise<void> {
         playAt('railgun', ev.x1, ev.y1);
       }
       else if (ev.type === 'trap' && ev.kind !== 'mine') playAt('impact', ev.x, ev.y);
+      else if (ev.type === 'heal') board.addFloat('+', ev.x, ev.y, 0x7bd36a);
+      else if (ev.type === 'disarmed') board.addFloat(t('trap.disarmed'), ev.x, ev.y, 0xe0624f);
       else if (ev.type === 'flash') board.onFlash(ev.towerId, ev.x, ev.y, ev.aim, ev.cone, ev.range, ev.big);
       else if (ev.type === 'bounce') {
         board.onBounce(ev.x1, ev.y1, ev.x2, ev.y2);

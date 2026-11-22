@@ -1,6 +1,6 @@
 import { afterArmor, applyDamage } from './damage';
 import type { Upgrades } from './research';
-import { BASE_ROLES, DAMAGE_GROWTH, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { BASE_ROLES, DAMAGE_GROWTH, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type BaseRole, type EnemyDef, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
@@ -98,6 +98,12 @@ export interface Enemy {
   held?: number;
   /** Seconds it is still in tar (slower). */
   tarred?: number;
+  /** Repair wagon: seconds to its next mending. */
+  healIn?: number;
+  /** Base mode: blows struck (units with only so many charges). */
+  blows?: number;
+  /** Boss: escorts already let out. */
+  escorted?: number;
 }
 
 /** A trap on the enemy's way. A spent one stays where it is until it is re-armed. */
@@ -114,6 +120,8 @@ export interface Trap {
   burning: number;
   /** Tar: enemies it already wounded. */
   tarred: number[];
+  /** Seconds of a sapper's work on it so far. */
+  disarm?: number;
 }
 
 export interface TowerStats {
@@ -276,6 +284,10 @@ export type GameEvent =
   | { type: 'built'; towerId: number; kind: GunJob['kind'] }
   /** Base mode: sappers blew up their charge. */
   | { type: 'blast'; x: number; y: number; radius: number }
+  /** A repair wagon mended a machine. */
+  | { type: 'heal'; enemyId: number; x: number; y: number }
+  /** Sappers disarmed a trap. */
+  | { type: 'disarmed'; trapId: number; x: number; y: number }
   /** A trap went off. */
   | { type: 'trap'; trapId: number; kind: TrapId; x: number; y: number }
   | { type: 'waveStart'; wave: number }
@@ -291,7 +303,7 @@ export interface GameOptions {
   /** Waves to clear to win; the level's own number when absent. */
   totalWaves?: number;
   /** Wave plan to use instead of the standard one (for tests and scenarios). */
-  waves?: (n: number, level: number) => WaveSpec;
+  waves?: (n: number, level: number, hq?: number, total?: number) => WaveSpec;
   /** Finished research: which guns can be built, and the boosts. Without it every gun is open and nothing is boosted. */
   upgrades?: Upgrades;
   /** Siege mode with the player's base: what stands, the treasury, the builders. */
@@ -330,12 +342,19 @@ const DART_IDLE = 2;
 /** Harpoon: the hook (research) slows its target by this share, for this many seconds. */
 const HOOK_SLOW = 0.4;
 const HOOK_SECONDS = 1.5;
+/** Shield-bearer: the cover it gives and how far behind it a column keeps its place. */
+const SHIELD = ENEMIES.shield.aura;
+/** A repair wagon keeps behind a machine this close ahead of it (tiles). */
+const WAGON_FOLLOW = 2;
 /** A trap goes off under a unit this close to its tile's centre (plus half the unit's length). */
 const TRAP_REACH = 0.45;
 /** Tar: seconds a unit stays slowed after it leaves the patch. */
 const TAR_STICK = 0.25;
 /** Rear: a gun's way through range, in cells, is taken as this many times its range. */
 const REAR_PATH = 1.5;
+
+/** An enemy's definition with every optional field visible. */
+const edef = (id: EnemyId): EnemyDef => ENEMIES[id];
 
 /** Bosses: the fortress and the dreadnought. */
 export function isBoss(def: EnemyId): boolean {
@@ -425,6 +444,8 @@ export class Game {
   projectiles: Projectile[] = [];
   /** Traps laid on the map. */
   traps: Trap[] = [];
+  /** Shield-bearers alive this step (their cover and their column). */
+  private shields: Enemy[] = [];
   /** Re-arm spent traps between waves by themselves while there is gold. */
   trapAuto = true;
   private readonly hqOutside: number;
@@ -436,7 +457,7 @@ export class Game {
   private events: GameEvent[] = [];
   /** Units dropped during this step (by destroyed APCs); join after it. */
   private dropped: Enemy[] = [];
-  private readonly waves: (n: number, level: number, hq?: number) => WaveSpec;
+  private readonly waves: (n: number, level: number, hq?: number, total?: number) => WaveSpec;
   private readonly upgrades: Upgrades | null;
   /** Targeting mode the player last set per gun kind; new guns of that kind take it. */
   aimPrefs: Partial<Record<TowerId, Targeting>> = {};
@@ -649,7 +670,7 @@ export class Game {
     this.projectiles = b.projectiles;
     this.traps = Array.isArray(b.traps) ? b.traps.filter((tr) => isTrapId(tr.kind) && grid.inBounds(tr.cx, tr.cy)) : [];
     this.phase = b.phase;
-    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0) : null;
+    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0, this.totalWaves) : null;
     this.spawnState = b.phase === 'wave' ? b.spawnState : [];
     this.rebuildFlow();
     return true;
@@ -1209,8 +1230,22 @@ export class Game {
       const def = TRAPS[tr.kind];
       const power = this.trapPower(tr.kind);
       if (tr.armed) {
+        const near = (e: Enemy) => e.alive && !e.air && Math.hypot(e.x - tr.x, e.y - tr.y) <= TRAP_REACH + ENEMIES[e.def].radius * 0.5;
+        // A sapper on it stops and disarms it; it never sets one off.
+        const sapper = this.enemies.find((e) => near(e) && edef(e.def).disarm);
+        if (sapper) {
+          tr.disarm = (tr.disarm ?? 0) + dt;
+          sapper.held = Math.max(sapper.held ?? 0, 2 * dt);
+          if (tr.disarm >= (edef(sapper.def).disarm ?? 0)) {
+            tr.armed = false;
+            tr.disarm = 0;
+            this.events.push({ type: 'disarmed', trapId: tr.id, x: tr.x, y: tr.y });
+          }
+          continue;
+        }
+        tr.disarm = 0;
         const proof = tr.kind === 'pit' || tr.kind === 'leg';
-        const victim = this.enemies.find((e) => e.alive && !e.air && !(proof && 'trapProof' in ENEMIES[e.def]) && Math.hypot(e.x - tr.x, e.y - tr.y) <= TRAP_REACH + ENEMIES[e.def].radius * 0.5);
+        const victim = this.enemies.find((e) => near(e) && !edef(e.def).disarm && !(proof && edef(e.def).trapProof));
         if (!victim) continue;
         tr.armed = false;
         this.events.push({ type: 'trap', trapId: tr.id, kind: tr.kind, x: tr.x, y: tr.y });
@@ -1224,7 +1259,7 @@ export class Game {
           this.damageEnemy(victim, def.damage * power, undefined, this.armorOf(victim), def.pierce);
         } else if (tr.kind === 'leg') {
           this.damageEnemy(victim, def.damage * power, undefined, this.armorOf(victim), def.pierce);
-          const hold = isBoss(victim.def) ? 0 : ENEMIES[victim.def].armor > 0 ? (def.hold ?? 0) / 2 : (def.hold ?? 0);
+          const hold = isBoss(victim.def) ? 0 : edef(victim.def).machine ? (def.hold ?? 0) / 2 : (def.hold ?? 0);
           victim.held = Math.max(victim.held ?? 0, hold);
         } else {
           tr.patch = (def.seconds ?? 0) * power;
@@ -1257,7 +1292,7 @@ export class Game {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
     if (this.retake && !this.towers.some((t) => !isWreck(t) && t.job?.kind !== 'build')) return { ok: false, reason: 'busy' };
     this.wave++;
-    this.currentWave = this.retake ? { groups: [], clearBonus: 0 } : this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0);
+    this.currentWave = this.retake ? { groups: [], clearBonus: 0 } : this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0, this.totalWaves);
     this.spawnState = this.currentWave.groups.map((g) => ({ left: g.count, timer: g.delay }));
     this.phase = 'wave';
     if (this.base && this.wave === 1) {
@@ -1339,7 +1374,9 @@ export class Game {
       p.pt = p.t;
     }
     this.spawn(dt);
+    this.shields = this.enemies.filter((e) => e.alive && e.def === 'shield');
     this.moveEnemies(dt);
+    this.stepAbilities(dt);
     if (this.base) this.assaultInBase(dt);
     else if (this.mode === 'siege') this.assault(dt);
     this.stepTraps(dt);
@@ -1569,9 +1606,25 @@ export class Game {
 
   /** Speed right now: weaving riders ease off a little in bends. */
   speedOf(e: Enemy): number {
-    if (e.stun > 0 || (e.held ?? 0) > 0) return 0;
-    const tar = (e.tarred ?? 0) > 0 ? 1 - (TRAPS.tar.slow ?? 0) : 1;
-    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0)) * (e.hooked > 0 ? 1 - HOOK_SLOW : 1) * tar;
+    let v = this.ownSpeed(e);
+    if (v <= 0 || e.air) return v;
+    // Close behind a shield-bearer: it never passes it (a turtle).
+    if (e.def !== 'shield') {
+      for (const sh of this.shields) {
+        if (!sh.alive || sh.remaining >= e.remaining || e.remaining - sh.remaining > SHIELD.reach) continue;
+        if (Math.hypot(sh.x - e.x, sh.y - e.y) > SHIELD.reach + ENEMIES.shield.radius) continue;
+        v = Math.min(v, this.ownSpeed(sh));
+      }
+    }
+    // A repair wagon never drives faster than the machine ahead of it.
+    if (edef(e.def).heal) {
+      for (const m of this.enemies) {
+        if (m === e || !m.alive || m.air || !('machine' in ENEMIES[m.def]) || m.remaining >= e.remaining || e.remaining - m.remaining > WAGON_FOLLOW) continue;
+        if (Math.hypot(m.x - e.x, m.y - e.y) > WAGON_FOLLOW + ENEMIES[m.def].radius) continue;
+        v = Math.min(v, this.ownSpeed(m));
+      }
+    }
+    return v;
   }
 
   /** Walk a ground unit along a field; a weaving rider swings across its way as it goes. */
@@ -1679,18 +1732,24 @@ export class Game {
     return s;
   }
 
+  /** Base mode: a unit's role; one whose charges are spent fights on as an infantryman. */
+  private roleOf(e: Enemy): BaseRole {
+    const r = BASE_ROLES[e.def];
+    return r.charges && (e.blows ?? 0) >= r.charges ? BASE_ROLES.infantry : r;
+  }
+
   /** Base mode: what a unit goes for (see BASE_ROLES): the nearest of its kind, else the nearest building or gun. */
   private pickGoal(e: Enemy): Structure | undefined {
     const standingTowers = this.towers.filter((t) => !isWreck(t));
     const standingBuildings = this.buildings.filter((b) => b.hp > 0);
     let pool: Structure[];
-    switch (BASE_ROLES[e.def].goal) {
+    switch (this.roleOf(e).goal) {
       case 'nearest':
         pool = [...standingBuildings, ...standingTowers, ...this.fences];
         break;
       case 'treasury':
       case 'hq':
-        pool = standingBuildings.filter((b) => b.kind === BASE_ROLES[e.def].goal);
+        pool = standingBuildings.filter((b) => b.kind === this.roleOf(e).goal);
         break;
       case 'gun':
         pool = standingTowers;
@@ -1715,7 +1774,7 @@ export class Game {
   /** Base mode: walk (or fly) towards the goal; ground units stop at the first wall in the way. */
   private moveInBase(e: Enemy, dt: number): void {
     const goal = this.goalOf(e);
-    const role = BASE_ROLES[e.def];
+    const role = this.roleOf(e);
     const hq = this.hq!;
     if (e.air) {
       if (!goal) return;
@@ -1730,6 +1789,10 @@ export class Game {
         e.x += (dx / d) * m;
         e.y += (dy / d) * m;
         e.heading = Math.atan2(dy, dx);
+      } else if (edef(e.def).lands) {
+        // A glider lands by its goal and lets its soldier out (no bounty: it was not shot down).
+        this.land(e, edef(e.def).lands as EnemyId);
+        return;
       }
       e.remaining = Math.hypot(hq.x - e.x, hq.y - e.y);
       return;
@@ -1819,7 +1882,7 @@ export class Game {
       // A stunned unit strikes nothing.
       if (!e.alive || e.stun > 0) continue;
       const d = ENEMIES[e.def];
-      const role = BASE_ROLES[e.def];
+      const role = this.roleOf(e);
       const a = role.assault;
       e.attackCooldown = Math.max(0, e.attackCooldown - dt);
       if (e.attackCooldown > 0) continue;
@@ -1848,6 +1911,11 @@ export class Game {
       e.attackCooldown = a.interval;
       this.events.push({ type: 'strike', kind: a.kind, enemyId: e.id, x1: e.x, y1: e.y, x2: target.x, y2: target.y });
       this.hitStructure(target, a.damage * power);
+      if (role.charges) {
+        e.blows = (e.blows ?? 0) + 1;
+        // Its last charge laid: on as a soldier, after whatever is nearest.
+        if (e.blows >= role.charges) e.goal = 0;
+      }
     }
   }
 
@@ -2190,7 +2258,7 @@ export class Game {
     t.heat += dt;
     t.firing = true;
     const per = dps / BEAM_HITS_PER_SECOND;
-    const through = afterArmor(per, ENEMIES[target.def].armor, def.pierce) * BEAM_HITS_PER_SECOND;
+    const through = afterArmor(per, this.armorOf(target), def.pierce) * BEAM_HITS_PER_SECOND;
     t.stats.wasted += (dps - through) * dt;
     t.stats.wasted += this.damageEnemy(target, through * dt, t, 0, 0, false);
   }
@@ -2203,7 +2271,7 @@ export class Game {
     let hitAny = false;
     for (const e of this.onLine(t.x, t.y, x2, y2)) {
       hitAny = true;
-      t.stats.wasted += this.damageEnemy(e, lvl.damage, t, ENEMIES[e.def].armor, def.pierce);
+      t.stats.wasted += this.damageEnemy(e, lvl.damage, t, this.armorOf(e), def.pierce);
     }
     if (!hitAny) t.stats.wasted += lvl.damage;
   }
@@ -2270,10 +2338,10 @@ export class Game {
       }
       case 'armored': {
         const max = def.maxArmor ?? Infinity;
-        const fit = list.filter((e) => ENEMIES[e.def].armor > 0 && ENEMIES[e.def].armor <= max);
+        const fit = list.filter((e) => this.armorOf(e) > 0 && this.armorOf(e) <= max);
         if (!fit.length) return first(list);
-        const top = Math.max(...fit.map((e) => ENEMIES[e.def].armor));
-        return first(fit.filter((e) => ENEMIES[e.def].armor === top));
+        const top = Math.max(...fit.map((e) => this.armorOf(e)));
+        return first(fit.filter((e) => this.armorOf(e) === top));
       }
       case 'crowd': {
         const r = this.levelOf(t).splash ?? 0;
@@ -2395,9 +2463,39 @@ export class Game {
     return Math.max(0, -b + Math.sqrt(disc)) / v;
   }
 
-  /** An enemy's armour now. */
+  /** An enemy's armour now: its own, and a shield-bearer's cover when one is close (not stacking). */
   armorOf(e: Enemy): number {
-    return ENEMIES[e.def].armor;
+    const own = ENEMIES[e.def].armor;
+    if (e.air || !this.shields.length) return own;
+    for (const sh of this.shields) {
+      if (sh === e || !sh.alive) continue;
+      if (Math.hypot(sh.x - e.x, sh.y - e.y) <= SHIELD.reach + ENEMIES.shield.radius) return own + SHIELD.armor;
+    }
+    return own;
+  }
+
+  /** A unit's own speed now (stun, traps, hooks, bends), before keeping its place in a column. */
+  private ownSpeed(e: Enemy): number {
+    if (e.stun > 0 || (e.held ?? 0) > 0) return 0;
+    const tar = (e.tarred ?? 0) > 0 ? 1 - (TRAPS.tar.slow ?? 0) : 1;
+    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0)) * (e.hooked > 0 ? 1 - HOOK_SLOW : 1) * tar;
+  }
+
+  /** Repair wagons mend the machines round them; sappers keep to their trap work (see stepTraps). */
+  private stepAbilities(dt: number): void {
+    for (const w of this.enemies) {
+      const heal = edef(w.def).heal;
+      if (!heal || !w.alive || w.stun > 0) continue;
+      w.healIn = (w.healIn ?? heal.every) - dt;
+      if (w.healIn > 0) continue;
+      w.healIn = heal.every;
+      for (const m of this.enemies) {
+        if (!m.alive || m === w || m.air || !('machine' in ENEMIES[m.def]) || m.hp >= m.maxHp) continue;
+        if (Math.hypot(m.x - w.x, m.y - w.y) > heal.reach + ENEMIES[m.def].radius) continue;
+        m.hp = Math.min(m.maxHp, m.hp + m.maxHp * heal.share * (isBoss(m.def) ? BOSS_PCT : 1));
+        this.events.push({ type: 'heal', enemyId: m.id, x: m.x, y: m.y });
+      }
+    }
   }
 
   private moveProjectiles(dt: number): void {
@@ -2553,6 +2651,7 @@ export class Game {
     target.hp = r.hpAfter;
     if (tower) tower.stats.dealt += r.dealt;
     if (announce) this.events.push({ type: 'hit', enemyId: target.id, dealt: r.dealt, overkill: r.overkill, x: target.x, y: target.y });
+    if (target.hp > 0 && edef(target.def).escort) this.escortOut(target);
     if (target.hp <= 0) {
       target.alive = false;
       // A gun with the trophy research takes a share more gold for its kills.
@@ -2565,6 +2664,34 @@ export class Game {
       this.dropUnits(target);
     }
     return r.overkill + r.blocked;
+  }
+
+  /** Base mode: a glider down: gone, and one unit on foot where it landed. */
+  private land(e: Enemy, kind: EnemyId): void {
+    e.alive = false;
+    this.lets(e, kind, 1);
+  }
+
+  /** Units let out of another (an escort, a landed glider), grown like the unit they came from. */
+  private lets(from: Enemy, kind: EnemyId, count: number): void {
+    const k = from.maxHp / ENEMIES[from.def].baseHp;
+    const hp = Math.max(1, Math.round(ENEMIES[kind].baseHp * k));
+    for (let i = 0; i < count; i++) {
+      const side = (i - (count - 1) / 2) * 0.35;
+      const x = from.x - Math.sin(from.heading) * side - Math.cos(from.heading) * 0.3;
+      const y = from.y + Math.cos(from.heading) * side - Math.sin(from.heading) * 0.3;
+      this.dropped.push(this.makeEnemy(kind, hp, ENEMIES[kind].baseReward, x, y, from.target));
+    }
+  }
+
+  /** A boss lets out its escort each time its health falls to the next share. */
+  private escortOut(e: Enemy): void {
+    const esc = edef(e.def).escort;
+    if (!esc) return;
+    while ((e.escorted ?? 0) < esc.at.length && e.hp <= e.maxHp * esc.at[e.escorted ?? 0]!) {
+      e.escorted = (e.escorted ?? 0) + 1;
+      for (const u of esc.units) this.lets(e, u.enemy as EnemyId, u.count);
+    }
   }
 
   /** A destroyed APC unloads its squad where it stopped, at the same strength as its wave. */

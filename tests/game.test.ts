@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { ECONOMY, ENEMIES, TICK, TOWERS } from '../src/sim/content';
+import { ECONOMY, ENEMIES, TICK, TOWERS, type EnemyId } from '../src/sim/content';
 import { angleDelta, Game, startMoney, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
-import { waveOfStrength, waveSpec, waveStrength } from '../src/sim/waves';
+import { groupWeight, olderGroups, waveOfStrength, waveSpec, waveStrength, type WaveGroup } from '../src/sim/waves';
+import { levelWaves } from '../src/sim/levels';
 import { run } from './helpers/bot';
 
 /** Map level 2 on the fixed test map, its waves rising from strength 1 (so the first is small). */
@@ -177,8 +178,36 @@ describe('balance', () => {
     expect(kinds(5, 2)).toEqual(['infantry', 'moto', 'truck', 'apc']);
     expect(kinds(5, 3)).toContain('drone');
     expect(kinds(5, 4)).toContain('tank');
-    expect(kinds(9, 5)).not.toContain('fortress');
-    expect(kinds(10, 5)).toContain('fortress');
+    // The boss comes on a map's last wave only, from map 5: the fortress, from map 80 the dreadnought.
+    expect(kinds(10, 5)).not.toContain('fortress');
+    const last = (level: number) => waveSpec(levelWaves(level), level).groups.map((g) => g.enemy);
+    expect(last(4)).not.toContain('fortress');
+    expect(last(5)).toContain('fortress');
+    expect(last(79)).toContain('fortress');
+    expect(last(80)).toContain('dreadnought');
+    expect(last(80)).not.toContain('fortress');
+    // One newcomer per act from map 10.
+    const open: Array<[EnemyId, number, number]> = [['wagon', 10, 6], ['rider', 16, 6], ['glider', 23, 6], ['armorcar', 31, 8], ['sapper', 40, 8], ['shield', 51, 10], ['boat', 64, 10]];
+    for (const [e, level, k] of open) {
+      expect(kinds(k, level), `${e} on ${level}`).toContain(e);
+      expect(kinds(k, level - 1), `${e} before ${level}`).not.toContain(e);
+      expect(kinds(k - 1, level), `${e} below ${k}`).not.toContain(e);
+    }
+  });
+
+  it('keeps a wave\'s weight as the newcomers and the boss join: the older seven thin out', () => {
+    const weight = (groups: WaveGroup[]) => groups.reduce((s, g) => s + groupWeight(g), 0);
+    for (const level of [10, 16, 23, 31, 40, 51, 64, 80]) {
+      for (const k of [10, 14, 18]) {
+        const target = weight(olderGroups(k, level));
+        for (const opts of [{}, { boss: true, even: true }]) {
+          const w = waveOfStrength(k, level, 0, opts);
+          // Rounding the thinned numbers (at least one of each) leaves a little over.
+          expect(weight(w.groups) / target, `${level} k${k}`).toBeGreaterThan(0.85);
+          expect(weight(w.groups) / target, `${level} k${k}`).toBeLessThan(1.15);
+        }
+      }
+    }
   });
 
   it('starts each map level a little stronger, up to a cap', () => {

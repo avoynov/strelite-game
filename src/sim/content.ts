@@ -136,6 +136,18 @@ export interface EnemyDef {
   boss?: boolean;
   /** Walks over spike pits and leg traps as if they were not there. */
   trapProof?: boolean;
+  /** A machine (not a soldier): leg traps hold it half as long; repair wagons mend it. */
+  machine?: boolean;
+  /** Repair wagon: mends machines within `reach` tiles by `share` of their full health every `every` seconds (bosses half). */
+  heal?: { share: number; every: number; reach: number };
+  /** Shield-bearer: other ground units within `reach` tiles take this much more armour (not stacking), and those close behind it never pass it. */
+  aura?: { armor: number; reach: number };
+  /** Sapper: seconds it needs to disarm a trap in its way (it never sets one off). */
+  disarm?: number;
+  /** Base mode: a flyer that lands by its goal and lets out this unit. */
+  lands?: string;
+  /** Boss: lets out an escort when its health falls to each of these shares. */
+  escort?: { at: readonly number[]; units: ReadonlyArray<{ enemy: string; count: number }> };
   /** Siege mode: how it attacks guns and fences; units without one only pass by. */
   assault?: Assault;
   /**
@@ -380,10 +392,42 @@ export const ENEMIES = {
   infantry: { id: 'infantry', baseHp: 20, armor: 0, speed: 1.0, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 1, assault: { kind: 'shoot', damage: 2, interval: 1, range: 2 }, detour: 8 },
   moto: { id: 'moto', baseHp: 40, armor: 0, speed: 2.2, leakDamage: 1, radius: 0.35, baseReward: 2, weave: 0.7, unlockLevel: 2 },
   drone: { id: 'drone', baseHp: 45, armor: 0, speed: 1.8, leakDamage: 1, radius: 1.0, baseReward: 3, air: true, unlockLevel: 3 },
-  truck: { id: 'truck', baseHp: 130, armor: 3, speed: 1.6, leakDamage: 2, radius: 0.7, baseReward: 4, unlockLevel: 1 },
-  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.95, baseReward: 8, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
-  tank: { id: 'tank', baseHp: 800, armor: 14, speed: 0.6, leakDamage: 5, radius: 0.8, baseReward: 14, unlockLevel: 4, assault: { kind: 'shoot', damage: 25, interval: 2.5, range: 3.5 }, detour: 3 },
-  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.85, baseReward: 80, unlockLevel: 5, boss: true, assault: { kind: 'shoot', damage: 60, interval: 3, range: 4 }, detour: 1 },
+  truck: { id: 'truck', baseHp: 130, armor: 3, speed: 1.6, leakDamage: 2, radius: 0.7, baseReward: 4, unlockLevel: 1, machine: true },
+  apc: { id: 'apc', baseHp: 300, armor: 7, speed: 1.1, leakDamage: 3, radius: 0.95, baseReward: 8, machine: true, dropsOnDeath: { enemy: 'infantry', count: 4 }, unlockLevel: 2, assault: { kind: 'ram', damage: 30, interval: 2, range: 0.4 }, detour: 4 },
+  tank: { id: 'tank', baseHp: 800, armor: 14, speed: 0.6, leakDamage: 5, radius: 0.8, baseReward: 14, unlockLevel: 4, machine: true, assault: { kind: 'shoot', damage: 25, interval: 2.5, range: 3.5 }, detour: 3 },
+  fortress: { id: 'fortress', baseHp: 5000, armor: 22, speed: 0.35, leakDamage: 10, radius: 1.85, baseReward: 80, unlockLevel: 5, boss: true, machine: true, assault: { kind: 'shoot', damage: 60, interval: 3, range: 4 }, detour: 1 },
+  // The new eight, one per act from II: they join the waves on these map levels (see waveOfStrength).
+  /** Repair wagon: follows the armour and mends it; never drives faster than the machine ahead. */
+  wagon: { id: 'wagon', baseHp: 160, armor: 4, speed: 1.0, leakDamage: 2, radius: 0.73, baseReward: 5, unlockLevel: 10, machine: true, heal: { share: 0.02, every: 2, reach: 2 } },
+  /** Riders: fast packs on horseback. */
+  rider: { id: 'rider', baseHp: 55, armor: 1, speed: 1.9, leakDamage: 1, radius: 0.32, baseReward: 2, unlockLevel: 16 },
+  /** Gliders: flocks of light flyers; in the base they land and let a soldier out. */
+  glider: { id: 'glider', baseHp: 35, armor: 0, speed: 2.3, leakDamage: 1, radius: 0.69, baseReward: 2, air: true, unlockLevel: 23, lands: 'infantry' },
+  /** Armoured car: fast, with a machine gun it fires on the move. */
+  armorcar: { id: 'armorcar', baseHp: 200, armor: 5, speed: 1.7, leakDamage: 2, radius: 0.64, baseReward: 10, unlockLevel: 31, machine: true, assault: { kind: 'shoot', damage: 4, interval: 0.5, range: 3 }, detour: 4 },
+  /** Sappers: slow soldiers who disarm traps and lay charges at fences. */
+  sapper: { id: 'sapper', baseHp: 40, armor: 3, speed: 0.8, leakDamage: 1, radius: 0.3, baseReward: 1, unlockLevel: 40, disarm: 1.5, assault: { kind: 'shoot', damage: 12, interval: 1.5, range: 0.6 }, detour: 8 },
+  /** Shield-bearer: a slow wall on wheels; what follows close behind it is armoured too and keeps behind it. */
+  shield: { id: 'shield', baseHp: 700, armor: 18, speed: 0.5, leakDamage: 4, radius: 0.8, baseReward: 18, unlockLevel: 51, machine: true, aura: { armor: 6, reach: 1.5 }, assault: { kind: 'ram', damage: 40, interval: 2.5, range: 0.4 }, detour: 3 },
+  /** Flying boat: a slow armoured flyer that bombs what is under it. */
+  boat: { id: 'boat', baseHp: 1000, armor: 12, speed: 0.45, leakDamage: 5, radius: 1.8, baseReward: 20, air: true, unlockLevel: 64 },
+  /** Dreadnought: the last boss, from map 80; lets out an escort as it breaks up; pits and leg traps do nothing to it. */
+  dreadnought: {
+    id: 'dreadnought',
+    baseHp: 12000,
+    armor: 26,
+    speed: 0.3,
+    leakDamage: 20,
+    radius: 2.0,
+    baseReward: 150,
+    unlockLevel: 80,
+    boss: true,
+    trapProof: true,
+    machine: true,
+    escort: { at: [2 / 3, 1 / 3], units: [{ enemy: 'armorcar', count: 1 }, { enemy: 'infantry', count: 4 }] },
+    assault: { kind: 'shoot', damage: 90, interval: 3, range: 5 },
+    detour: 0,
+  },
 } as const satisfies Record<string, EnemyDef>;
 
 export type EnemyId = keyof typeof ENEMIES;
@@ -417,6 +461,8 @@ export interface BaseRole {
   detour: number;
   /** `blast` only: tiles round the charge it damages. */
   splash?: number;
+  /** Blows it has before it falls back to an infantryman's role. */
+  charges?: number;
 }
 
 /**
@@ -435,6 +481,15 @@ export const BASE_ROLES: Record<EnemyId, BaseRole> = {
   apc: { goal: 'gun', assault: { kind: 'ram', damage: 18, interval: 2, range: 0.4 }, detour: ENEMIES.apc.detour },
   tank: { goal: 'gun', assault: { kind: 'shoot', damage: 12, interval: 2.5, range: 3 }, detour: ENEMIES.tank.detour },
   fortress: { goal: 'hq', assault: ENEMIES.fortress.assault, detour: ENEMIES.fortress.detour },
+  wagon: { goal: 'gun', assault: { kind: 'ram', damage: 8, interval: 2, range: 0.4 }, detour: 4 },
+  rider: { goal: 'treasury', assault: { kind: 'shoot', damage: 3, interval: 0.8, range: 1.2 }, detour: 24 },
+  glider: { goal: 'nearest', assault: { kind: 'bomb', damage: 6, interval: 3, range: 0.6 }, detour: 0 },
+  armorcar: { goal: 'gun', assault: ENEMIES.armorcar.assault, detour: ENEMIES.armorcar.detour },
+  // Four charges at the fences, then it fights on as a soldier.
+  sapper: { goal: 'fence', assault: ENEMIES.sapper.assault, detour: 0, charges: 4 },
+  shield: { goal: 'gun', assault: ENEMIES.shield.assault, detour: ENEMIES.shield.detour },
+  boat: { goal: 'gun', assault: { kind: 'bomb', damage: 40, interval: 3, range: 0.8 }, detour: 0 },
+  dreadnought: { goal: 'hq', assault: ENEMIES.dreadnought.assault, detour: 0 },
 };
 
 /** Siege mode: a unit with no assault stuck at a wall leans on it this hard (per second), so no wave can stall. */
