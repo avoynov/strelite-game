@@ -118,6 +118,13 @@ html, body {
 .fence-2::after {
   background: radial-gradient(circle, #c9d2da 0 1.5px, transparent 2px) 0 0 / 9px 9px, linear-gradient(#8a96a3, #4f5964);
 }
+/* Traps: stand-in icons until they have art. */
+.trap-ico { background: #5b4a32 radial-gradient(circle at 50% 62%, #7a6648 0 45%, transparent 70%); }
+.trap-ico::after { content: ''; position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); }
+.trap-mine::after { width: 30px; height: 14px; border-radius: 50%; background: radial-gradient(circle, #c23a2a 0 3px, #3a3a30 3.5px); box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35); }
+.trap-pit::after { width: 32px; height: 18px; background: repeating-linear-gradient(90deg, #2a2116 0 5px, #9a7a4a 5px 7px); clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); }
+.trap-leg::after { width: 30px; height: 14px; border: 3px solid #9ca0a6; border-radius: 50%; background: repeating-linear-gradient(90deg, transparent 0 4px, #6c7076 4px 5px); }
+.trap-tar::after { width: 20px; height: 26px; border-radius: 4px; background: linear-gradient(#5a3c22, #3e2814); box-shadow: inset 0 6px 0 -4px #222, inset 0 -6px 0 -4px #222; }
 .gun-ico-none::after { content: ''; position: absolute; inset: 18px; border-radius: 50%; background: #3d4a27; }
 .row { display: flex; gap: 12px; align-items: center; width: 100%; }
 .info { flex: 1; min-width: 0; }

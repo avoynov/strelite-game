@@ -11,8 +11,8 @@ describe('research sets', () => {
     expect(new Set(all).size).toBe(all.length);
   });
 
-  it('one set per gun in unlock order, then the Fortress', () => {
-    expect(RESEARCH_SETS.map((s) => s.id)).toEqual([...GUN_ORDER, 'fortress']);
+  it('one set per gun in unlock order, then the Fortress and the Traps', () => {
+    expect(RESEARCH_SETS.map((s) => s.id)).toEqual([...GUN_ORDER, 'fortress', 'traps']);
     expect([...GUN_ORDER].sort()).toEqual([...TOWER_IDS].sort());
   });
 

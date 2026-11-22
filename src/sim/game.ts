@@ -27,6 +27,7 @@ import {
   type Occupier,
 } from './base';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
+import { isTrapId, TAR_BURN, trapCap, trapOpen, TRAPS, type TrapId } from './traps';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
 
@@ -50,6 +51,7 @@ export interface BattleSave {
   towers: Tower[];
   enemies: Enemy[];
   projectiles: Projectile[];
+  traps?: Trap[];
 }
 
 export interface Enemy {
@@ -92,6 +94,26 @@ export interface Enemy {
   stunGuard: number;
   /** Seconds a harpoon's hook still drags on it (slower). */
   hooked: number;
+  /** Seconds a leg trap still holds it (it stands, but can still strike). */
+  held?: number;
+  /** Seconds it is still in tar (slower). */
+  tarred?: number;
+}
+
+/** A trap on the enemy's way. A spent one stays where it is until it is re-armed. */
+export interface Trap {
+  id: number;
+  kind: TrapId;
+  cx: number;
+  cy: number;
+  x: number;
+  y: number;
+  armed: boolean;
+  /** Tar: seconds the patch still lies, and seconds it still burns. */
+  patch: number;
+  burning: number;
+  /** Tar: enemies it already wounded. */
+  tarred: number[];
 }
 
 export interface TowerStats {
@@ -254,12 +276,14 @@ export type GameEvent =
   | { type: 'built'; towerId: number; kind: GunJob['kind'] }
   /** Base mode: sappers blew up their charge. */
   | { type: 'blast'; x: number; y: number; radius: number }
+  /** A trap went off. */
+  | { type: 'trap'; trapId: number; kind: TrapId; x: number; y: number }
   | { type: 'waveStart'; wave: number }
   | { type: 'waveClear'; wave: number; bonus: number }
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' | 'noBuilder' | 'noArsenal' | 'wreck' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' | 'noBuilder' | 'noArsenal' | 'wreck' | 'trapCap' | 'trapHq' | 'armed' };
 
 export interface GameOptions {
   /** Map level, 1-based: decides which guns can be built and which enemies attack. */
@@ -274,6 +298,10 @@ export interface GameOptions {
   base?: BaseSetup;
   /** Targeting modes the player set on each gun kind before (see Game.setAim). */
   aimPrefs?: Partial<Record<TowerId, Targeting>>;
+  /** Headquarters level (0-based) outside base mode: which traps, and how many. The highest when absent. */
+  hqLevel?: number;
+  /** Re-arm spent traps between waves by themselves while there is gold (default on). */
+  trapAuto?: boolean;
 }
 
 const ARRIVE_EPS = 1e-6;
@@ -302,6 +330,10 @@ const DART_IDLE = 2;
 /** Harpoon: the hook (research) slows its target by this share, for this many seconds. */
 const HOOK_SLOW = 0.4;
 const HOOK_SECONDS = 1.5;
+/** A trap goes off under a unit this close to its tile's centre (plus half the unit's length). */
+const TRAP_REACH = 0.45;
+/** Tar: seconds a unit stays slowed after it leaves the patch. */
+const TAR_STICK = 0.25;
 /** Rear: a gun's way through range, in cells, is taken as this many times its range. */
 const REAR_PATH = 1.5;
 
@@ -391,6 +423,11 @@ export class Game {
   /** Base mode: seconds into the raid that provokes the attack, or null when there is none. */
   raidTime: number | null = null;
   projectiles: Projectile[] = [];
+  /** Traps laid on the map. */
+  traps: Trap[] = [];
+  /** Re-arm spent traps between waves by themselves while there is gold. */
+  trapAuto = true;
+  private readonly hqOutside: number;
 
   private nextId = 1;
   private currentWave: WaveSpec | null = null;
@@ -433,6 +470,8 @@ export class Game {
     this.totalWaves = opts.totalWaves ?? levelWaves(this.level);
     this.upgrades = opts.upgrades ?? null;
     this.aimPrefs = { ...opts.aimPrefs };
+    this.hqOutside = opts.hqLevel ?? HQ_LEVELS.length - 1;
+    this.trapAuto = opts.trapAuto ?? true;
     this.base = map.mode === 'siege' ? (opts.base ?? null) : null;
     if (!this.base) this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
@@ -512,6 +551,10 @@ export class Game {
       const fence = this.newFence(f.cx, f.cy, f.level, f.invested);
       fence.hp = Math.min(f.hp, fence.maxHp);
     }
+    for (const tr of b.traps ?? []) {
+      if (this.trapError(tr.kind, tr.cx, tr.cy, true)) continue;
+      this.newTrap(tr.kind, tr.cx, tr.cy).armed = tr.armed;
+    }
     if (b.occupied) this.army = b.occupied.map((o) => ({ ...o }));
     this.settleJobs();
   }
@@ -573,6 +616,7 @@ export class Game {
       towers: copy(this.towers),
       enemies: copy(this.enemies),
       projectiles: copy(this.projectiles),
+      traps: copy(this.traps),
     };
   }
 
@@ -603,6 +647,7 @@ export class Game {
     for (const t of this.towers) this.markFootprint(t, t.id);
     this.enemies = b.enemies;
     this.projectiles = b.projectiles;
+    this.traps = Array.isArray(b.traps) ? b.traps.filter((tr) => isTrapId(tr.kind) && grid.inBounds(tr.cx, tr.cy)) : [];
     this.phase = b.phase;
     this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0) : null;
     this.spawnState = b.phase === 'wave' ? b.spawnState : [];
@@ -611,13 +656,14 @@ export class Game {
   }
 
   /** Base mode: the base as it stands now, to be saved (attack number, building jobs and the occupation are the caller's). */
-  snapshot(): Pick<BaseState, 'buildings' | 'guns' | 'fences'> {
+  snapshot(): Pick<BaseState, 'buildings' | 'guns' | 'fences' | 'traps'> {
     const buildings = {} as BaseState['buildings'];
     for (const b of this.buildings) buildings[b.kind] = { level: b.level, hp: Math.max(0, b.hp) };
     return {
       buildings,
       guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: Math.max(0, t.hp), invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}) })),
       fences: this.fences.map((f) => ({ cx: f.cx, cy: f.cy, level: f.level, hp: f.hp, invested: f.invested })),
+      traps: this.traps.map((tr) => ({ kind: tr.kind, cx: tr.cx, cy: tr.cy, armed: tr.armed })),
     };
   }
 
@@ -1070,6 +1116,143 @@ export class Game {
     return { ok: true };
   }
 
+  // ---- traps ---------------------------------------------------------------
+
+  /** Headquarters level (0-based) that decides which traps there are and how many. */
+  get trapHq(): number {
+    return this.base ? (this.hq?.level ?? 0) : this.hqOutside;
+  }
+
+  /** Traps that may lie on this map now. */
+  get trapLimit(): number {
+    return trapCap(this.trapHq);
+  }
+
+  trapAt(cx: number, cy: number): Trap | undefined {
+    return this.traps.find((tr) => tr.cx === cx && tr.cy === cy);
+  }
+
+  trapById(id: number): Trap | undefined {
+    return this.traps.find((tr) => tr.id === id);
+  }
+
+  /** Why a trap cannot go here, or null. In path mode on the road; elsewhere on any empty tile. */
+  trapError(kind: TrapId, cx: number, cy: number, loading = false): 'trapHq' | 'trapCap' | 'notBuildable' | 'occupied' | null {
+    if (!trapOpen(kind, this.trapHq)) return 'trapHq';
+    if (this.traps.length >= this.trapLimit) return 'trapCap';
+    const { grid } = this.map;
+    if (!grid.inBounds(cx, cy)) return 'notBuildable';
+    const i = grid.index(cx, cy);
+    if (this.mode === 'path') {
+      if (grid.get(cx, cy) !== 'path') return 'notBuildable';
+    } else {
+      if (grid.get(cx, cy) !== 'build' || this.entry.has(i)) return 'notBuildable';
+      if (!loading && !this.inArea(cx, cy, 1)) return 'notBuildable';
+      if (this.occupied[i] || this.fenceGrid[i] || this.rubble[i]) return 'occupied';
+    }
+    if (this.trapAt(cx, cy)) return 'occupied';
+    return null;
+  }
+
+  private newTrap(kind: TrapId, cx: number, cy: number): Trap {
+    const tr: Trap = { id: this.nextId++, kind, cx, cy, x: cx + 0.5, y: cy + 0.5, armed: true, patch: 0, burning: 0, tarred: [] };
+    this.traps.push(tr);
+    return tr;
+  }
+
+  /** Lay a trap on one tile. */
+  buildTrap(kind: TrapId, cx: number, cy: number): ActionResult {
+    if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    const err = this.trapError(kind, cx, cy);
+    if (err) return { ok: false, reason: err };
+    if (this.money < TRAPS[kind].cost) return { ok: false, reason: 'noMoney' };
+    this.money -= TRAPS[kind].cost;
+    this.newTrap(kind, cx, cy);
+    return { ok: true };
+  }
+
+  /** Gold back for lifting a trap: half its price while armed, nothing once spent. */
+  trapSellValue(tr: Trap): number {
+    return tr.armed ? Math.floor(TRAPS[tr.kind].cost / 2) : 0;
+  }
+
+  sellTrap(id: number): ActionResult {
+    const tr = this.trapById(id);
+    if (!tr) return { ok: false, reason: 'notFound' };
+    this.money += this.trapSellValue(tr);
+    this.traps = this.traps.filter((o) => o !== tr);
+    return { ok: true };
+  }
+
+  /** Re-arm a spent trap (not while its tar still lies). */
+  rechargeTrap(id: number): ActionResult {
+    const tr = this.trapById(id);
+    if (!tr) return { ok: false, reason: 'notFound' };
+    if (tr.armed) return { ok: false, reason: 'armed' };
+    if (tr.patch > 0) return { ok: false, reason: 'busy' };
+    const cost = TRAPS[tr.kind].recharge;
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    this.money -= cost;
+    tr.armed = true;
+    return { ok: true };
+  }
+
+  /** What a trap's action is multiplied by (its research). */
+  private trapPower(kind: TrapId): number {
+    return this.upgrades?.traps[kind] ?? 1;
+  }
+
+  /** Traps go off under ground units; tar lies, slows and (lit by greek fire) burns. */
+  private stepTraps(dt: number): void {
+    if (!this.traps.length) return;
+    for (const tr of this.traps) {
+      const def = TRAPS[tr.kind];
+      const power = this.trapPower(tr.kind);
+      if (tr.armed) {
+        const proof = tr.kind === 'pit' || tr.kind === 'leg';
+        const victim = this.enemies.find((e) => e.alive && !e.air && !(proof && 'trapProof' in ENEMIES[e.def]) && Math.hypot(e.x - tr.x, e.y - tr.y) <= TRAP_REACH + ENEMIES[e.def].radius * 0.5);
+        if (!victim) continue;
+        tr.armed = false;
+        this.events.push({ type: 'trap', trapId: tr.id, kind: tr.kind, x: tr.x, y: tr.y });
+        if (tr.kind === 'mine') {
+          const r = def.radius ?? 1;
+          this.events.push({ type: 'burst', x: tr.x, y: tr.y, radius: r });
+          for (const e of this.enemies) {
+            if (e.alive && !e.air && Math.hypot(e.x - tr.x, e.y - tr.y) <= r + ENEMIES[e.def].radius) this.damageEnemy(e, def.damage * power, undefined, this.armorOf(e), def.pierce);
+          }
+        } else if (tr.kind === 'pit') {
+          this.damageEnemy(victim, def.damage * power, undefined, this.armorOf(victim), def.pierce);
+        } else if (tr.kind === 'leg') {
+          this.damageEnemy(victim, def.damage * power, undefined, this.armorOf(victim), def.pierce);
+          const hold = isBoss(victim.def) ? 0 : ENEMIES[victim.def].armor > 0 ? (def.hold ?? 0) / 2 : (def.hold ?? 0);
+          victim.held = Math.max(victim.held ?? 0, hold);
+        } else {
+          tr.patch = (def.seconds ?? 0) * power;
+          tr.tarred = [];
+        }
+      }
+      if (tr.patch <= 0) continue;
+      tr.patch = Math.max(0, tr.patch - dt);
+      const r = def.radius ?? 1;
+      const inPatch = (e: Enemy) => e.alive && !e.air && Math.hypot(e.x - tr.x, e.y - tr.y) <= r + ENEMIES[e.def].radius * 0.5;
+      // Greek fire lights it (research): a flame reaching anyone in the patch.
+      if (!tr.burning && this.upgrades?.burningTar) {
+        const lit = this.towers.some((t) => t.def === 'greekfire' && t.firing && this.enemies.some((e) => e.id === t.targetId && inPatch(e)));
+        if (lit) tr.burning = tr.patch;
+      }
+      if (tr.burning > 0) tr.burning = Math.max(0, tr.burning - dt);
+      for (const e of this.enemies) {
+        if (!inPatch(e)) continue;
+        e.tarred = TAR_STICK;
+        if (!tr.tarred.includes(e.id)) {
+          tr.tarred.push(e.id);
+          this.damageEnemy(e, def.damage * power, undefined, this.armorOf(e), def.pierce);
+        }
+        if (tr.burning > 0 && e.alive) this.damageEnemy(e, TAR_BURN.dps * power * dt, undefined, this.armorOf(e), TAR_BURN.pierce, false);
+      }
+    }
+  }
+
   startWave(): ActionResult {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
     if (this.retake && !this.towers.some((t) => !isWreck(t) && t.job?.kind !== 'build')) return { ok: false, reason: 'busy' };
@@ -1159,6 +1342,7 @@ export class Game {
     this.moveEnemies(dt);
     if (this.base) this.assaultInBase(dt);
     else if (this.mode === 'siege') this.assault(dt);
+    this.stepTraps(dt);
     this.fireTowers(dt);
     this.moveProjectiles(dt);
     this.enemies = this.enemies.filter((e) => e.alive);
@@ -1385,8 +1569,9 @@ export class Game {
 
   /** Speed right now: weaving riders ease off a little in bends. */
   speedOf(e: Enemy): number {
-    if (e.stun > 0) return 0;
-    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0)) * (e.hooked > 0 ? 1 - HOOK_SLOW : 1);
+    if (e.stun > 0 || (e.held ?? 0) > 0) return 0;
+    const tar = (e.tarred ?? 0) > 0 ? 1 - (TRAPS.tar.slow ?? 0) : 1;
+    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0)) * (e.hooked > 0 ? 1 - HOOK_SLOW : 1) * tar;
   }
 
   /** Walk a ground unit along a field; a weaving rider swings across its way as it goes. */
@@ -1460,6 +1645,8 @@ export class Game {
       if (!e.alive) continue;
       e.stunGuard = Math.max(0, e.stunGuard - dt);
       e.hooked = Math.max(0, e.hooked - dt);
+      if (e.held) e.held = Math.max(0, e.held - dt);
+      if (e.tarred) e.tarred = Math.max(0, e.tarred - dt);
       if (e.stun > 0) {
         // Stunned: it stands where it is.
         e.stun = Math.max(0, e.stun - dt);
@@ -2407,6 +2594,12 @@ export class Game {
     this.currentWave = null;
     this.spawnState = [];
     this.events.push({ type: 'waveClear', wave: this.wave, bonus });
+    for (const tr of this.traps) {
+      tr.patch = 0;
+      tr.burning = 0;
+      tr.tarred = [];
+    }
+    if (this.trapAuto) for (const tr of this.traps) if (!tr.armed && this.money >= TRAPS[tr.kind].recharge) this.rechargeTrap(tr.id);
     if (this.wave >= this.totalWaves) {
       this.phase = 'won';
       this.events.push({ type: 'won' });

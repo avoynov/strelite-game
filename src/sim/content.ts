@@ -134,6 +134,8 @@ export interface EnemyDef {
   unlockLevel: number;
   /** A boss: takes half the share-of-health damage and half the stun. */
   boss?: boolean;
+  /** Walks over spike pits and leg traps as if they were not there. */
+  trapProof?: boolean;
   /** Siege mode: how it attacks guns and fences; units without one only pass by. */
   assault?: Assault;
   /**

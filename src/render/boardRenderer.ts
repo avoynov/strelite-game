@@ -2,6 +2,7 @@ import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type T
 import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerDef, type TowerId } from '../sim/content';
 import { isWreck, type Building, type Fence, type Game, type Tower } from '../sim/game';
 import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT, type BuildingKind } from '../sim/base';
+import { isTrapId, TRAPS, type TrapId } from '../sim/traps';
 import { BuildingView, type BuildingState } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
@@ -15,14 +16,21 @@ import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTow
 import { frameForAim, shotEffects, spriteScale, type ProjectileArtDef } from './towers/towerArt';
 import type { TowerView } from './towers/towerView';
 
-/** What the build menu has picked: a gun, or (siege mode) fences. */
-export type Armed = TowerId | 'fence';
+/** What the build menu has picked: a gun, fences (siege mode) or a kind of trap. */
+export type Armed = TowerId | 'fence' | TrapId;
+
+/** The picked gun, when a gun (not fences or a trap) is picked. */
+export function armedGun(a: Armed | null): TowerId | null {
+  return a && a !== 'fence' && !isTrapId(a) ? a : null;
+}
 
 export type Selection =
   /** An existing gun, by id. */
   | { kind: 'tower'; id: number }
   /** Siege mode: an existing fence, by id. */
   | { kind: 'fence'; id: number }
+  /** A trap on the map, by id. */
+  | { kind: 'trap'; id: number }
   /** Base mode: one of the base's buildings. */
   | { kind: 'building'; what: BuildingKind }
   /** A gun about to be built, footprint's top-left cell at (cx, cy). */
@@ -135,6 +143,8 @@ export class BoardRenderer {
   private readonly roundSprites = new Map<number, Sprite>();
   private readonly shotFxCache = new Map<string, string[]>();
   private overlayKey = '';
+  /** Traps and tar patches, on the ground under everything that stands. */
+  private readonly trapLayer = new Graphics();
   private groundSprite: TilingSprite | null = null;
   private groundDensity: Density = 1;
   private roadTexture: Texture | null = null;
@@ -151,7 +161,7 @@ export class BoardRenderer {
     private readonly artUrl: string,
   ) {
     this.objects.sortableChildren = true;
-    this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots, this.rounds);
+    this.world.addChild(this.groundLayer, this.map, this.overlay, this.trapLayer, this.objects, this.shots, this.rounds);
     this.root.addChild(this.world, this.floats);
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
@@ -604,6 +614,9 @@ export class BoardRenderer {
     } else if (selection?.kind === 'fence') {
       const fc = this.game.fenceById(selection.id);
       if (fc) f = { cx: fc.cx, cy: fc.cy, size: 1, tall: 0.5 };
+    } else if (selection?.kind === 'trap') {
+      const tr = this.game.trapById(selection.id);
+      if (tr) f = { cx: tr.cx, cy: tr.cy, size: 1, tall: 0.3 };
     }
     if (!f) return null;
     const mid = this.gridToScreen(f.cx + f.size / 2, f.cy + f.size / 2);
@@ -724,7 +737,7 @@ export class BoardRenderer {
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0, game.hq?.level, game.buildings.map((b) => b.hp > 0)]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.traps.length, game.openField ? game.arcWidth() : 0, game.hq?.level, game.buildings.map((b) => b.hp > 0)]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
@@ -734,8 +747,17 @@ export class BoardRenderer {
       for (const c of game.activeSpawns()) o.poly(diamond(c.x, c.y, c.x + 1, c.y + 1)).fill({ color: PALETTE.invalid, alpha: 0.28 });
     }
 
+    // While a trap is picked, show the tiles it can go on.
+    if (armed && isTrapId(armed)) {
+      for (let y = 0; y < grid.rows; y++) {
+        for (let x = 0; x < grid.cols; x++) {
+          const err = game.trapError(armed, x, y);
+          if (err === 'notBuildable' || err === 'occupied') continue;
+          o.poly(diamond(x, y, x + 1, y + 1)).stroke({ width: 1, color: PALETTE.valid, alpha: 0.35 });
+        }
+      }
+    } else if (selection?.kind === 'place' || (armed && !selection)) {
     // While a gun is picked for building, show where it can stand.
-    if (selection?.kind === 'place' || (armed && !selection)) {
       for (let y = 0; y < grid.rows; y++) {
         for (let x = 0; x < grid.cols; x++) {
           if (grid.get(x, y) !== 'build' || game.towerAt(x, y) || game.fenceAt(x, y) || game.buildingAt(x, y) || !game.inArea(x, y, 1)) continue;
@@ -788,6 +810,50 @@ export class BoardRenderer {
     } else if (selection?.kind === 'fence') {
       const f = game.fenceById(selection.id);
       if (f) o.poly(diamond(f.cx, f.cy, f.cx + 1, f.cy + 1)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
+    } else if (selection?.kind === 'trap') {
+      const tr = game.trapById(selection.id);
+      if (tr) o.poly(diamond(tr.cx, tr.cy, tr.cx + 1, tr.cy + 1)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
+    }
+  }
+
+  /** Traps: stand-in drawings until they have art; a spent one is faded; tar shows its patch (alight when burning). */
+  private drawTraps(): void {
+    const g = this.trapLayer;
+    g.clear();
+    for (const tr of this.game.traps) {
+      const x = isoX(tr.x, tr.y);
+      const y = isoY(tr.x, tr.y);
+      const a = tr.armed ? 1 : 0.45;
+      if (tr.patch > 0) {
+        const rx = (((TRAPS.tar.radius ?? 1) * TILE_W) / Math.SQRT2) * Math.min(1, 0.4 + tr.patch);
+        g.ellipse(x, y, rx, rx / 2).fill({ color: 0x15110c, alpha: 0.7 });
+        if (tr.burning > 0) {
+          const f = 0.8 + 0.2 * Math.sin(this.game.time * 25 + tr.id);
+          g.ellipse(x, y - 2, rx * 0.85 * f, (rx / 2) * 0.85 * f).fill({ color: 0xff7a22, alpha: 0.45 });
+          g.ellipse(x, y - 3, rx * 0.5 * f, (rx / 4) * f).fill({ color: 0xffd060, alpha: 0.5 });
+        }
+      }
+      switch (tr.kind) {
+        case 'mine':
+          g.ellipse(x, y, 9, 4.5).fill({ color: 0x3a3a30, alpha: a }).stroke({ width: 1, color: 0x1c1c16, alpha: a });
+          g.circle(x, y - 2, 2).fill({ color: tr.armed ? 0xc23a2a : 0x555555, alpha: a });
+          break;
+        case 'pit':
+          g.poly(diamond(tr.cx + 0.12, tr.cy + 0.12, tr.cx + 0.88, tr.cy + 0.88)).fill({ color: 0x2a2116, alpha: 0.9 * a });
+          for (let i = -1; i <= 1; i++) g.moveTo(x + i * 7, y + 2).lineTo(x + i * 7, y - 6).stroke({ width: 2, color: 0x9a7a4a, alpha: a });
+          break;
+        case 'leg':
+          g.ellipse(x, y, 10, 5).stroke({ width: 2, color: 0x6c7076, alpha: a });
+          for (let i = -2; i <= 2; i++) g.moveTo(x + i * 4, y - 3).lineTo(x + i * 4, y + 3).stroke({ width: 1, color: 0x9ca0a6, alpha: a });
+          break;
+        case 'tar':
+          if (tr.armed) {
+            g.ellipse(x, y, 7, 3.5).fill({ color: 0x000000, alpha: 0.25 });
+            g.roundRect(x - 6, y - 15, 12, 15, 3).fill({ color: 0x5a3c22 }).stroke({ width: 1, color: 0x2a1a0e });
+            g.moveTo(x - 6, y - 11).lineTo(x + 6, y - 11).moveTo(x - 6, y - 4).lineTo(x + 6, y - 4).stroke({ width: 1, color: 0x2a2a2a });
+          } else if (tr.patch <= 0) g.ellipse(x, y, 8, 4).fill({ color: 0x15110c, alpha: 0.35 });
+          break;
+      }
     }
   }
 
@@ -1036,6 +1102,7 @@ export class BoardRenderer {
     this.syncEnemies(alpha);
     this.syncRaid();
     this.drawOverlay(selection, armed);
+    this.drawTraps();
     this.drawShots(alpha, dtSeconds);
     this.effects?.update(dtSeconds);
 

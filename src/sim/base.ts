@@ -1,6 +1,7 @@
 import { ENEMY_IDS, FENCE_LEVELS, gunHp, TOWER_IDS, TOWERS, type EnemyId, type TowerId } from './content';
 import { levelArcMap } from './levels';
 import type { ArcMapSpec } from './maps';
+import { isTrapId, type TrapId } from './traps';
 
 /**
  * The player's base: one fixed field the player builds on, kept between
@@ -204,6 +205,14 @@ export interface BaseFence {
   invested: number;
 }
 
+/** A trap on the base's ground; a spent one waits to be re-armed. */
+export interface BaseTrap {
+  kind: TrapId;
+  cx: number;
+  cy: number;
+  armed: boolean;
+}
+
 export interface BaseBuilding {
   /** 0-based. */
   level: number;
@@ -233,6 +242,7 @@ export interface BaseState {
   buildings: Record<BuildingKind, BaseBuilding>;
   guns: BaseGun[];
   fences: BaseFence[];
+  traps: BaseTrap[];
   jobs: BaseJob[];
   /** The army that took the headquarters and holds it; null while it is the player's. */
   occupied: Occupier[] | null;
@@ -252,6 +262,7 @@ export function newBase(): BaseState {
     buildings,
     guns: STARTER_GUNS.map(([def, cx, cy]) => ({ def, level: 0, cx, cy, hp: gunHp(TOWERS[def].size, 0), invested: TOWERS[def].levels[0].cost })),
     fences: [],
+    traps: [],
     jobs: [],
     occupied: null,
   };
@@ -335,6 +346,16 @@ export function sanitizeBase(raw: unknown): BaseState {
       const hp = num(f.hp, 0, FENCE_LEVELS[level]!.hp);
       if (hp === null || hp <= 0) continue;
       s.fences.push({ cx, cy, level, hp, invested: int(f.invested, 0, 1e9) ?? 0 });
+    }
+  }
+  if (Array.isArray(r.traps)) {
+    for (const v of r.traps as unknown[]) {
+      if (!v || typeof v !== 'object') continue;
+      const tr = v as Record<string, unknown>;
+      const cx = int(tr.cx, 0, BASE_MAP.cols - 1);
+      const cy = int(tr.cy, 0, BASE_MAP.rows - 1);
+      if (!isTrapId(tr.kind) || cx === null || cy === null) continue;
+      s.traps.push({ kind: tr.kind, cx, cy, armed: tr.armed !== false });
     }
   }
   if (Array.isArray(r.jobs)) {
