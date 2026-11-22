@@ -17,6 +17,7 @@ from PIL import Image
 from pack_atlas import bbox, load_premultiplied, pack, to_image
 
 NAMES = {
+    "raiders": {"bg": "Разузнавачи", "en": "Raiders"},
     "infantry": {"bg": "Пехота", "en": "Infantry"},
     "truck": {"bg": "Камион", "en": "Truck"},
     "tank": {"bg": "Танк", "en": "Tank"},
@@ -31,6 +32,7 @@ NAMES = {
 # Model name -> the game's enemy id (src/sim/content.ts): the bikers are "moto", and the
 # armoured airship is the game's air unit "drone" (it replaced the drone model).
 GAME_ID = {"bikers": "moto", "airship": "drone"}
+ALLIES = {"raiders"}        # the player's own units: manifest "allies", not "enemies"
 HAZE = 12 / 255   # alpha under this is shadow-catcher haze: dropped
 SOLID = 32 / 255  # the trim box is set by alpha at or over this ...
 MARGIN = 8        # ... grown by this many pixels at @2x for the soft shadow edge
@@ -118,6 +120,11 @@ def main():
         manifest = json.load(f)
     enemies = manifest.setdefault("enemies", {})
     for model in a.models:
+        if model in ALLIES:
+            manifest.setdefault("allies", {})[model] = pack_model(a.src, a.dst, model)
+            manifest["alliesNote"] = ("allies/<id>: the player's own units (raiders = the party that rides out "
+                                      "to provoke the enemy). Same sheet layout, headings and movement as enemies.")
+            continue
         enemies[GAME_ID.get(model, model)] = pack_model(a.src, a.dst, model)
     manifest["enemiesNote"] = ("enemies/<model>@1x|@2x.json: frame <model>_NN faces game angle "
                                "NN * 2*pi/directions (atan2(dy, dx) in grid cells, 0 = screen "

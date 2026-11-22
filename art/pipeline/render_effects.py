@@ -255,6 +255,32 @@ def burn_frames(rng, n=8, size=2.2):
     return frames
 
 
+def plume_frames(rng, n=16, width=3.2, height=7.0):
+    """A column of dark smoke rising from a burning building or wreck (loop; anchor at the
+    base). It starts narrow and dense, widens, leans with the wind and thins out; lit from
+    the lower left like everything else. Seamless: the noise flows up one full period."""
+    W, H = int(width * PPM), int(height * PPM)
+    y, x = np.mgrid[0:H, 0:W].astype(np.float32)
+    X, Y = (x - W * 0.32) / PPM, (H * 0.97 - y) / PPM      # Y up from the base, column leans right
+    big = tile_noise(H, W, rng, 1.6, 2)
+    fine = tile_noise(H, W, rng, 1.2, 5)
+    frames = []
+    for i in range(n):
+        sh = int(round(H * i / n))
+        nb, nf = np.roll(big, -sh, axis=0), np.roll(fine, -sh, axis=0)
+        u = np.clip(Y / height, 0, 1)
+        cx = 0.9 * u ** 1.6 + 0.25 * nb * u
+        r = 0.35 + 1.05 * u ** 0.8
+        d = np.abs(X - cx) / r + nb * 0.4 + nf * 0.18
+        dens = np.clip((1 - d) * 1.5, 0, 1) * np.clip(1.0 - u ** 1.3, 0, 1) * np.clip(Y * 3, 0, 1)
+        dens *= np.clip(0.7 + 0.5 * nb + 0.3 * nf, 0, 1) * 0.85
+        lit = np.clip(0.5 - (X - cx) * 0.35 / r + nf * 0.2, 0, 1)
+        g = 0.07 + 0.12 * lit + 0.12 * u
+        rgb = np.stack([g * 1.03, g, g * 0.95], -1)
+        frames.append(premul(rgb, dens))
+    return frames
+
+
 def _bolt_path(rng, x0, y0, x1, y1, depth=5, rough=0.35):
     pts = [(x0, y0), (x1, y1)]
     for _ in range(depth):
@@ -385,7 +411,10 @@ def main():
         "fire_burn": write(a.dst, "fire_burn", burn_frames(rng), (0.5, 0.88), "normal"),
         "rail_charge": write(a.dst, "rail_charge", charge_frames(rng), (0.5, 0.5), "add"),
         "rail_beam": write(a.dst, "rail_beam", beam_frames(rng), (0.0, 0.5), "add"),
+        "smoke_plume": write(a.dst, "smoke_plume", plume_frames(rng), (0.32, 0.97), "normal"),
     }
+    fx["smoke_plume"].update(loop=True, fps=12, note="dark smoke column over a damaged building or gun; loop. "
+                             "Pair with fire_burn at the breach; anchor = the base of the column")
     fx["fire_stream"].update(loop=True, lengthM=7.5, note="jet along +x from the nozzle: rotate to the nozzle's "
                              "screen angle, scale x to the range; loop while firing")
     fx["fire_burn"].update(loop=True, note="flames on a burning target or ground patch; loop")
