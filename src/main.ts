@@ -16,14 +16,15 @@ import { readAimPrefs } from './aimPrefs';
 import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
-import { Hud } from './ui/hud';
 import { Lab, itemName } from './ui/lab';
 import { ResearchStore } from './researchStore';
 import { BaseStore } from './baseStore';
+import { ProgressStore } from './progressStore';
+import { starsFor, type OrderEvent } from './sim/progress';
 import { battleTakings, researchItem } from './sim/research';
-import { BASE_MAP, baseTakings, BUILDING_KINDS, buildingHp, liberate, occupy, treasuryLoss, type BuildingKind } from './sim/base';
+import { BASE_MAP, baseTakings, BUILDING_KINDS, buildingHp, jobPrice, liberate, occupy, treasuryLoss, type BuildingKind } from './sim/base';
 import { attackStrength, defenceStrength } from './sim/strength';
-import type { BaseHud, BaseResult } from './ui/hud';
+import { Hud, rankName, type BaseHud, type BaseResult, type MissionResult } from './ui/hud';
 import { GameAudio } from './audio/audio';
 import type { SoundName } from './audio/synth';
 import { installWay, onInstallChange, promptInstall } from './pwa/install';
@@ -163,6 +164,19 @@ async function start(): Promise<void> {
   };
   baseStore.settle();
   syncLab();
+  const progress = new ProgressStore();
+  /** Highest map level won in either mission, and the highest the player may fight. */
+  const highestWon = () => Math.max(missionLevel('path'), missionLevel('arc')) - 1;
+  const reached = () => highestWon() + 1;
+  /** Count something towards today's order; when that finishes it, pay it and say so. */
+  const reportOrder = (ev: OrderEvent): number => {
+    const paid = progress.report(ev, reached(), highestWon());
+    if (!paid) return 0;
+    research.bank(paid.gold);
+    hud.showToast(t('toast.orderDone', { n: paid.gold }));
+    audio.play('waveClear');
+    return paid.gold;
+  };
   /** A battle's takings with the full Fortress set's share on top. */
   const withBonus = (gold: number) => Math.round(gold * (1 + research.upgrades().goldBonus));
   /** Once a battle at the base is over: how it went. */
@@ -244,8 +258,12 @@ async function start(): Promise<void> {
     state: () => baseStore.state,
     startJob: (what) => {
       saveBase();
+      const kind = jobPriceKind(what);
       const err = baseStore.startJob(what, wallet);
-      if (!err) syncLab();
+      if (!err) {
+        syncLab();
+        if (kind === 'upgrade') reportOrder({ type: 'upgrade' });
+      }
       return err;
     },
     strength: () => {
@@ -258,6 +276,11 @@ async function start(): Promise<void> {
     missions: () => ({ path: missionLevel('path'), arc: missionLevel('arc') }),
     startMission: (m, level) => goTo(m, level),
     openLevels: () => levels.open(),
+    order: () => {
+      const order = progress.order(reached());
+      return { order, state: progress.state, reward: progress.reward(highestWon()).gold };
+    },
+    stars: () => ({ total: progress.totalStars(), medals: progress.medals }),
     provoked: () => {
       hud.showToast(t('toast.raid'));
       audio.play('waveStart');
@@ -265,6 +288,9 @@ async function start(): Promise<void> {
   };
   /** Gold this battle put in the treasury when it ended; null while it runs. */
   let banked: number | null = null;
+  /** A finished mission: its stars and what they (and the order) paid. */
+  let missionResult: MissionResult | null = null;
+  const jobPriceKind = (what: BuildingKind) => jobPrice(baseStore.state, what)?.kind ?? null;
   let board = new BoardRenderer(game, art, ART_URL);
   app.stage.addChild(board.root);
   let selection: Selection | null = null;
@@ -288,6 +314,7 @@ async function start(): Promise<void> {
     openLab: () => lab.open(),
     toBase: () => goTo('siege'),
     banked: () => banked ?? 0,
+    missionResult: () => missionResult,
     base: () => (game.base ? baseHud : null),
     pause: () => pause(),
     done: () => audio.play('build'),
@@ -311,6 +338,7 @@ async function start(): Promise<void> {
       game = newGame(level);
       banked = null;
       baseResult = null;
+      missionResult = null;
       board = new BoardRenderer(game, art, ART_URL);
       app.stage.addChild(board.root);
       loop = new FixedStep(TICK, (dt) => game.step(dt));
@@ -391,6 +419,8 @@ async function start(): Promise<void> {
   let listMode: Mode = 'path';
   const levels = new LevelSelect({
     won: () => missionLevel(listMode === 'arc' ? 'arc' : 'path') - 1,
+    stars: (level) => progress.starsOf(listMode === 'arc' ? 'arc' : 'path', level),
+    totals: () => ({ total: progress.totalStars(), medals: progress.medals }),
     current: () => (game.mode === listMode ? game.level : 0),
     mode: () => listMode,
     // The list shows one kind of mission at a time; picking a level starts it.
@@ -443,6 +473,8 @@ async function start(): Promise<void> {
       // In peace the base is rebuilt at once with the new levels; during an attack they count from the next.
       if (game.base && game.phase === 'build' && game.wave === 0) hud.restartAt(game.level);
     }
+    // A new order is sealed at local midnight.
+    if (progress.roll()) hud.invalidate();
     // The running battle every few seconds, in case the app is killed without warning.
     if (++ticks % 5 === 0 && !paused) saveBattle();
   }, 1000);
@@ -492,6 +524,14 @@ async function start(): Promise<void> {
     },
     // Guns not researched yet show as locked.
     isUnlocked: (def) => game.isUnlocked(def),
+    veterans: () =>
+      game.base
+        ? [...game.towers]
+            .filter((tw) => (tw.vet ?? 0) > 0)
+            .sort((a, b) => (b.vet ?? 0) - (a.vet ?? 0))
+            .slice(0, 3)
+            .map((tw) => ({ def: tw.def, level: tw.level, kills: tw.vet ?? 0, rank: rankName(game.rank(tw)) }))
+        : [],
   });
   document.body.appendChild(arsenal.el);
 
@@ -513,6 +553,8 @@ async function start(): Promise<void> {
     const building = cell ? game.buildingAt(cell.x, cell.y) : undefined;
     const trap = cell ? game.trapAt(cell.x, cell.y) : undefined;
     if (building) {
+      // Tapping the muster opens the day's sealed order.
+      if (building.kind === 'muster' && building.hp > 0) progress.markRead();
       selection = selection?.kind === 'building' && selection.what === building.kind ? null : { kind: 'building', what: building.kind };
     } else if (tower) {
       selection = selection?.kind === 'tower' && selection.id === tower.id ? null : { kind: 'tower', id: tower.id };
@@ -629,6 +671,14 @@ async function start(): Promise<void> {
         board.onKill(ev.enemyId);
         board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c, 'air' in ENEMIES[ev.def]);
         playAt(DEATH_SOUND[ev.def], ev.x, ev.y, ev.def === 'moto' ? 0.6 : 1);
+        reportOrder({ type: 'kill', def: ev.def });
+      }
+      else if (ev.type === 'rankUp') {
+        const tw = game.towerById(ev.towerId);
+        if (tw) {
+          hud.showToast(t('toast.rankUp', { name: t(`tower.${tw.def}`), rank: rankName(ev.rank) }));
+          board.addFloat(rankName(ev.rank), tw.x, tw.y, 0xf2c94c);
+        }
       }
       else if (ev.type === 'leak') audio.play('leak');
       else if (ev.type === 'blast') {
@@ -693,6 +743,7 @@ async function start(): Promise<void> {
         } else if (won) {
           baseStore.set({ ...st, attack: st.attack + 1 });
           baseResult = { kind: 'won', bonus: banked, n: 0 };
+          reportOrder({ type: 'defend', clean: game.ruined.size === 0 });
         } else if (game.hqFell) {
           // The army that took the headquarters holds it; no attacks until it is won back.
           const army = game.survivors();
@@ -700,14 +751,23 @@ async function start(): Promise<void> {
           baseResult = { kind: 'fell', bonus: banked, n: army.length };
         } else baseResult = { kind: 'broken', bonus: banked, n: 0 };
       } else {
-        banked = withBonus(battleTakings(game.money, game.goldEarned, game.phase === 'won', game.level));
+        const won = game.phase === 'won';
+        banked = withBonus(battleTakings(game.money, game.goldEarned, won, game.level));
         research.bank(banked);
-        if (game.phase === 'won' && game.level > wonLevel()) saveNumber(wonKey(), game.level);
+        const m = game.mode === 'arc' ? 'arc' : 'path';
+        const stars = progress.recordStars(m, game.level, starsFor(won, game.lives, game.startLives));
+        const medalGold = stars.medals.reduce((a, b) => a + b, 0);
+        if (stars.gold + medalGold > 0) research.bank(stars.gold + medalGold);
+        if (stars.medals.length) audio.play('waveClear');
+        if (won && game.level > wonLevel()) saveNumber(wonKey(), game.level);
+        const order = won ? reportOrder({ type: 'win', mode: m, kinds: game.builtKinds.size, leaked: game.lives < game.startLives }) : 0;
+        missionResult = { stars: stars.stars, before: stars.before, starGold: stars.gold, medals: stars.medals, medalCount: progress.medals, order };
       }
     }
     if (selection?.kind === 'tower' && !game.towerById(selection.id)) selection = null;
     if (selection?.kind === 'building' && !game.building(selection.what)) selection = null;
     if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
+    if (game.base) board.marks = { envelope: !progress.state.read, medals: progress.medals };
     if (selection?.kind === 'trap' && !game.trapById(selection.id)) selection = null;
     board.render(alpha, selection, armed, paused ? 0 : frame * loop.speed);
     hud.update();

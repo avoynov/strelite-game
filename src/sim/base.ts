@@ -189,6 +189,8 @@ export interface BaseGun {
   invested: number;
   /** A builder at work on it: building it (it does not fire yet), raising it a level, or rebuilding a wreck. */
   job?: GunJob;
+  /** Kills in the base's battles: the gun's veteran rank (src/sim/progress.ts). */
+  kills?: number;
 }
 
 export interface GunJob {
@@ -326,9 +328,12 @@ export function sanitizeBase(raw: unknown): BaseState {
       const cx = int(g.cx, 0, BASE_MAP.cols - 1);
       const cy = int(g.cy, 0, BASE_MAP.rows - 1);
       if (level === null || cx === null || cy === null) continue;
-      const hp = num(g.hp, 0, gunHp(TOWERS[def].size, level));
+      // A veteran is sturdier than its level (up to a fifth more).
+      const hp = num(g.hp, 0, gunHp(TOWERS[def].size, level) * 1.2 + 1);
       if (hp === null) continue;
       const gun: BaseGun = { def, level, cx, cy, hp, invested: int(g.invested, 0, 1e9) ?? 0 };
+      const kills = int(g.kills, 0, 1e9);
+      if (kills) gun.kills = kills;
       const j = g.job as Record<string, unknown> | undefined;
       if (j && (j.kind === 'build' || j.kind === 'upgrade' || j.kind === 'repair') && typeof j.endsAt === 'number' && Number.isFinite(j.endsAt)) gun.job = { kind: j.kind, endsAt: j.endsAt };
       if (hp <= 0 && gun.job?.kind !== 'repair') delete gun.job;

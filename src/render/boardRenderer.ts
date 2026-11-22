@@ -131,6 +131,8 @@ export class BoardRenderer {
   /** The selected building's name, under it (like Clash of Clans: only while it is selected). */
   /** The raid that provokes an attack: friendly riders. */
   private readonly raiderViews: PixiEnemyView[] = [];
+  /** Base mode: marks over the base: the sealed daily order over the muster, star medals by the headquarters. */
+  marks = { envelope: false, medals: 0 };
   /** Base mode: the camera has been put on the base once. */
   private focused = false;
   private readonly towerViews = new Map<number, { view: PixiTowerView; level: number }>();
@@ -661,6 +663,7 @@ export class BoardRenderer {
       g.rect(x - w / 2, y, w * f, 4).fill(f > 0.5 ? 0x7bd36a : f > 0.25 ? 0xe6c14a : 0xe0624f);
     };
     for (const t of this.game.towers) if (!isWreck(t)) bar(t, t.size, 0.35 * t.size + 0.4);
+    if (this.game.base) this.drawMarks(g);
     for (const f of this.game.fences) bar(f, 1, FENCE_HEIGHT[Math.min(f.level, 2)]! * 1.2 + 0.1);
     for (const b of this.game.buildings) if (b.hp > 0) bar(b, 3, b.kind === 'hq' ? 1.4 + 0.18 * b.level : 1.1);
     this.strikes = this.strikes.filter((s) => {
@@ -672,6 +675,51 @@ export class BoardRenderer {
         .stroke({ width: 1.5, color: 0xff9a5a, alpha: 0.9 * (1 - k), cap: 'round' });
       return true;
     });
+  }
+
+  /**
+   * Base mode: a veteran's chevrons at the front corner of its footprint, the
+   * sealed envelope floating over the muster while the day's order is unread,
+   * and a ribbon per star medal by the headquarters.
+   */
+  private drawMarks(g: Graphics): void {
+    const gold = 0xf2c94c;
+    for (const t of this.game.towers) {
+      const rank = this.game.rank(t);
+      if (!rank || isWreck(t)) continue;
+      const x = isoX(t.cx + t.size, t.cy + t.size);
+      const y = isoY(t.cx + t.size, t.cy + t.size) + 2;
+      for (let i = 0; i < rank; i++) {
+        const yy = y + i * 4;
+        g.moveTo(x - 6, yy).lineTo(x, yy + 4).lineTo(x + 6, yy).stroke({ width: 3.5, color: 0x1a1408, alpha: 0.85, cap: 'round', join: 'round' });
+        g.moveTo(x - 6, yy).lineTo(x, yy + 4).lineTo(x + 6, yy).stroke({ width: 2, color: gold, cap: 'round', join: 'round' });
+      }
+    }
+    const muster = this.game.building('muster');
+    if (this.marks.envelope && muster && muster.hp > 0) {
+      // A gentle bob so it catches the eye.
+      const bob = Math.sin(Date.now() / 380) * 2.5;
+      const x = isoX(muster.x, muster.y);
+      const y = isoY(muster.x, muster.y, 2.1) + bob;
+      const w = 22;
+      const h = 15;
+      g.roundRect(x - w / 2 - 1.5, y - h / 2 - 1.5, w + 3, h + 3, 3).fill({ color: 0x000000, alpha: 0.55 });
+      g.roundRect(x - w / 2, y - h / 2, w, h, 2).fill(0xe9dcc0);
+      g.moveTo(x - w / 2, y - h / 2).lineTo(x, y + 1).lineTo(x + w / 2, y - h / 2).stroke({ width: 1.4, color: 0x7a6a4a });
+      g.circle(x, y + 1, 3.6).fill(0xa8261d);
+    }
+    const hq = this.game.hq;
+    if (this.marks.medals > 0 && hq && hq.hp > 0) {
+      const n = Math.min(this.marks.medals, 5);
+      const x0 = isoX(hq.cx + hq.size, hq.cy) - 4;
+      const y0 = isoY(hq.cx + hq.size, hq.cy, 1.2);
+      for (let i = 0; i < n; i++) {
+        const x = x0 + i * 8;
+        g.rect(x - 2.5, y0 - 8, 5, 7).fill(i % 2 ? 0x2f5aa8 : 0xa8261d);
+        g.circle(x, y0 + 1, 3.6).fill({ color: 0x1a1408, alpha: 0.8 });
+        g.circle(x, y0 + 1, 2.8).fill(gold);
+      }
+    }
   }
 
   private createTowerView(t: Tower): PixiTowerView {

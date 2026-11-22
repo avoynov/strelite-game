@@ -27,6 +27,7 @@ import {
   type Occupier,
 } from './base';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
+import { demoted, rankOf, RANKS } from './progress';
 import { isTrapId, TAR_BURN, trapCap, trapOpen, TRAPS, type TrapId } from './traps';
 
 export type Phase = 'build' | 'wave' | 'won' | 'lost';
@@ -171,6 +172,8 @@ export interface Tower {
   stats: TowerStats;
   /** Base mode: a builder at work on it (a gun being built does not fire). */
   job?: GunJob;
+  /** Base mode: kills in the base's battles, all time; they give the gun its veteran rank. */
+  vet?: number;
 }
 
 /** Base mode: one of the base's buildings; at 0 health it lies in ruins. */
@@ -282,6 +285,7 @@ export type GameEvent =
   | { type: 'wrecked'; fence: boolean; building?: BuildingKind; x: number; y: number; size: number }
   /** Base mode: a builder finished a gun or raised it. */
   | { type: 'built'; towerId: number; kind: GunJob['kind'] }
+  | { type: 'rankUp'; towerId: number; rank: number }
   /** Base mode: sappers blew up their charge. */
   | { type: 'blast'; x: number; y: number; radius: number }
   /** A repair wagon mended a machine. */
@@ -411,6 +415,10 @@ export class Game {
   /** Distance field to the goal; rebuilt in arc mode whenever a gun is built or sold. */
   flow: FlowField;
   lives = ECONOMY.startLives;
+  /** Lives the battle began with (research adds some): the stars measure against it. */
+  readonly startLives: number;
+  /** Gun kinds built in this battle (the daily order may allow only two). */
+  readonly builtKinds = new Set<TowerId>();
   /** Number of the current or last started wave, 0 before the first. */
   wave = 0;
   totalWaves: number;
@@ -497,6 +505,7 @@ export class Game {
     this.base = map.mode === 'siege' ? (opts.base ?? null) : null;
     if (!this.base) this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
+    this.startLives = this.lives;
     this.waves = opts.waves ?? waveSpec;
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
     this.fenceGrid = new Int32Array(map.grid.cols * map.grid.rows);
@@ -561,6 +570,7 @@ export class Game {
     for (const g of b.guns) {
       if (this.placementError(g.def, g.cx, g.cy, true)) continue;
       const t = this.newTower(g.def, g.cx, g.cy, g.level, g.invested);
+      if (g.kills) this.setVet(t, g.kills);
       t.hp = Math.min(g.hp, t.maxHp);
       if (g.job) t.job = { ...g.job };
       if (isWreck(t)) {
@@ -666,7 +676,10 @@ export class Game {
     this.nextId = Math.max(1, Number(b.nextId) || 1);
     this.spawned = Number(b.spawned) || 0;
     this.towers = b.towers;
-    for (const t of this.towers) this.markFootprint(t, t.id);
+    for (const t of this.towers) {
+      this.markFootprint(t, t.id);
+      this.builtKinds.add(t.def);
+    }
     this.enemies = b.enemies;
     this.projectiles = b.projectiles;
     this.traps = Array.isArray(b.traps) ? b.traps.filter((tr) => isTrapId(tr.kind) && grid.inBounds(tr.cx, tr.cy)) : [];
@@ -683,7 +696,7 @@ export class Game {
     for (const b of this.buildings) buildings[b.kind] = { level: b.level, hp: Math.max(0, b.hp) };
     return {
       buildings,
-      guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: Math.max(0, t.hp), invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}) })),
+      guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: Math.max(0, t.hp), invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}), ...(t.vet ? { kills: t.vet } : {}) })),
       fences: this.fences.map((f) => ({ cx: f.cx, cy: f.cy, level: f.level, hp: f.hp, invested: f.invested })),
       traps: this.traps.map((tr) => ({ kind: tr.kind, cx: tr.cx, cy: tr.cy, armed: tr.armed })),
     };
@@ -706,6 +719,8 @@ export class Game {
       delete t.job;
       if (kind === 'upgrade') this.raise(t);
       if (kind === 'repair') {
+        // Rebuilt from a wreck: the crew is new, one rank down.
+        if (t.vet) this.setVet(t, demoted(t.vet));
         t.hp = t.maxHp;
         this.markCells(t.cx, t.cy, t.size, this.rubble, 0);
         this.markFootprint(t, t.id);
@@ -868,7 +883,36 @@ export class Game {
   }
 
   levelOf(tower: Tower): TowerLevel {
-    return this.levelStats(tower.def, tower.level);
+    const base = this.levelStats(tower.def, tower.level);
+    const rank = this.rank(tower);
+    if (!rank) return base;
+    const key = `${tower.def}:${tower.level}:r${rank}`;
+    let l = this.levelCache.get(key);
+    if (!l) {
+      l = { ...base, damage: Math.round(base.damage * (1 + RANKS[rank]!.damage) * 10) / 10 };
+      this.levelCache.set(key, l);
+    }
+    return l;
+  }
+
+  /** Base mode: a gun's veteran rank (0 for a fresh one, and always outside the base). */
+  rank(tower: Tower): number {
+    return this.base && tower.vet ? rankOf(tower.vet) : 0;
+  }
+
+  /** A gun's full health: its level's, plus its rank's share. */
+  private gunMaxHp(t: Pick<Tower, 'size' | 'level' | 'vet'>): number {
+    const hp = gunHp(t.size, t.level);
+    const rank = this.base && t.vet ? rankOf(t.vet) : 0;
+    return rank ? Math.round(hp * (1 + RANKS[rank]!.hp)) : hp;
+  }
+
+  /** Base mode: set a gun's kill count; a new rank makes it sturdier by the difference (damage taken stays). */
+  private setVet(t: Tower, kills: number): void {
+    t.vet = kills;
+    const maxHp = this.gunMaxHp(t);
+    if (t.hp > 0) t.hp = Math.max(1, t.hp + maxHp - t.maxHp);
+    t.maxHp = maxHp;
   }
 
   /** A gun level's numbers with research applied (level is 0-based). */
@@ -1049,6 +1093,7 @@ export class Game {
     const pref = this.aimPrefs[def];
     if (pref && pref !== d.targeting && this.aimModes(def).includes(pref)) tower.aimMode = pref;
     this.towers.push(tower);
+    this.builtKinds.add(def);
     this.structs.set(tower.id, tower);
     this.markFootprint(tower, tower.id);
     return tower;
@@ -1084,7 +1129,7 @@ export class Game {
   private raise(t: Tower): void {
     t.level = Math.min(t.level + 1, TOWERS[t.def].levels.length - 1);
     // A bigger gun is sturdier by the difference; damage taken stays.
-    const maxHp = gunHp(t.size, t.level);
+    const maxHp = this.gunMaxHp(t);
     t.hp += maxHp - t.maxHp;
     t.maxHp = maxHp;
   }
@@ -2663,7 +2708,16 @@ export class Game {
       if (extra > 0) target.reward = Math.round(target.reward * (1 + extra));
       this.money += target.reward;
       this.goldEarned += target.reward;
-      if (tower) tower.stats.kills++;
+      if (tower) {
+        tower.stats.kills++;
+        // In the base every kill counts towards the gun's rank.
+        if (this.base) {
+          const was = this.rank(tower);
+          this.setVet(tower, (tower.vet ?? 0) + 1);
+          const now = this.rank(tower);
+          if (now > was) this.events.push({ type: 'rankUp', towerId: tower.id, rank: now });
+        }
+      }
       this.events.push({ type: 'kill', enemyId: target.id, def: target.def, reward: target.reward, x: target.x, y: target.y });
       this.dropUnits(target);
     }

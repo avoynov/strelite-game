@@ -1052,6 +1052,33 @@ body.in-base .arsenal, body.in-base .lab, body.in-base .levels {
 /* A gun not unlocked: a black shape behind a padlock. */
 .lt-card.veiled .lt-pic { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.4)); }
 body.in-base .lab-head, body.in-base .ars-head { padding-top: 16px; }
+
+/* ---- Stars, veterans, daily order ------------------------------------------- */
+.stars { display: inline-flex; gap: 1px; letter-spacing: 0; }
+.stars i { font-style: normal; color: rgba(241, 234, 216, 0.22); }
+.stars i.on { color: var(--gold); text-shadow: 0 0 6px rgba(242, 201, 76, 0.45); }
+.end-stars { display: flex; justify-content: center; gap: 6px; font-size: 40px; line-height: 1; margin: 0 0 6px; }
+.end-stars i.on { animation: star-pop 420ms cubic-bezier(.2, 1.6, .4, 1) both; }
+.end-stars i:nth-child(2) { animation-delay: 160ms; }
+.end-stars i:nth-child(3) { animation-delay: 320ms; }
+@keyframes star-pop { from { transform: scale(0.2) rotate(-30deg); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .end-stars i.on { animation: none; } }
+.end-hint { font-size: 12px; color: var(--muted) !important; }
+.end-medal { color: var(--gold) !important; font-weight: 700; }
+.lv-stars { font-size: 13px; }
+.lv-total { margin: 2px 0 0; font-size: 12px; color: var(--gold); }
+.stats.vet { margin-top: 3px; color: var(--gold); }
+.stats.vet { align-items: center; }
+.stats.vet .chevrons { width: 12px; height: auto; max-height: 18px; fill: none; stroke: var(--gold); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.order { flex: 1 1 100%; padding: 8px 10px; border: 1px solid rgba(201, 162, 75, 0.45); border-radius: 8px; background: linear-gradient(180deg, rgba(233, 220, 192, 0.12), rgba(233, 220, 192, 0.04)); }
+.order.done { border-color: rgba(143, 209, 122, 0.5); }
+.order-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+.order-tag { color: #8fd17a; }
+.order p { margin: 4px 0 0; font-size: 13px; }
+body.in-base .ars-vets { display: block; grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+.ars-vets[hidden] { display: none !important; }
+.ars-vets b { color: var(--gold); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px; }
+.ars-vets ol { margin: 2px 0 0; padding-left: 18px; }
 /* What the next headquarters level adds to the research tree. */
 .lt-grow {
   display: flex; align-items: center; gap: 10px; margin: 4px 16px 0; padding: 12px 14px;

@@ -21,6 +21,8 @@ export interface ArsenalCallbacks {
   close(def: TowerId | null): void;
   /** False for guns the current map level has not unlocked yet; all unlocked when absent. */
   isUnlocked?(def: TowerId): boolean;
+  /** In the base: the best veteran guns, most kills first (shown under the guns). */
+  veterans?(): ReadonlyArray<{ def: TowerId; level: number; kills: number; rank: string }>;
 }
 
 /**
@@ -176,6 +178,7 @@ export class Arsenal {
         <button class="ars-arrow next" data-ars="next" aria-label="${t('arsenal.next')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg></button>` : ''}
       </div>
       <footer class="ars-foot">
+        <div class="ars-vets base-only" aria-live="polite"></div>
         ${many ? `<div class="ars-dots" role="tablist">${TOWER_IDS.map((id, i) => `<button class="ars-dot" role="tab" data-ars="goto" data-i="${i}" aria-label="${t(`tower.${id}`)}"></button>`).join('')}</div>
         <p class="ars-hint">${t('arsenal.swipe')}</p>` : ''}
         <button class="btn go ars-start" data-ars="start"><span class="not-base">${t('arsenal.start')}</span><span class="base-only">${t('arsenal.pick')}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
@@ -184,6 +187,14 @@ export class Arsenal {
 
   private render(): void {
     this.track.innerHTML = TOWER_IDS.map((id, i) => this.slideHtml(id, i)).join('');
+    const vets = this.cb.veterans?.() ?? [];
+    const box = this.el.querySelector<HTMLElement>('.ars-vets');
+    if (box) {
+      box.hidden = !vets.length;
+      box.innerHTML = vets.length
+        ? `<b>${t('arsenal.veterans')}</b><ol>${vets.map((v) => `<li>${t('arsenal.vetRow', { name: t(`tower.${v.def}`), level: v.level + 1, rank: v.rank, n: v.kills })}</li>`).join('')}</ol>`
+        : '';
+    }
     this.refreshGuns();
     this.place(0, false);
   }
