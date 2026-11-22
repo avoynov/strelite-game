@@ -4,6 +4,10 @@ import { Game, type Wallet } from '../../src/sim/game';
 import { buildArcMap } from '../../src/sim/maps';
 import type { Upgrades } from '../../src/sim/research';
 import { spend } from './bot';
+import { attackStrength, defenceStrength } from '../../src/sim/strength';
+
+/** How far the guns must match the attack a raised headquarters draws before the bot raises it. */
+const HQ_MARGIN = 1;
 
 /**
  * Base mode for tests: the saved base, the treasury and a clock that runs with
@@ -79,8 +83,10 @@ export class Campaign {
 
   /**
    * Between attacks (hours pass while the player plays elsewhere): raise the
-   * headquarters, then the laboratory, when that takes no more than a share of
-   * the treasury; then mend everything and spend the rest, one builder's job at a time.
+   * headquarters, then the laboratory (never above the headquarters), when that
+   * takes no more than a share of the treasury (the headquarters only once the
+   * guns match what it would draw). Then mend
+   * everything and spend the rest, one builder's job at a time.
    */
   prepare(): void {
     this.save();
@@ -89,6 +95,9 @@ export class Campaign {
       if (this.base.occupied) break;
       const price = jobPrice(this.base, what);
       if (!price || price.kind !== 'upgrade' || price.cost > this.wallet.gold * share) continue;
+      if (what === 'lab' && this.base.buildings.lab.level >= this.base.buildings.hq.level) continue;
+      // A stronger headquarters draws stronger attacks: only once the guns match what it would draw.
+      if (what === 'hq' && defenceStrength(this.game) < HQ_MARGIN * attackStrength(this.base.attack, undefined, undefined, this.base.buildings.hq.level + 1)) continue;
       this.wallet.gold -= price.cost;
       this.base = settleJobs(startJob(this.base, what, 0), Infinity);
       raised = true;

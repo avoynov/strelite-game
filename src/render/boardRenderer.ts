@@ -6,7 +6,7 @@ import { BuildingView, type BuildingState } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
 import { FENCE_HEIGHT, FenceView, NX, NY, PX, PY } from './fenceView';
-import { FLY_HEIGHT, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
+import { FLY_HEIGHT, FLYER_Z, PlaceholderEnemyView, SpriteEnemyView, type EnemyView } from './enemyView';
 import { depth, diamond, isoX, isoY, project, RISE, TILE_H, TILE_W, unproject } from './iso';
 import { PALETTE } from './palette';
 import { roadCentreLines, stripOutline } from './road';
@@ -77,7 +77,9 @@ function groundLengthPx(tiles: number, a: number): number {
   return Math.hypot(isoX(Math.cos(a), Math.sin(a)), isoY(Math.cos(a), Math.sin(a))) * tiles;
 }
 /** Size of the burst a destroyed vehicle goes up in; units not listed just fall. */
-const VEHICLE_BURST: Record<string, number> = { truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
+const VEHICLE_BURST: Record<string, number> = { drone: 0.6, truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
+/** Units drawn up in the air: their hits and wrecks burst at flying height. */
+const AIR_KINDS = new Set<string>(Object.values(ENEMIES).filter((e) => 'air' in e && e.air).map((e) => e.id));
 const BURST_LIFE = 0.45;
 /** Seconds before a railgun shot that its charge glow starts building. */
 const RAIL_CHARGE = 0.9;
@@ -351,14 +353,15 @@ export class BoardRenderer {
 
   // ---- events from the simulation ------------------------------------------
 
-  addFloat(text: string, gx: number, gy: number, color: number): void {
+  /** A rising number; `air` starts it up at flying height. */
+  addFloat(text: string, gx: number, gy: number, color: number, air = false): void {
     const node = new Text({
       text,
       style: { fontFamily: 'system-ui, sans-serif', fontSize: 13, fontWeight: '700', fill: color, stroke: { color: 0x000000, width: 3 } },
     });
     node.anchor.set(0.5);
     this.floats.addChild(node);
-    this.floatTexts.push({ node, age: 0, gx, gy, h: 0.6 });
+    this.floatTexts.push({ node, age: 0, gx, gy, h: air ? this.flyHeight() + 0.6 : 0.6 });
   }
 
   /** A gun fired: flash and recoil on its view, and remember where the round visibly starts. */
@@ -414,16 +417,39 @@ export class BoardRenderer {
     else this.bursts.push({ gx, gy, radius, age: 0 });
   }
 
-  /** A direct round struck: a small spray of earth and smoke at the target. */
-  onImpact(gx: number, gy: number): void {
-    this.effects?.play('shell_burst', gx, gy, { size: 0.3, zBias: 0.2 });
+  /**
+   * A direct round struck: a small spray of earth and smoke at the target. On
+   * a flyer it strikes sparks up on its hull, drawn over it (earth would not
+   * fly up there, and dust does not show on a grey hull).
+   */
+  onImpact(gx: number, gy: number, air = false): void {
+    if (air) this.airHit(gx, gy, 1);
+    else this.effects?.play('shell_burst', gx, gy, { size: 0.3, zBias: 0.2 });
+  }
+
+  /** Sparks and a puff of smoke at a flyer's height over a ground point; `size` 1 for a bolt. */
+  private airHit(gx: number, gy: number, size: number): void {
+    const fx = this.effects;
+    if (!fx) return;
+    // Not every bolt on the same spot of the hull.
+    const jx = (Math.random() - 0.5) * 0.5;
+    const jy = (Math.random() - 0.5) * 0.5;
+    const height = this.flyHeight() * RISE + (Math.random() - 0.5) * 10;
+    const a = Math.random() * Math.PI * 2;
+    const opts = { height, zBias: FLYER_Z + 0.3 };
+    fx.play('muzzle_flash', gx + jx, gy + jy, { ...opts, size: 0.4 * size, rotation: a });
+    fx.play('muzzle_flash', gx + jx, gy + jy, { ...opts, size: 0.3 * size, rotation: a + Math.PI * (0.8 + Math.random() * 0.4) });
+    fx.play('muzzle_smoke', gx + jx, gy + jy, { ...opts, zBias: FLYER_Z + 0.25, size: 0.3 * size, lift: 8 });
   }
 
   /** A unit was destroyed: vehicles go up in a burst of their own. */
   onKill(enemyId: number): void {
     const e = this.enemyViews.get(enemyId);
     if (!e || !VEHICLE_BURST[e.kind]) return;
-    this.effects?.play('shell_burst', e.gx, e.gy, { size: VEHICLE_BURST[e.kind], zBias: 0.2 });
+    // A flyer goes up in the air where it was, not on the ground under it.
+    const air = AIR_KINDS.has(e.kind);
+    this.effects?.play('shell_burst', e.gx, e.gy, { size: VEHICLE_BURST[e.kind], zBias: air ? FLYER_Z + 0.2 : 0.2, height: air ? this.flyHeight() * RISE : 0 });
+    if (air) this.airHit(e.gx, e.gy, 2.2);
   }
 
   /** A railgun slug: the rendered beam when the art has it, else a bright drawn line out to the end of its range. */
