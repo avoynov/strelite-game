@@ -37,7 +37,7 @@ BARE_STEEL = (0.56, 0.57, 0.58)
 OLIVE = (0.34, 0.35, 0.24)      # FS 34087 olive drab
 GREEN_4BO = (0.30, 0.37, 0.21)  # Soviet 4BO protective green
 SAND = (0.58, 0.52, 0.38)       # military beige / sand
-GREEN_DARK = (0.15, 0.21, 0.11)  # dark green (howitzer level 3)
+GREEN_DARK = (0.12, 0.27, 0.11)  # forest green (howitzer level 3)
 ENEMY_GREY = (0.14, 0.16, 0.18)  # the attackers' slate (parallel-world faction, see models/faction.py)
 SPEC = {
     "paint_olive":   ("painted", dict(color=OLIVE, rough=0.62)),
@@ -48,6 +48,7 @@ SPEC = {
     "paint_white":   ("painted", dict(color=(0.80, 0.79, 0.74), rough=0.5, wear=1.2, dust=0.5)),
     "paint_yellow":  ("painted", dict(color=(0.80, 0.62, 0.10), rough=0.5, wear=0.6, dust=0.5)),
     "paint_shell":   ("painted", dict(color=(0.27, 0.30, 0.19), rough=0.42, wear=0.4, dust=0.5)),
+    "paint_shell_dark": ("painted", dict(color=(0.10, 0.11, 0.08), rough=0.4, wear=0.3, dust=0.3)),  # ZIS-3 L3+
     "paint_crate":   ("painted", dict(color=(0.30, 0.32, 0.21), rough=0.7, wear=1.6, dust=1.0,
                                       primer=(0.60, 0.46, 0.29), bare=None)),
     "gunmetal":      ("metal", dict(color=(0.17, 0.17, 0.18), rough=0.36, dust=0.5)),
@@ -135,8 +136,8 @@ SPEC = {
                                      weather=0.35, dust=0.6, checks=0.7)),
     "timber_red":    ("timber", dict(light=(0.52, 0.12, 0.08), dark=(0.30, 0.06, 0.04), rough=0.6,
                                      weather=0.3, dust=0.5, checks=0.5)),
-    "timber_varnish": ("timber", dict(light=(0.58, 0.30, 0.13), dark=(0.32, 0.14, 0.05), rough=0.16,
-                                      weather=0.05, dust=0.25, checks=0.2)),   # lacquered wood (greek fire 2)
+    "timber_varnish": ("timber", dict(light=(0.30, 0.13, 0.05), dark=(0.13, 0.05, 0.02), rough=0.14,
+                                      weather=0.04, dust=0.2, checks=0.15)),   # dark lacquered wood (greek fire 2)
     "timber_honey":  ("timber", dict(light=(0.62, 0.40, 0.18), dark=(0.38, 0.22, 0.09), rough=0.42,
                                      weather=0.08, dust=0.35, checks=0.3)),
     "iron_black":    ("metal", dict(color=(0.06, 0.06, 0.065), rough=0.32, dust=0.4, rust=0.1)),

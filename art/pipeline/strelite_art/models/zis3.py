@@ -553,14 +553,14 @@ def _flagstones(k, root, r, top, level):
 
 
 # --------------------------------------------------------------------------
-def _round76(k, parent, loc, rot):
+def _round76(k, parent, loc, rot, shell="paint_shell"):
     """76 mm unitary round, 0.72 m long. Local +Y = nose."""
     e = k.empty("round76", loc, parent=parent)
     e.rotation_euler = rot
     k.lathe("case", [(0.0, 0.0), (0.0, 0.05), (0.012, 0.05), (0.014, 0.045), (0.33, 0.043),
                      (0.385, 0.0392), (0.385, 0.0)], "brass", segs=20, parent=e)
     k.lathe("shell76", [(0.385, 0.0), (0.385, 0.0385), (0.6, 0.0385), (0.69, 0.02), (0.69, 0.0)],
-            "paint_shell", segs=20, parent=e)
+            shell, segs=20, parent=e)
     k.lathe("band76", [(0.4, 0.0), (0.4, 0.04), (0.42, 0.04), (0.42, 0.0)], "copper", segs=20, parent=e)
     k.lathe("fuze76", [(0.69, 0.0), (0.69, 0.02), (0.72, 0.008), (0.722, 0.0)], "steel_worn", segs=14,
             parent=e)
@@ -585,18 +585,21 @@ def _props(k, root, level):
     r0 = 3.5
     stacks = {1: [(-116, 1), (-100, 1)],
               2: [(-122, 2), (-106, 2), (-90, 1)],
-              3: [(-122, 2), (-106, 2), (-90, 2)],
-              4: [(-130, 3), (-114.5, 3), (-99, 2), (-83.5, 2)],
-              5: [(-130, 3), (-114.5, 3), (-99, 3), (-83.5, 2)]}[level]
+              3: [(-130, 3), (-114.5, 3), (-99, 2), (-83.5, 2)],           # more from level 3 (user 2026-11-22)
+              4: [(-130, 3), (-114.5, 3), (-99, 3), (-83.5, 2), (-68, 2)],
+              5: [(-130, 4), (-114.5, 3), (-99, 3), (-83.5, 3), (-68, 2)]}[level]
+    shell = "paint_shell" if level < 3 else "paint_shell_dark"   # darker rounds from level 3
     for i, (deg, high) in enumerate(stacks):
         for j in range(high):
             p = pol(r0 + 0.02 * (j % 2), deg + (1.0 if j % 2 else 0), 0.26 * j)
             fort.crate(k, root, f"crate_{i}_{j}", p, math.radians(deg) + (0.07 if j % 2 else -0.04),
                        **crate76)
     deg0, top = stacks[0][0], 0.26 * stacks[0][1]
-    for i in range(3):
-        p = pol(r0 - 0.1 + 0.1 * i, deg0, top + 0.045)
-        _round76(k, root, p - pol(0.36, deg0 + 90), (0, 0, math.radians(deg0)))
+    for i in range(3 if level < 3 else 6):
+        p = pol(r0 - 0.1 + 0.1 * (i % 3), deg0 + (15.5 if i >= 3 else 0),
+                (top if i < 3 else 0.26 * stacks[1][1]) + 0.045)
+        _round76(k, root, p - pol(0.36, deg0 + (15.5 if i >= 3 else 0) + 90),
+                 (0, 0, math.radians(deg0 + (15.5 if i >= 3 else 0))), shell)
     if level <= 2:
         for i, dd in enumerate((-9.5, -7.5)):
             _round76(k, root, pol(r0 + 0.06 * i, deg0 + dd), (math.pi / 2, 0, i * 1.1))
@@ -612,7 +615,7 @@ def _props(k, root, level):
         for sy in (-1, 1):
             k.box("rack_post", (0.3, 0.04, 0.55), (0, sy * 0.45, 0.275), rack_mat, parent=rk, bevel=0.004)
         for i in range(6):
-            _round76(k, rk, Vector((0.0, -0.36 + i * 0.145, 0.05)), (math.pi / 2, 0, 0))
+            _round76(k, rk, Vector((0.0, -0.36 + i * 0.145, 0.05)), (math.pi / 2, 0, 0), shell)
         if level == 5:
             k.box("rack_trim", (0.32, 0.92, 0.012), (0, 0, 0.51), "brass", parent=rk, bevel=False)
     # spent cases thrown clear to the far left; the heap grows with the level

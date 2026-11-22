@@ -102,7 +102,8 @@ def build(style, level=1):
     _frame(k, turret, level, s)
     _traverse(k, turret, level, s)
     _arm(k, turret, level, s)
-    _windlass(k, turret, level, s)
+    if level > 1:                                        # level 1: no winding wheels (user 2026-11-22)
+        _windlass(k, turret, level, s)
     th, al = FIRE[RELEASE_FRAME - 1][:2]
     tip, pouch = _sling_pose(th, al)
     m = k.empty("muzzle", pouch, parent=turret)              # where the round leaves the sling

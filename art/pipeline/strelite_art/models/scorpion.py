@@ -310,6 +310,36 @@ def _feed(k, root, t, level, s):
         c = q0 + e * f
         k.beam("feed_band", c, c + e.normalized() * 0.05, (0.3, 0.3), F, parent=t, bevel=0.005)
     k.box("feed_gate", (0.3, 0.3, 0.2), q1 + Vector((-0.04, 0, 0.06)), F, parent=t, bevel=0.01)
+    _loader(k, t, q1 + Vector((-0.04, 0, 0.16)), level, s)
+
+
+def _loader(k, t, base, level, s):
+    """Levels 3-5: a small separate pincer crane beside the stock (user 2026-11-22). It stands on
+    its own post on a bracket off the stock, takes the next bolt from the feed gate and lays it in
+    the channel; shown holding that bolt just above and beside the channel. Brass joints so the
+    arm reads apart from the dark stock at game zoom."""
+    F, J = "steel_worn", "brass"
+    ym = CLAW_Y0 + 0.9                                   # the arm grips the bolt at its middle
+    zb = _z(ym) - 0.22
+    px = 0.78
+    k.beam("loader_bracket", (0.1, ym, zb), (px + 0.06, ym, zb), (0.1, 0.12), s["fit"], parent=t, bevel=0.008)
+    k.cylinder("loader_base", 0.1, 0.1, (px, ym, zb - 0.05), J, segs=16, parent=t)
+    top = Vector((px, ym, zb + 0.85))
+    k.cylinder("loader_post", 0.05, 0.85, (px, ym, zb + 0.05), F, segs=12, parent=t)
+    k.cylinder("loader_knuckle", 0.075, 0.12, top + Vector((0, 0, -0.06)), J, segs=16, parent=t)
+    el = Vector((0.36, ym, top.z + 0.18))
+    k.beam("loader_boom", top, el, (0.07, 0.09), F, parent=t, bevel=0.008)
+    k.tube("loader_elbow", el + Vector((0, -0.07, 0)), el + Vector((0, 0.07, 0)), 0.055, J, parent=t, segs=14)
+    zbolt = _z(ym) + 0.42
+    wr = Vector((el.x, ym, zbolt + 0.17))
+    k.beam("loader_drop", el, wr, (0.05, 0.06), F, parent=t, bevel=0.006)
+    k.box("loader_wrist", (0.12, 0.16, 0.07), wr, J, parent=t, bevel=0.008)
+    for sx in (-1, 1):                                   # the pincer jaws closed round the bolt
+        k.beam("loader_jaw", wr + Vector((sx * 0.05, 0, -0.03)), Vector((el.x + sx * 0.03, ym, zbolt - 0.06)),
+               (0.03, 0.08), F, parent=t, bevel=0.004)
+    d = Vector((0, 1, math.tan(TILT))).normalized()
+    tail = Vector((el.x, ym, zbolt)) - d * (BOLT_LEN * 0.5)
+    _bolt(k, t, tail, d, level, s)
 
 
 def _vsides(level):

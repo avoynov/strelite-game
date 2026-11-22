@@ -40,7 +40,7 @@ DECK_Z = 0.42
 STYLE = {
     1: dict(wood="timber_raw", fit="iron_forged", pipe="hose", nozzle="iron_forged", vessel="clay",
             rope="hemp", plat="timber_raw"),
-    2: dict(wood="timber_varnish", fit="iron_forged", pipe="copper", nozzle="copper", vessel="copper",
+    2: dict(wood="timber_varnish", fit="copper", pipe="timber_varnish", nozzle="copper", vessel="timber_varnish",
             rope="hemp", plat="timber_varnish"),                 # copper and lacquered wood (user 2026-11-22)
     3: dict(wood="timber_oak", fit="bronze_old", pipe="bronze_old", nozzle="bronze_old", vessel="bronze_old",
             rope="hemp", plat="timber_oak"),
@@ -189,6 +189,20 @@ def _vessel(k, t, level, s):
         prof = [(-0.35, 0.0), (-0.32, r * 0.55), (-0.15, r * 0.95), (0.1, r), (0.3, r * 0.92), (0.42, r * 0.7),
                 (0.5, r * 0.45 if level == 3 else r * 0.75), (0.58, 0.0 if level == 3 else r * 0.75)]
         k.lathe("cauldron", prof, s["vessel"], segs=32, loc=c, rot=(math.pi / 2, 0, 0), parent=t)
+        if level == 2:                                   # dark lacquered wooden jacket, generous copper fittings
+            for zz, rr in ((-0.3, r * 0.62), (-0.12, r * 0.97), (0.1, r * 1.01), (0.3, r * 0.93), (0.48, r * 0.77)):
+                k.torus("vat_hoop", rr + 0.012, 0.022, c + Vector((0, 0, zz)), "copper", parent=t, segs=32,
+                        tube_segs=6)
+            k.torus("vat_rim", r * 0.75, 0.035, c + Vector((0, 0, 0.58)), "copper", parent=t, segs=32, tube_segs=6)
+            k.cylinder("vat_lid", r * 0.72, 0.04, c + Vector((0, 0, 0.58)), "copper", segs=32, parent=t)
+            k.cylinder("lid_knob", 0.06, 0.1, c + Vector((0, 0, 0.62)), "copper", segs=12, parent=t)
+            k.lathe("vat_pan", [(-0.42, 0.0), (-0.4, r * 0.4), (-0.3, r * 0.6)], "copper", segs=32, loc=c,
+                    rot=(math.pi / 2, 0, 0), parent=t)       # copper pan under the jacket takes the fire
+            for i in range(8):                               # copper strap plates down the staves
+                a = 2 * math.pi * i / 8 + 0.2
+                d = Vector((math.cos(a), math.sin(a), 0))
+                k.beam("vat_strap", c + d * (r * 0.66) + Vector((0, 0, -0.3)), c + d * (r * 1.02) + Vector((0, 0, 0.1)),
+                       (0.05, 0.012), "copper", parent=t, bevel=False)
         if level == 3:
             k.cylinder("lid_knob", 0.06, 0.1, c + Vector((0, 0, 0.55)), "bronze_old", segs=12, parent=t)
         for a in (90, 210, 330):                         # iron legs
@@ -254,7 +268,7 @@ def _siphon(k, t, level, s):
     b = top + Vector((0, 1.45, 0.08))
     k.tube("siphon", a, b, 0.09 if level > 1 else 0.075, s["pipe"] if level > 1 else "iron_forged", parent=t,
            segs=16)
-    for f in (0.15, 0.5, 0.85):
+    for f in ((0.06, 0.25, 0.45, 0.65, 0.85, 0.97) if level == 2 else (0.15, 0.5, 0.85)):
         k.torus("siphon_band", 0.098, 0.016, a.lerp(b, f), s["fit"], rot=((b - a).to_track_quat("Z", "Y").to_euler()),
                 parent=t, segs=16, tube_segs=4)
     k.tube("handle", a + Vector((0, 0.05, 0)), a + Vector((0, -0.35, -0.12)), 0.03, "wood", parent=t, segs=8,
@@ -265,7 +279,8 @@ def _siphon(k, t, level, s):
         k.hose("feed", [feed, feed + Vector((0, 0.3, 0.25)), a + Vector((0, -0.2, 0.05)), a], 0.045, "leather",
                parent=t)
     else:
-        k.hose("feed", [feed, feed + Vector((0, 0.25, 0.15)), a + Vector((0, -0.15, 0.0)), a], 0.04, s["pipe"],
+        k.hose("feed", [feed, feed + Vector((0, 0.25, 0.15)), a + Vector((0, -0.15, 0.0)), a], 0.04,
+               "copper" if level == 2 else s["pipe"],
                parent=t)
     d = (b - a).normalized()
     before = set(bpy.data.objects)
