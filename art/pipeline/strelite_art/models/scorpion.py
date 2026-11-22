@@ -113,6 +113,8 @@ def build(style, level=1):
     _sights(k, turret, level, s)
     if level >= 3:
         _feed(k, root, turret, level, s)
+    if level >= 2:
+        _loader(k, turret, level, s)
     m = k.empty("muzzle", (0, FRAME_Y + 0.4, _z(FRAME_Y + 0.4) + 0.12), parent=turret)
     m["marker"] = "muzzle"
     _rig(k, turret, level, s)
@@ -310,33 +312,64 @@ def _feed(k, root, t, level, s):
         c = q0 + e * f
         k.beam("feed_band", c, c + e.normalized() * 0.05, (0.3, 0.3), F, parent=t, bevel=0.005)
     k.box("feed_gate", (0.3, 0.3, 0.2), q1 + Vector((-0.04, 0, 0.06)), F, parent=t, bevel=0.01)
-    _loader(k, t, q1 + Vector((-0.04, 0, 0.16)), level, s)
 
 
-def _loader(k, t, base, level, s):
-    """Levels 3-5: a small separate pincer crane beside the stock (user 2026-11-22). It stands on
-    its own post on a bracket off the stock, takes the next bolt from the feed gate and lays it in
-    the channel; shown holding that bolt just above and beside the channel. Brass joints so the
-    arm reads apart from the dark stock at game zoom."""
-    F, J = "steel_worn", "brass"
-    ym = CLAW_Y0 + 0.9                                   # the arm grips the bolt at its middle
-    zb = _z(ym) - 0.22
-    px = 0.78
-    k.beam("loader_bracket", (0.1, ym, zb), (px + 0.06, ym, zb), (0.1, 0.12), s["fit"], parent=t, bevel=0.008)
-    k.cylinder("loader_base", 0.1, 0.1, (px, ym, zb - 0.05), J, segs=16, parent=t)
-    top = Vector((px, ym, zb + 0.85))
-    k.cylinder("loader_post", 0.05, 0.85, (px, ym, zb + 0.05), F, segs=12, parent=t)
-    k.cylinder("loader_knuckle", 0.075, 0.12, top + Vector((0, 0, -0.06)), J, segs=16, parent=t)
-    el = Vector((0.36, ym, top.z + 0.18))
-    k.beam("loader_boom", top, el, (0.07, 0.09), F, parent=t, bevel=0.008)
-    k.tube("loader_elbow", el + Vector((0, -0.07, 0)), el + Vector((0, 0.07, 0)), 0.055, J, parent=t, segs=14)
+LOADER = Vector((1.4, -1.0, 0))     # foot of the loading crane (turret space, beside the stock)
+
+
+def _loader(k, t, level, s):
+    """Levels 2-5: a separate pincer crane standing on the ground beside the scorpion (user
+    2026-11-22). It rolls round with the gun on its own little carriage, keeps a few bolts in
+    a rack on its column, and lays the next bolt in the channel; shown holding it above.
+    Pine and iron (2), iron and brass (3), bronze (4), silver and gold (5)."""
+    col, J, F = {2: ("timber_tarred", "iron_forged", "iron_forged"), 3: ("iron_black", "brass", "steel_worn"),
+                 4: ("iron_black", "bronze_old", "bronze_old"), 5: ("silver_satin", "gold_trim", "silver_satin")}[level]
+    P = LOADER
+    # its carriage on the ground: a cross of runners on small wheels (a skid at 2)
+    for a in (0.6, 0.6 + math.pi / 2):
+        d = Vector((math.cos(a), math.sin(a), 0)) * 0.28
+        k.beam("loader_runner", P - d + Vector((0, 0, 0.09)), P + d + Vector((0, 0, 0.09)), (0.09, 0.09), col,
+               parent=t, bevel=0.006)
+        if level >= 3:
+            for e in (-1, 1):
+                c = P + d * e + Vector((0, 0, 0.06))
+                k.cylinder("loader_castor", 0.06, 0.04, c - Vector((0, 0, 0)) + d.normalized().cross(Vector((0, 0, 1)))
+                           * 0.02, J, segs=14, rot=(math.pi / 2, 0, a + math.pi / 2), parent=t)
+    k.cylinder("loader_foot", 0.15, 0.08, P + Vector((0, 0, 0.13)), J, segs=20, parent=t)
+    H = _z(P.y) + 0.65
+    if col.startswith("timber"):
+        _beam(k, t, "loader_column", P + Vector((0, 0, 0.18)), P + Vector((0, 0, H)), (0.14, 0.14), col)
+    else:
+        k.cylinder("loader_column", 0.07, H - 0.18, P + Vector((0, 0, 0.18)), col, segs=16, parent=t)
+    for f in (0.3, 0.7):
+        k.cylinder("loader_collar", 0.095, 0.05, P + Vector((0, 0, 0.18 + (H - 0.18) * f)), J, segs=16, parent=t)
+    for sx in (-1, 1):                                   # struts from the carriage up the column
+        a = 0.6 + (math.pi / 2 if sx > 0 else 0)
+        d = Vector((math.cos(a), math.sin(a), 0)) * 0.3
+        k.beam("loader_strut", P + d + Vector((0, 0, 0.14)), P + Vector((0, 0, 0.9)), (0.04, 0.05), F, parent=t,
+               bevel=False)
+    # a small rack of bolts on the column, tips up
+    for i in range(3):
+        a = math.pi * 0.9 + i * 0.35
+        b0 = P + Vector((math.cos(a) * 0.13, math.sin(a) * 0.13, 0.35))
+        _bolt(k, t, b0, Vector((0, 0, 1)), level, s, length=1.2)
+    k.torus("rack_band", 0.16, 0.015, P + Vector((0, 0, 0.6)), J, parent=t, segs=20, tube_segs=4)
+    # the slewing head, the boom over the stock, the drop link and the pincer
+    top = P + Vector((0, 0, H))
+    k.cylinder("loader_head", 0.11, 0.14, top - Vector((0, 0, 0.04)), J, segs=18, parent=t)
+    ym = CLAW_Y0 + 0.9
     zbolt = _z(ym) + 0.42
+    el = Vector((0.34, ym, zbolt + 0.5))
+    k.beam("loader_boom", top + Vector((0, 0, 0.06)), el, (0.08, 0.1), col if not col.startswith("timber") else F,
+           parent=t, bevel=0.008)
+    k.beam("loader_tie", P + Vector((0, 0, H - 0.5)), top.lerp(el, 0.6), (0.035, 0.035), F, parent=t, bevel=False)
+    k.tube("loader_elbow", el + Vector((0, -0.07, 0)), el + Vector((0, 0.07, 0)), 0.06, J, parent=t, segs=14)
     wr = Vector((el.x, ym, zbolt + 0.17))
     k.beam("loader_drop", el, wr, (0.05, 0.06), F, parent=t, bevel=0.006)
-    k.box("loader_wrist", (0.12, 0.16, 0.07), wr, J, parent=t, bevel=0.008)
+    k.box("loader_wrist", (0.13, 0.18, 0.07), wr, J, parent=t, bevel=0.008)
     for sx in (-1, 1):                                   # the pincer jaws closed round the bolt
-        k.beam("loader_jaw", wr + Vector((sx * 0.05, 0, -0.03)), Vector((el.x + sx * 0.03, ym, zbolt - 0.06)),
-               (0.03, 0.08), F, parent=t, bevel=0.004)
+        k.beam("loader_jaw", wr + Vector((sx * 0.055, 0, -0.03)), Vector((el.x + sx * 0.03, ym, zbolt - 0.06)),
+               (0.03, 0.09), F, parent=t, bevel=0.004)
     d = Vector((0, 1, math.tan(TILT))).normalized()
     tail = Vector((el.x, ym, zbolt)) - d * (BOLT_LEN * 0.5)
     _bolt(k, t, tail, d, level, s)
