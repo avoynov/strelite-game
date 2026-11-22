@@ -84,9 +84,9 @@ FIRE = [
     (27, 0.57, True, None, 180),
     (32, 0.36, True, None, 225),
     (36, 0.16, True, None, 270),
-    (38, 0.0, True, 0.0, 315),     # 11 cocked; the loader lays the next bolt in
-    (38, 0.0, True, 0.0, 360),     # 12
-] + [(38, 0.0, True, 0.0, 360)] * 6   # 13-18 the loader fetches the one after (levels 2-5)
+    (38, 0.0, True, None, 315),    # 11 cocked
+    (38, 0.0, True, 0.0, 360),     # 12 the next bolt laid in (by the loader from level 2)
+]
 FIRE_FRAMES = len(FIRE)
 RELEASE_FRAME = 2
 RELOAD_FROM = 3
@@ -419,20 +419,24 @@ def _RIG_ZS(level):
     return _z(CLAW_Y0) + 0.06
 
 
-# Loader motion per firing frame: slew (deg), lift (0 = over the channel, -1 = down at the
-# channel or the stand), jaws open (0/1), held bolt shown, top bolt on the stand shown. It runs
-# on through extra frames after the scorpion is cocked; it does not have to match the rate.
-LOADER_FIRE = [(0, 0, 0, True, True)] * 8 + [
-    (0, -0.5, 0, True, True),       # 9  lowering the next bolt
-    (0, -1, 0, True, True),         # 10 in the channel
-    (0, -1, 1, False, True),        # 11 let go: the bolt is laid
-    (0, -0.3, 1, False, True),      # 12 up
-    (-60, 0, 1, False, True),       # 13 swing to the stand
-    (-120, 0, 1, False, True),      # 14
-    (-120, -1, 1, False, True),     # 15 down to the stand
-    (-120, -1, 0, True, False),     # 16 grip the top bolt
-    (-120, 0, 0, True, False),      # 17 lift it
-    (-60, 0, 0, True, False),       # 18 swing back over the channel
+# Loader motion per firing frame: slew (deg), lift (0 = up, -1 = down at the channel or the
+# stand), jaws open (0/1), held bolt shown, top bolt on the stand shown. The round trip fills
+# the whole shot at an even pace (user 2026-11-22): it lays the bolt in frame 12 and is back
+# at rest over the channel, empty and open; it never holds the gun up.
+LOADER_REST = (0, -1, 1, False, True)
+LOADER_FIRE = [
+    (0, -0.5, 1, False, True),      # 1  rises as the bolt leaves
+    (-20, 0, 1, False, True),       # 2  starts to swing to its stand
+    (-55, 0, 1, False, True),       # 3
+    (-90, 0, 1, False, True),       # 4
+    (-120, -0.5, 1, False, True),   # 5  over the stand, coming down
+    (-120, -1, 0, True, False),     # 6  grips the top bolt
+    (-120, -0.4, 0, True, False),   # 7  lifts it
+    (-95, 0, 0, True, False),       # 8  carries it back, steadily
+    (-65, 0, 0, True, False),       # 9
+    (-32, 0, 0, True, False),       # 10
+    (-5, -0.45, 0, True, False),    # 11 over the channel as the gun is cocked, lowering
+    (0, -1, 1, False, False),       # 12 lays it in and lets go
 ]
 
 
@@ -441,10 +445,9 @@ def _apply_loader(slew, lift, jaw, held, top):
     if not L:
         return
     L["slew"].rotation_euler = (0, 0, math.radians(slew))
-    drop = L["hover"] if slew == 0 else LOADER_TRAY_DROP
+    f = min(abs(slew) / abs(LOADER_TRAY_DEG), 1.0)        # how far round toward the stand
+    drop = L["hover"] * (1 - f) + LOADER_TRAY_DROP * f
     dz = lift * drop if lift < 0 else 0.0
-    if slew not in (0, LOADER_TRAY_DEG):
-        dz = 0.0
     L["hand"].location = L["hand_rest"] + Vector((0, 0, dz))
     length = (L["el"].z - (L["hand_rest"].z + dz + 0.24))
     L["cable"].scale = (1, 1, max(length, 0.02))
@@ -787,7 +790,7 @@ def _apply(sweep, slide, hooked, bolt, wheel_deg):
 
 
 def _loader_pose(f):
-    return LOADER_FIRE[f - 1] if f > 0 else (0, 0, 0, True, True)
+    return LOADER_FIRE[f - 1] if f > 0 else LOADER_REST
 
 
 def key_fire_animation(scene):
