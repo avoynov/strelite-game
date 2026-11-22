@@ -53,15 +53,60 @@ export function levelSwing(level: number): number {
   return FIRST_SWING - steps(level, STRAIGHTER_CHANCE, 2, FIRST_SWING - MIN_SWING);
 }
 
+/** Shortest straight run of the road, in tiles: keeps a pocket of at least two tiles between parallel runs. */
+export const MIN_RUN = 3;
+
 /**
  * The road for a level: from the top of the diagonal band to its bottom, in
- * alternating runs along +x and +y. Each run swings the road from one side of
- * the band's middle to the other, by up to the level's swing.
+ * runs along +x and +y. Every level draws its own shape from its number: which
+ * edge the road enters from, where, and for each run how far it swings, from a
+ * full crossing of the band to a short step that keeps to one side, so roads
+ * range from wide zig-zags to staircases. No run swings
+ * further than the level's swing from the band's middle. Level 1, a new
+ * player's first battle, keeps the even zig-zag its balance was tuned on.
  */
 export function levelMap(level: number): PathMapSpec {
+  if (level <= 1) return firstMap();
   const swing = levelSwing(level);
-  const side = (i: number) => swing - (rand(level, 100 + i) < 0.4 ? 1 : 0);
+  let salt = 100;
+  const roll = () => rand(level, salt++);
+  /** A whole number in [lo, hi]. */
+  const pick = (lo: number, hi: number) => (hi <= lo ? lo : lo + Math.floor(roll() * (hi - lo + 1)));
   // Diagonal offset d = x - y; runs along +x raise it, runs along +y lower it.
+  let alongX = roll() < 0.5;
+  const enter = pick(Math.ceil(swing / 2), swing);
+  // The first run must have room to swing the other way.
+  let x = alongX ? 0 : enter;
+  let y = alongX ? enter : 0;
+  const waypoints: Array<[number, number]> = [[x, y]];
+  for (;;) {
+    const d = x - y;
+    let target: number;
+    const room = alongX ? swing - d : d + swing;
+    if (room <= MIN_RUN || roll() < 0.7) {
+      // Across the band to the far side, by a varied amount.
+      const far = pick(Math.max(1, Math.ceil(swing / 2)), swing);
+      target = alongX ? far : -far;
+    } else {
+      // A short step that stays near this side: a staircase.
+      const step = pick(MIN_RUN, Math.min(room, MIN_RUN + 2));
+      target = alongX ? d + step : d - step;
+    }
+    // Every run is at least MIN_RUN long, and never past the swing.
+    target = alongX ? Math.min(swing, Math.max(target, d + MIN_RUN)) : Math.max(-swing, Math.min(target, d - MIN_RUN));
+    if (alongX) x = Math.min(COLS - 1, x + (target - d));
+    else y = Math.min(COLS - 1, y + (d - target));
+    waypoints.push([x, y]);
+    if (x === COLS - 1 || y === COLS - 1) break;
+    alongX = !alongX;
+  }
+  return { id: `level-${level}`, cols: COLS, rows: COLS, band: BAND, waypoints };
+}
+
+/** Level 1: a full swing to each side in turn. */
+function firstMap(): PathMapSpec {
+  const swing = FIRST_SWING;
+  const side = (i: number) => swing - (rand(1, 100 + i) < 0.4 ? 1 : 0);
   let x = 0;
   let y = side(0);
   const waypoints: Array<[number, number]> = [[x, y]];
@@ -74,7 +119,7 @@ export function levelMap(level: number): PathMapSpec {
     waypoints.push([x, y]);
     if (x === COLS - 1 || y === COLS - 1) break;
   }
-  return { id: `level-${level}`, cols: COLS, rows: COLS, band: BAND, waypoints };
+  return { id: 'level-1', cols: COLS, rows: COLS, band: BAND, waypoints };
 }
 
 // ---- arc mode ---------------------------------------------------------------

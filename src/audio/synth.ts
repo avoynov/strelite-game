@@ -192,13 +192,15 @@ function cannon(r: () => number, o: { len: number; crack: number; body: number; 
   return drive(out, o.drive);
 }
 
-/** A tensioned string or bow arm let go: twang + wooden knock + swish. */
+/**
+ * A tensioned string or bow arm let go: a dull snap, a wooden knock and a
+ * swish. No pitched twang: fired many times a second it rang like a bell.
+ */
 function bow(r: () => number, o: { len: number; pitch: number; knock: number; heavy: number }): Float32Array {
   const len = n(o.len);
   const out = new Float32Array(len);
-  const f = o.pitch * (0.97 + r() * 0.06);
-  mix(out, tone(len, (t) => f * (1 + 0.25 * Math.exp(-t * 40)), 0.07 + o.heavy * 0.05, 'tri'), 0.5);
-  mix(out, tone(len, (t) => f * 2.01 * (1 + 0.2 * Math.exp(-t * 40)), 0.04), 0.25);
+  // The string's snap: a very short burst of low-mid noise, no tone.
+  mix(out, decay(biquad(white(len, r), 'bp', o.pitch * 3 * (0.9 + r() * 0.2), 0.9), 0.006 + o.heavy * 0.004), 0.7);
   // The knock of the stock / slider.
   mix(out, decay(biquad(white(len, r), 'bp', o.knock, 2.5), 0.012 + o.heavy * 0.01), 1.4);
   mix(out, tone(len, (t) => 90 + 120 * Math.exp(-t * 30), 0.04 + o.heavy * 0.04), 0.6 + o.heavy * 0.5);
@@ -301,9 +303,8 @@ export function synth(name: SoundName, seed = 1): Float32Array {
       const charge = tone(n(0.16), (t) => 300 + 9000 * t * t * 40, 99, 'saw', 0.05);
       for (let i = 0; i < charge.length; i++) charge[i]! *= i / charge.length;
       mix(out, biquad(charge, 'lp', 4000), 0.25);
-      // The discharge: a hard electric crack and a metallic ring.
+      // The discharge: a hard electric crack (no metallic ring).
       mix(out, decay(biquad(white(len, r), 'hp', 2500), 0.03), 1.2, 0.16);
-      mix(out, ring(len, 1180, 0.14, r), 0.35, 0.16);
       // Mains buzz of the coils, dying away.
       mix(out, decay(biquad(tone(len, () => 100, 99, 'saw'), 'lp', 1600), 0.18), 0.5, 0.16);
       // The slug's sonic boom far down range.
@@ -318,7 +319,6 @@ export function synth(name: SoundName, seed = 1): Float32Array {
       const len = n(0.22);
       const out = decay(biquad(white(len, r), 'lp', 1200), 0.025);
       mix(out, tone(len, (t) => 120 + 80 * Math.exp(-t * 40), 0.05), 0.6);
-      mix(out, ring(len, 2200 + r() * 600, 0.03, r), 0.15);
       return finish(drive(out, 1.5), 0.45);
     }
     case 'deathSoft': {

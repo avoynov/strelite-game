@@ -20,7 +20,7 @@ const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][],
 /** The stage a map level needs: the bot wins with it and loses two stages short of it. */
 const NEEDS: [level: number, stage: number][] = [
   [1, 1],
-  [5, 4],
+  [5, 5],
   [8, 6],
   [12, 8],
   [20, FULL],

@@ -1,6 +1,6 @@
 import { afterArmor, applyDamage } from './damage';
 import type { Upgrades } from './research';
-import { BASE_ROLES, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { BASE_ROLES, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
@@ -15,6 +15,7 @@ import {
   builders,
   gunJobSeconds,
   HQ_LEVELS,
+  hqThreat,
   inBuildArea,
   baseHpFactor,
   repairCost,
@@ -113,6 +114,8 @@ export interface Tower {
   aim: number;
   /** Enemy the gun is on; kept until it dies or leaves range. 0 for none. */
   targetId: number;
+  /** A targeting mode the player set (research opens them); the gun's own when absent. */
+  aimMode?: Targeting;
   /** Flame: seconds spent on the current target (the flame heats up). */
   heat: number;
   /** Flame: true while it is burning a target this step. */
@@ -210,7 +213,8 @@ export type GameEvent =
   | { type: 'hit'; enemyId: number; dealt: number; overkill: number; x: number; y: number }
   | { type: 'burst'; x: number; y: number; radius: number }
   /** A direct round struck its target. */
-  | { type: 'impact'; x: number; y: number }
+  /** A direct round struck; `air` when the target flies (the hit is up where it is). */
+  | { type: 'impact'; x: number; y: number; air?: boolean }
   | { type: 'fizzle'; projectileId: number; x: number; y: number }
   /** A railgun fired: everything on the segment was hit. */
   | { type: 'rail'; towerId: number; x1: number; y1: number; x2: number; y2: number }
@@ -243,6 +247,8 @@ export interface GameOptions {
   upgrades?: Upgrades;
   /** Siege mode with the player's base: what stands, the treasury, the builders. */
   base?: BaseSetup;
+  /** Targeting modes the player set on each gun kind before (see Game.setAim). */
+  aimPrefs?: Partial<Record<TowerId, Targeting>>;
 }
 
 const ARRIVE_EPS = 1e-6;
@@ -348,8 +354,12 @@ export class Game {
   private events: GameEvent[] = [];
   /** Units dropped during this step (by destroyed APCs); join after it. */
   private dropped: Enemy[] = [];
-  private readonly waves: (n: number, level: number) => WaveSpec;
+  private readonly waves: (n: number, level: number, hq?: number) => WaveSpec;
   private readonly upgrades: Upgrades | null;
+  /** Targeting mode the player last set per gun kind; new guns of that kind take it. */
+  aimPrefs: Partial<Record<TowerId, Targeting>> = {};
+  /** Kill gold not yet paid out as a whole coin (stronger attackers pay fractions more). */
+  private rewardCarry = 0;
   /** Gun stats with research applied, per gun and level. */
   private readonly levelCache = new Map<string, TowerLevel>();
   private readonly defCache = new Map<TowerId, TowerDef>();
@@ -377,6 +387,7 @@ export class Game {
     this.level = Math.max(1, Math.floor(opts.level ?? 1));
     this.totalWaves = opts.totalWaves ?? levelWaves(this.level);
     this.upgrades = opts.upgrades ?? null;
+    this.aimPrefs = { ...opts.aimPrefs };
     this.base = map.mode === 'siege' ? (opts.base ?? null) : null;
     if (!this.base) this.money = startMoney(this.level) + (this.upgrades?.startGold ?? 0);
     this.lives += this.upgrades?.lives ?? 0;
@@ -553,7 +564,7 @@ export class Game {
     this.enemies = b.enemies;
     this.projectiles = b.projectiles;
     this.phase = b.phase;
-    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level) : null;
+    this.currentWave = b.phase === 'wave' ? this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0) : null;
     this.spawnState = b.phase === 'wave' ? b.spawnState : [];
     this.rebuildFlow();
     return true;
@@ -859,6 +870,32 @@ export class Game {
     return occupied ? 'occupied' : null;
   }
 
+  /** Targeting modes a gun can be set to: its own first, then the ones research opened. */
+  aimModes(def: TowerId): Targeting[] {
+    const own = TOWERS[def].targeting;
+    return [own, ...(this.upgrades?.aims[def] ?? []).filter((m) => m !== own)];
+  }
+
+  /** The targeting mode a gun uses now. */
+  aimOf(tower: Tower): Targeting {
+    const modes = this.aimModes(tower.def);
+    return tower.aimMode && modes.includes(tower.aimMode) ? tower.aimMode : modes[0]!;
+  }
+
+  /**
+   * Set a gun's targeting mode. New guns of the same kind take it too
+   * (`aimPrefs`, which the app keeps between battles).
+   */
+  setAim(towerId: number, mode: Targeting): ActionResult {
+    const t = this.towerById(towerId);
+    if (!t) return { ok: false, reason: 'notFound' };
+    if (!this.aimModes(t.def).includes(mode)) return { ok: false, reason: 'locked' };
+    t.aimMode = mode;
+    t.targetId = 0;
+    this.aimPrefs[t.def] = mode;
+    return { ok: true };
+  }
+
   /** Whether research has opened the gun (every gun is open when the game has no research). */
   isUnlocked(def: TowerId): boolean {
     return this.upgrades ? this.upgrades.guns.includes(def) : true;
@@ -927,6 +964,8 @@ export class Game {
       maxHp: gunHp(d.size, level),
       stats: { dealt: 0, wasted: 0, kills: 0, invested },
     };
+    const pref = this.aimPrefs[def];
+    if (pref && pref !== d.targeting && this.aimModes(def).includes(pref)) tower.aimMode = pref;
     this.towers.push(tower);
     this.builtKinds.add(def);
     this.structs.set(tower.id, tower);
@@ -1022,7 +1061,7 @@ export class Game {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
     if (this.retake && !this.towers.some((t) => !isWreck(t) && t.job?.kind !== 'build')) return { ok: false, reason: 'busy' };
     this.wave++;
-    this.currentWave = this.retake ? { groups: [], clearBonus: 0 } : this.waves(this.wave, this.level);
+    this.currentWave = this.retake ? { groups: [], clearBonus: 0 } : this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0);
     this.spawnState = this.currentWave.groups.map((g) => ({ left: g.count, timer: g.delay }));
     this.phase = 'wave';
     if (this.base && this.wave === 1) {
@@ -1270,8 +1309,14 @@ export class Game {
       while (st.left > 0 && st.timer <= 0) {
         const s = this.spawnCell();
         const siege = this.base ? baseHpFactor(this.level) : this.mode === 'siege' ? siegeHpFactor(this.level) : 1;
-        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * siege);
-        this.enemies.push(this.makeEnemy(g.enemy, hp, g.reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
+        // The player's base: a stronger headquarters draws stronger attackers, who pay more.
+        const threat = this.base ? hqThreat(this.hq?.level ?? 0) : 1;
+        const hp = this.mode === 'path' ? g.hp : Math.round(g.hp * arcHpFactor(this.level) * siege * threat);
+        // Kill gold stays whole: the fractions carry over to the next unit.
+        this.rewardCarry += g.reward * threat;
+        const reward = Math.floor(this.rewardCarry + 1e-9);
+        this.rewardCarry -= reward;
+        this.enemies.push(this.makeEnemy(g.enemy, hp, reward, s.x + 0.5, s.y + 0.5, { x: s.x, y: s.y }));
         st.left--;
         st.timer += g.interval;
       }
@@ -1804,14 +1849,17 @@ export class Game {
 
   /**
    * The gun keeps its target until it dies or leaves range; then it picks by
-   * its own fixed priority, and takes the first on the path when nothing
-   * matches that priority.
+   * its priority (its own, or the mode the player set), and takes the first on
+   * the path when nothing matches that priority.
    */
   private pickTarget(t: Tower): Enemy | undefined {
     const list = this.candidates(t);
     if (!list.length) return undefined;
+    const mode = this.aimOf(t);
     const kept = t.targetId ? list.find((e) => e.id === t.targetId) : undefined;
-    if (kept) return kept;
+    // Set to the most vulnerable, a gun leaves its target for one in range with less health left.
+    const weaker = mode === 'weakest' && kept && list.some((e) => e.hp < kept.hp);
+    if (kept && !weaker) return kept;
     const def: TowerDef = this.defOf(t.def);
     const first = (es: Enemy[]) => es.reduce<Enemy | undefined>((b, e) => (!b || e.remaining < b.remaining ? e : b), undefined);
     /** Highest score wins; ties go to the one closest to the goal. */
@@ -1827,7 +1875,9 @@ export class Game {
       }
       return pick;
     };
-    switch (def.targeting) {
+    switch (mode) {
+      case 'weakest':
+        return best((e) => -e.hp);
       case 'airFast': {
         const air = list.filter((e) => e.air);
         if (air.length) return first(air);
@@ -1887,7 +1937,7 @@ export class Game {
       }
       if (p.kind === 'direct') {
         const target = this.enemies.find((e) => e.id === p.targetId)!;
-        this.events.push({ type: 'impact', x: target.x, y: target.y });
+        this.events.push({ type: 'impact', x: target.x, y: target.y, ...(target.air ? { air: true } : {}) });
         let wasted = this.damageEnemy(target, p.damage, tower, ENEMIES[target.def].armor, p.pierce);
         // A bolt that goes through carries on into the nearest others behind its target.
         const hit = new Set([target.id]);

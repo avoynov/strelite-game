@@ -57,25 +57,35 @@ export function waveStrength(n: number, level = 1): number {
  * closes every tenth step, each once its map level lets it attack. Health grows
  * faster than gun damage so upgrades matter, and a little with each map level.
  */
-export function waveSpec(n: number, level = 1): WaveSpec {
-  return waveOfStrength(waveStrength(n, level), level);
+export function waveSpec(n: number, level = 1, hq = 0): WaveSpec {
+  return waveOfStrength(waveStrength(n, level), level, hq);
 }
 
-/** A wave of strength k on a map level (see waveSpec). */
-export function waveOfStrength(k: number, level: number): WaveSpec {
+/**
+ * The player's base: per headquarters level (0-based) above the first,
+ * `count` more of every unit (a share), each kind of unit joins the waves
+ * `earlier` steps of strength sooner, and kinds open as if the attack were
+ * `unlock` attacks further on. Tuned with the base bot (tests/base.test.ts).
+ */
+export const HQ_WAVES = { count: 0.2, earlier: 1, unlock: 2 };
+
+/** A wave of strength k on a map level (see waveSpec); `hq` is the base's headquarters level, 0-based. */
+export function waveOfStrength(k: number, level: number, hq = 0): WaveSpec {
   const levelScale = TUNING.hpScale * (1 + LEVEL_HP_GROWTH * (Math.min(level, LEVEL_HP_CAP) - 1));
   // Light units grow mostly in numbers, so overkill keeps biting late in the game.
   const grow = (enemy: EnemyId) => Math.pow(SWARM.has(enemy) ? SWARM_HP_GROWTH : HP_GROWTH, k - 1) * levelScale;
+  const more = 1 + HQ_WAVES.count * hq;
   const group = (enemy: EnemyId, count: number, interval: number, delay: number, hpScale = grow(enemy)): WaveGroup => ({
     enemy,
-    count,
+    // A kind brought in early by the headquarters still comes at least once.
+    count: Math.max(1, Math.round(count * more)),
     hp: Math.round(ENEMIES[enemy].baseHp * hpScale),
     interval,
     delay,
     // Later waves pay more per unit, so the bigger guns stay affordable.
     reward: Math.round(ENEMIES[enemy].baseReward * (1 + REWARD_GROWTH * (k - 1))),
   });
-  const has = (enemy: EnemyId, from: number) => enemyUnlocked(enemy, level) && k >= from;
+  const has = (enemy: EnemyId, from: number) => enemyUnlocked(enemy, level + HQ_WAVES.unlock * hq) && k >= from - HQ_WAVES.earlier * hq;
 
   const groups: WaveGroup[] = [group('infantry', 10 + 4 * k, Math.max(0.2, 0.6 - 0.03 * k), 0)];
   if (has('moto', 2)) groups.push(group('moto', 3 + k, 1.1, 3));

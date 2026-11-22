@@ -33,7 +33,7 @@ export class ResearchStore {
   }
 
   upgrades(): Upgrades {
-    return upgrades(this.state.done, TOWER_IDS);
+    return upgrades(this.state.done, TOWER_IDS, this.labInfo);
   }
 
   /** Complete the running item if its time is up; true when it just finished. */
@@ -76,6 +76,12 @@ export class ResearchStore {
   setGold(gold: number): void {
     const next = setGold(this.s, gold);
     if (next !== this.s) this.set(next);
+  }
+
+  /** Testing: every running item ends now (none while the laboratory lies destroyed). */
+  finishNow(now = Date.now()): void {
+    if (this.s.pausedAt !== null || !this.s.active.some((a) => a.endsAt > now)) return;
+    this.set({ ...this.s, active: this.s.active.map((a) => ({ ...a, endsAt: Math.min(a.endsAt, now) })) });
   }
 
   onChange(fn: () => void): () => void {

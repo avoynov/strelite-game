@@ -6,9 +6,10 @@ import { buildPathMap, MEADOW } from '../src/sim/maps';
 import type { WaveGroup } from '../src/sim/waves';
 
 /** A game on the last map level (everything unlocked) whose first wave is exactly `groups`. */
-function scenario(groups: Partial<WaveGroup>[], level = 8): Game {
+function scenario(groups: Partial<WaveGroup>[], level = 8, done?: string[]): Game {
   const g = new Game(buildPathMap(MEADOW), {
     level,
+    ...(done ? { upgrades: upgrades(done, TOWER_IDS) } : {}),
     waves: () => ({
       groups: groups.map((gr) => ({ enemy: 'infantry', count: 1, hp: ENEMIES[gr.enemy ?? 'infantry'].baseHp, interval: 1, delay: 0, reward: 1, ...gr })),
       clearBonus: 0,
@@ -90,6 +91,41 @@ describe('armour', () => {
 });
 
 describe('targeting', () => {
+  it('research opens the crossbow\'s "most vulnerable" mode, which the player sets per gun', () => {
+    const groups: Partial<WaveGroup>[] = [
+      { enemy: 'truck', hp: 1e6 },
+      { enemy: 'infantry', count: 6, hp: 1e5, interval: 0.4, delay: 0.6 },
+    ];
+    const kinds = (g: Game) => {
+      const kindOf = new Map<number, EnemyId>();
+      const hits: EnemyId[] = [];
+      g.startWave();
+      for (let i = 0; i < 14 / TICK; i++) {
+        for (const e of g.enemies) kindOf.set(e.id, e.def);
+        g.step(TICK);
+        for (const ev of g.drainEvents()) if (ev.type === 'hit') hits.push(kindOf.get(ev.enemyId)!);
+      }
+      return hits;
+    };
+    // Without the research the crossbow has one mode, and cannot be switched.
+    const plain = scenario(groups, 8, []);
+    buildNear(plain, 'crossbow', 3, 3);
+    expect(plain.aimModes('crossbow')).toEqual(['first']);
+    expect(plain.setAim(plain.towers[0]!.id, 'weakest')).toEqual({ ok: false, reason: 'locked' });
+    expect(kinds(plain)[0]).toBe('truck');
+    // With it: set to the most vulnerable, it lets the tough truck by and shoots the soldiers.
+    const g = scenario(groups, 8, ['lvl4.crossbow', 'aim.crossbow']);
+    buildNear(g, 'crossbow', 3, 3);
+    expect(g.aimModes('crossbow')).toEqual(['first', 'weakest']);
+    expect(g.setAim(g.towers[0]!.id, 'weakest')).toEqual({ ok: true });
+    const hits = kinds(g);
+    expect(hits.length).toBeGreaterThan(5);
+    expect(hits.filter((k) => k === 'infantry').length).toBeGreaterThan(hits.length * 0.8);
+    // A new crossbow takes the mode the player last set.
+    buildNear(g, 'crossbow', 12, 8);
+    expect(g.aimOf(g.towers[1]!)).toBe('weakest');
+  });
+
   it('ЗИС-3 prefers the most armoured target up to armour 10, then falls back to the first', () => {
     const g = scenario([
       { enemy: 'infantry', count: 12, hp: 40, interval: 0.6 },
