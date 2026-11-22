@@ -162,6 +162,8 @@ export interface ResearchState {
   active: ActiveItem[];
   /** When the laboratory was destroyed (clocks stand still), or null while it stands. */
   pausedAt: number | null;
+  /** Items a destroyed laboratory lost: done again for half the gold and half the time. */
+  halfPrice: string[];
 }
 
 /**
@@ -187,7 +189,7 @@ export function inTree(id: string, lab: LabInfo, done: readonly string[] = []): 
 }
 
 export function newResearch(): ResearchState {
-  return { gold: 0, done: [], active: [], pausedAt: null };
+  return { gold: 0, done: [], active: [], pausedAt: null, halfPrice: [] };
 }
 
 /** Repairs a state loaded from storage: unknown items and bad numbers are dropped. */
@@ -207,6 +209,7 @@ export function sanitize(raw: unknown): ResearchState {
     }
   }
   if (typeof r.pausedAt === 'number' && Number.isFinite(r.pausedAt)) s.pausedAt = r.pausedAt;
+  if (Array.isArray(r.halfPrice)) s.halfPrice = r.halfPrice.filter((id): id is string => typeof id === 'string' && BY_ID.has(id) && !s.done.includes(id));
   return s;
 }
 
@@ -235,20 +238,43 @@ export function startError(s: ResearchState, id: string, lab: LabInfo = FIRST_LA
   // The deepest items also need a laboratory raised as far (and the headquarters caps the laboratory).
   if ((item.hq ?? 1) > lab.level + 1) return 'labLevel';
   if (s.active.length >= labSlots(lab)) return 'busy';
-  if (s.gold < item.cost) return 'noGold';
+  if (s.gold < itemCost(item, s)) return 'noGold';
   return null;
 }
 
 /** Real seconds an item takes; `speed` > 1 shortens every timer (testing builds). */
-export function itemSeconds(item: ResearchItem, speed = 1): number {
-  return item.seconds / speed;
+export function itemSeconds(item: ResearchItem, speed = 1, s?: ResearchState): number {
+  return (item.seconds * (s?.halfPrice.includes(item.id) ? 0.5 : 1)) / speed;
+}
+
+/** Gold an item costs: half for one a destroyed laboratory lost. */
+export function itemCost(item: ResearchItem, s?: ResearchState): number {
+  return s?.halfPrice.includes(item.id) ? Math.ceil(item.cost / 2) : item.cost;
+}
+
+/**
+ * The laboratory was destroyed: the research running in it is lost, gold and
+ * all. With nothing running, the last item finished is lost instead, but it
+ * can be done again for half the gold and half the time. Guns it opened stay
+ * on the field; new ones cannot be built until it is done again.
+ */
+export function labDestroyed(s: ResearchState): { state: ResearchState; lost: string[] } {
+  if (s.active.length) return { state: { ...s, active: [] }, lost: s.active.map((a) => a.id) };
+  const last = s.done[s.done.length - 1];
+  if (!last) return { state: s, lost: [] };
+  return { state: { ...s, done: s.done.slice(0, -1), halfPrice: [...s.halfPrice.filter((id) => id !== last), last] }, lost: [last] };
 }
 
 /** Pay for `id` and start its clock. */
 export function start(s: ResearchState, id: string, now: number, speed = 1, lab: LabInfo = FIRST_LAB): ResearchState {
   if (startError(s, id, lab)) return s;
   const item = BY_ID.get(id)!;
-  return { ...s, gold: s.gold - item.cost, active: [...s.active, { id, endsAt: now + itemSeconds(item, speed) * 1000 }] };
+  return {
+    ...s,
+    gold: s.gold - itemCost(item, s),
+    active: [...s.active, { id, endsAt: now + itemSeconds(item, speed, s) * 1000 }],
+    halfPrice: s.halfPrice.filter((h) => h !== id),
+  };
 }
 
 /** Finish the running items whose time is up (nothing moves while the laboratory lies destroyed). */

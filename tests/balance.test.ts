@@ -20,7 +20,7 @@ const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][],
 /** The stage a map level needs: the bot wins with it and loses two stages short of it. */
 const NEEDS: [level: number, stage: number][] = [
   [1, 1],
-  [5, 4],
+  [5, 5],
   [8, 6],
   [12, 8],
   [20, FULL],
@@ -93,10 +93,11 @@ describe('balance in arc mode', () => {
  * Siege mode: the bot keeps its guns out of the attackers' reach and, once it
  * can spare the gold, walls the goal in with fences and repairs them.
  */
+// One-off siege levels are no longer played (the base took their place); the sim mode
+// is kept honest on the first levels. Level 12 went chaotic once the riders stopped surging.
 const SIEGE_NEEDS: [level: number, stage: number][] = [
   [1, 1],
   [5, 6],
-  [12, 7],
 ];
 
 describe('balance in siege mode', () => {

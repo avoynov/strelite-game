@@ -1,28 +1,30 @@
 import { afterArmor, applyDamage } from './damage';
 import type { Upgrades } from './research';
-import { ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { BASE_ROLES, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
 import { arcHalfWidth, arcHpFactor, levelWaves, siegeHpFactor } from './levels';
 import {
   BASE_RULES,
+  BUILDING_KINDS,
   BUILDING_SIZE,
+  BUILDING_SPOTS,
+  buildingHp,
   buildingValue,
   builders,
   gunJobSeconds,
-  HQ_BASE_VALUE,
   HQ_LEVELS,
-  HQ_SPOT,
   hqThreat,
   inBuildArea,
-  LAB_BASE_VALUE,
-  LAB_LEVELS,
-  LAB_SPOT,
   baseHpFactor,
   repairCost,
+  takesBuilder,
+  type BaseBuilding,
   type BaseState,
+  type BuildingKind,
   type GunJob,
+  type Occupier,
 } from './base';
 import { goldBefore, waveSpec, type WaveSpec } from './waves';
 
@@ -70,8 +72,16 @@ export interface Enemy {
   alive: boolean;
   /** Flying: goes straight to the goal and only some guns can hit it. */
   air: boolean;
-  /** Phase of the speed surges of a swerving unit. */
+  /** Phase of a weaving unit's swing from side to side. */
   phase: number;
+  /** Weaving units: how far off its way it is now (added to x, y), in tiles. */
+  wx?: number;
+  wy?: number;
+  /** Weaving units: smoothed direction of travel, and how hard it is turning (0..1, slows it a little). */
+  dir?: number;
+  corner?: number;
+  /** Base mode: id of the building, gun or fence it is going for; 0 for none yet. */
+  goal?: number;
   /** Siege mode: index of the cell of the fence or gun it stands stopped at, -1 when walking. */
   wall: number;
   /** Siege mode: seconds until it can strike again. */
@@ -109,7 +119,7 @@ export interface Tower {
   heat: number;
   /** Flame: true while it is burning a target this step. */
   firing: boolean;
-  /** Siege mode: health; the gun is wrecked at 0. Unused elsewhere. */
+  /** Siege mode: health; the gun is wrecked at 0 (in the base it stays as a wreck to rebuild). Unused elsewhere. */
   hp: number;
   maxHp: number;
   stats: TowerStats;
@@ -117,10 +127,10 @@ export interface Tower {
   job?: GunJob;
 }
 
-/** Base mode: the headquarters (the goal) or the laboratory. */
+/** Base mode: one of the base's buildings; at 0 health it lies in ruins. */
 export interface Building {
   id: number;
-  kind: 'hq' | 'lab';
+  kind: BuildingKind;
   cx: number;
   cy: number;
   size: number;
@@ -164,7 +174,9 @@ export interface Fence {
 /** Something siege enemies can stop at and break: a gun, a fence or a building of the base. */
 export type Structure = Tower | Fence | Building;
 const isFence = (s: Structure): s is Fence => 'kind' in s && s.kind === 'fence';
-const isBuilding = (s: Structure): s is Building => 'kind' in s && (s.kind === 'hq' || s.kind === 'lab');
+const isBuilding = (s: Structure): s is Building => 'kind' in s && s.kind !== 'fence';
+/** A gun the attackers destroyed (in the base it stays on the field as a wreck). */
+export const isWreck = (t: Tower): boolean => t.hp <= 0;
 
 export interface Projectile {
   id: number;
@@ -208,15 +220,17 @@ export type GameEvent =
   /** Siege mode: a unit shot at or rammed a gun or fence. */
   | { type: 'strike'; kind: Assault['kind']; enemyId: number; x1: number; y1: number; x2: number; y2: number }
   /** Siege mode: a gun, fence or building was destroyed. */
-  | { type: 'wrecked'; fence: boolean; building?: 'hq' | 'lab'; x: number; y: number; size: number }
+  | { type: 'wrecked'; fence: boolean; building?: BuildingKind; x: number; y: number; size: number }
   /** Base mode: a builder finished a gun or raised it. */
   | { type: 'built'; towerId: number; kind: GunJob['kind'] }
+  /** Base mode: sappers blew up their charge. */
+  | { type: 'blast'; x: number; y: number; radius: number }
   | { type: 'waveStart'; wave: number }
   | { type: 'waveClear'; wave: number; bonus: number }
   | { type: 'won' }
   | { type: 'lost' };
 
-export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' | 'noBuilder' };
+export type ActionResult = { ok: true } | { ok: false; reason: 'noMoney' | 'notBuildable' | 'occupied' | 'maxLevel' | 'notFound' | 'busy' | 'locked' | 'levelLocked' | 'blocks' | 'noBuilder' | 'noArsenal' | 'wreck' };
 
 export interface GameOptions {
   /** Map level, 1-based: decides which guns can be built and which enemies attack. */
@@ -247,8 +261,18 @@ const PASS_THROUGH_REACH = 1.2;
 /** Siege mode: what stepping into a wall costs a unit that never breaks one (it goes round any way there is). */
 const NO_BREAK = 1000;
 
-/** Seconds a swerving unit holds one speed before it jerks to another. */
-const SWERVE_SECONDS = 1.4;
+/** Weaving riders swing from side to side this fast (radians a second). */
+const WEAVE_RATE = 3.4;
+/** A weaving rider's direction of travel follows its way this slowly (seconds), so the zigzag of grid steps is not a turn. */
+const WEAVE_SMOOTH = 0.9;
+/** Turning faster than this (radians a second) counts as a bend; a full bend slows a rider by CORNER_SLOW. */
+const CORNER_RATE = 1.0;
+const CORNER_SLOW = 0.2;
+
+/** The raid that provokes an attack on the base: riders this fast, this many of them. */
+export const RAID = { speed: 7, riders: 3 };
+/** Base mode, retaking the headquarters: seconds between the occupiers coming out. */
+const ARMY_INTERVAL = 0.45;
 
 /** Deterministic pseudo-random number in [0, 1) from an integer. */
 function hash01(n: number): number {
@@ -284,7 +308,7 @@ export class Game {
   lives = ECONOMY.startLives;
   /** Number of the current or last started wave, 0 before the first. */
   wave = 0;
-  readonly totalWaves: number;
+  totalWaves: number;
   readonly level: number;
   /** Gold taken in this battle (kills and wave bonuses), whatever was spent. */
   goldEarned = 0;
@@ -295,11 +319,24 @@ export class Game {
   towers: Tower[] = [];
   /** Siege mode only. */
   fences: Fence[] = [];
-  /** Base mode: the headquarters (goal) and the laboratory (null once destroyed). */
-  hq: Building | null = null;
-  lab: Building | null = null;
+  /** Base mode: the base's buildings, ruins included. */
+  buildings: Building[] = [];
   /** Base mode, or null. */
   readonly base: BaseSetup | null;
+  /** Base mode: the headquarters is held by the enemy and this battle wins it back. */
+  readonly retake: boolean = false;
+  /** Base mode: the headquarters fell in this battle. */
+  hqFell = false;
+  /** Base mode: buildings destroyed in this battle. */
+  readonly ruined = new Set<BuildingKind>();
+  /** Base mode: the base's value (buildings and guns) when the attack began, and how much of it was destroyed since. */
+  private startValue = 0;
+  private lostValue = 0;
+  /** Base mode, retaking the headquarters: the army still inside, coming out one by one. */
+  private army: Occupier[] = [];
+  private armyTimer = 0;
+  /** Base mode: seconds into the raid that provokes the attack, or null when there is none. */
+  raidTime: number | null = null;
   projectiles: Projectile[] = [];
 
   private nextId = 1;
@@ -323,11 +360,15 @@ export class Game {
   /** Siege mode: fence id per cell, 0 where none. */
   private readonly fenceGrid: Int32Array;
   /** Siege mode: one field per detour length, built when first needed after the walls change. */
-  private readonly fields = new Map<number, FlowField>();
+  private readonly fields = new Map<string, FlowField>();
   /** Siege mode: the open-ground distance, walls ignored; orders the enemies along the way. */
   private readonly ground: FlowField | null;
   /** Siege mode: cells enemies come in from; nothing can be built there. */
   private readonly entry: Set<number>;
+  /** Base mode: cells of wrecked guns and ruined buildings (nothing new goes there; walkers pass). */
+  private readonly rubble: Int32Array;
+  /** Base mode: every building, gun and fence by id. */
+  private readonly structs = new Map<number, Structure>();
   /** Gold outside base mode. */
   private purse = 0;
 
@@ -345,11 +386,37 @@ export class Game {
     this.waves = opts.waves ?? waveSpec;
     this.occupied = new Int32Array(map.grid.cols * map.grid.rows);
     this.fenceGrid = new Int32Array(map.grid.cols * map.grid.rows);
+    this.rubble = new Int32Array(map.grid.cols * map.grid.rows);
     const { grid } = map;
     this.ground = map.mode === 'siege' ? new FlowField(grid, map.goals, (x, y) => grid.get(x, y) !== 'blocked') : null;
     this.entry = new Set(map.mode === 'siege' ? (map.arcSpawns ?? []).map((c) => grid.index(c.x, c.y)) : []);
-    if (this.base) this.loadBase(this.base.state);
+    if (this.base) {
+      this.retake = !!this.base.state.occupied;
+      if (this.retake) this.totalWaves = 1;
+      this.loadBase(this.base.state);
+    }
     this.flow = this.makeFlow(this.occupied);
+  }
+
+  /** Base mode: a building by kind (ruins included). */
+  building(kind: BuildingKind): Building | null {
+    return this.buildings.find((b) => b.kind === kind) ?? null;
+  }
+
+  /** Base mode: whether a building stands (ruins do not work). */
+  stands(kind: BuildingKind): boolean {
+    return (this.building(kind)?.hp ?? 0) > 0;
+  }
+
+  /** Base mode: the headquarters (also while it is held by the enemy); null elsewhere. */
+  get hq(): Building | null {
+    return this.building('hq');
+  }
+
+  /** Base mode: the laboratory while it stands. */
+  get lab(): Building | null {
+    const b = this.building('lab');
+    return b && b.hp > 0 ? b : null;
   }
 
   /** Gold to spend: the battle's own, or in base mode the treasury. */
@@ -368,27 +435,64 @@ export class Game {
 
   /** Base mode: put the saved base on the field. */
   private loadBase(b: BaseState): void {
-    const [hx, hy] = HQ_SPOT;
-    const hqMax = HQ_LEVELS[b.hq.level]!.hp;
-    this.hq = { id: this.nextId++, kind: 'hq', cx: hx, cy: hy, size: BUILDING_SIZE, x: hx + 1, y: hy + 1, level: b.hq.level, hp: Math.min(b.hq.hp, hqMax), maxHp: hqMax };
-    if (b.lab) {
-      const [lx, ly] = LAB_SPOT;
-      const max = LAB_LEVELS[b.lab.level]!.hp;
-      this.lab = { id: this.nextId++, kind: 'lab', cx: lx, cy: ly, size: BUILDING_SIZE, x: lx + 1, y: ly + 1, level: b.lab.level, hp: Math.min(b.lab.hp, max), maxHp: max };
-      for (let y = ly; y < ly + BUILDING_SIZE; y++) for (let x = lx; x < lx + BUILDING_SIZE; x++) this.occupied[this.map.grid.index(x, y)] = this.lab.id;
+    for (const kind of BUILDING_KINDS) {
+      const [cx, cy] = BUILDING_SPOTS[kind];
+      const saved: BaseBuilding = b.buildings[kind];
+      const maxHp = buildingHp(kind, saved.level);
+      const bl: Building = { id: this.nextId++, kind, cx, cy, size: BUILDING_SIZE, x: cx + 1, y: cy + 1, level: saved.level, hp: Math.min(saved.hp, maxHp), maxHp };
+      this.buildings.push(bl);
+      this.structs.set(bl.id, bl);
+      this.markCells(bl.cx, bl.cy, bl.size, bl.hp > 0 ? this.occupied : this.rubble, bl.id);
     }
     for (const g of b.guns) {
       if (this.placementError(g.def, g.cx, g.cy, true)) continue;
       const t = this.newTower(g.def, g.cx, g.cy, g.level, g.invested);
       t.hp = Math.min(g.hp, t.maxHp);
       if (g.job) t.job = { ...g.job };
+      if (isWreck(t)) {
+        this.markFootprint(t, 0);
+        this.markCells(t.cx, t.cy, t.size, this.rubble, t.id);
+      }
     }
     for (const f of b.fences) {
       if (this.fenceError(f.cx, f.cy, true)) continue;
       const fence = this.newFence(f.cx, f.cy, f.level, f.invested);
       fence.hp = Math.min(f.hp, fence.maxHp);
     }
+    if (b.occupied) this.army = b.occupied.map((o) => ({ ...o }));
     this.settleJobs();
+  }
+
+  private markCells(cx: number, cy: number, size: number, grid: Int32Array, value: number): void {
+    for (let y = cy; y < cy + size; y++) for (let x = cx; x < cx + size; x++) grid[this.map.grid.index(x, y)] = value;
+  }
+
+  /** Base mode: what the attack is measured against: standing buildings and guns, not fences. */
+  private baseValue(): number {
+    let v = 0;
+    for (const b of this.buildings) if (b.hp > 0) v += this.worth(b);
+    for (const t of this.towers) if (!isWreck(t)) v += this.worth(t);
+    return v;
+  }
+
+  /** Base mode: share of the base destroyed in this battle (the battle is lost at BASE_RULES.lossShare). */
+  lostShare(): number {
+    return this.startValue > 0 ? this.lostValue / this.startValue : 0;
+  }
+
+  /** Base mode, retaking the headquarters: the units still holding it (on the field and inside). */
+  survivors(): Occupier[] {
+    const out: Occupier[] = this.enemies.filter((e) => e.alive).map((e) => ({ def: e.def, hp: e.hp, maxHp: e.maxHp, reward: e.reward }));
+    // Units of the running wave that never came out are still with the army.
+    const w = this.currentWave;
+    if (w && !this.retake) {
+      w.groups.forEach((g, i) => {
+        const left = this.spawnState[i]?.left ?? 0;
+        const hp = Math.round(g.hp * arcHpFactor(this.level) * baseHpFactor(this.level));
+        for (let n = 0; n < left; n++) out.push({ def: g.enemy, hp, maxHp: hp, reward: g.reward });
+      });
+    }
+    return [...out, ...this.army.map((o) => ({ ...o }))];
   }
 
   /**
@@ -430,6 +534,11 @@ export class Game {
       if (!(t.def in TOWERS) || !grid.inBounds(t.cx, t.cy) || !grid.inBounds(t.cx + t.size - 1, t.cy + t.size - 1)) return false;
     }
     if (b.enemies.some((e) => !(e.def in ENEMIES))) return false;
+    // Older saves: riders surged instead of weaving.
+    for (const e of b.enemies) {
+      e.wx ??= 0;
+      e.wy ??= 0;
+    }
     this.lives = Number(b.lives) || 0;
     this.wave = Number(b.wave) || 0;
     this.time = Number(b.time) || 0;
@@ -448,22 +557,23 @@ export class Game {
     return true;
   }
 
-  /** Base mode: the base as it stands now, to be saved (attack number and building jobs are the caller's). */
-  snapshot(): Pick<BaseState, 'hq' | 'lab' | 'guns' | 'fences'> {
+  /** Base mode: the base as it stands now, to be saved (attack number, building jobs and the occupation are the caller's). */
+  snapshot(): Pick<BaseState, 'buildings' | 'guns' | 'fences'> {
+    const buildings = {} as BaseState['buildings'];
+    for (const b of this.buildings) buildings[b.kind] = { level: b.level, hp: Math.max(0, b.hp) };
     return {
-      hq: { level: this.hq?.level ?? 0, hp: Math.max(0, this.hq?.hp ?? 0) },
-      lab: this.lab ? { level: this.lab.level, hp: this.lab.hp } : null,
-      guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: t.hp, invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}) })),
+      buildings,
+      guns: this.towers.map((t) => ({ def: t.def, level: t.level, cx: t.cx, cy: t.cy, hp: Math.max(0, t.hp), invested: t.stats.invested, ...(t.job ? { job: { ...t.job } } : {}) })),
       fences: this.fences.map((f) => ({ cx: f.cx, cy: f.cy, level: f.level, hp: f.hp, invested: f.invested })),
     };
   }
 
-  /** Base mode: builders free now (the headquarters' and laboratory's jobs count, as do the guns'). */
+  /** Base mode: builders free now (the buildings' jobs count, as do the guns'). */
   freeBuilders(): number {
     if (!this.base) return Infinity;
     const st = this.base.state;
-    const total = builders({ ...st, lab: this.lab ? { level: this.lab.level, hp: this.lab.hp } : null });
-    return total - st.jobs.length - this.towers.filter((t) => t.job).length;
+    const total = builders({ ...st, buildings: { ...st.buildings, lab: { level: st.buildings.lab.level, hp: this.lab ? this.lab.hp : 0 } } });
+    return total - st.jobs.filter(takesBuilder).length - this.towers.filter((t) => t.job).length;
   }
 
   /** Base mode: finish the guns whose builders are done. */
@@ -474,37 +584,45 @@ export class Game {
       const kind = t.job.kind;
       delete t.job;
       if (kind === 'upgrade') this.raise(t);
+      if (kind === 'repair') {
+        t.hp = t.maxHp;
+        this.markCells(t.cx, t.cy, t.size, this.rubble, 0);
+        this.markFootprint(t, t.id);
+        this.rebuildFlow();
+      }
       this.events.push({ type: 'built', towerId: t.id, kind });
     }
   }
 
   /** Base mode: may footprints go here (the headquarters' level sets how far out)? */
   inArea(cx: number, cy: number, size: number): boolean {
-    return !this.base || !this.hq || inBuildArea(this.hq.level, cx, cy, size);
+    const hq = this.hq;
+    return !this.base || !hq || inBuildArea(hq.level, cx, cy, size);
   }
 
-  /** Base mode: the building on a cell (the laboratory or the headquarters). */
+  /** Base mode: the building on a cell (ruins too). */
   buildingAt(cx: number, cy: number): Building | undefined {
-    for (const b of [this.hq, this.lab]) if (b && cx >= b.cx && cx < b.cx + b.size && cy >= b.cy && cy < b.cy + b.size) return b;
+    for (const b of this.buildings) if (cx >= b.cx && cx < b.cx + b.size && cy >= b.cy && cy < b.cy + b.size) return b;
     return undefined;
   }
 
-  /** Gold a part cost: guns and fences what was paid, buildings the price of their levels. */
+  /** Gold a part is worth: guns and fences what was paid, buildings the price of their levels. */
   private worth(s: Structure): number {
     if (isFence(s)) return s.invested;
-    if (isBuilding(s)) return s.kind === 'hq' ? buildingValue(HQ_LEVELS, s.level, HQ_BASE_VALUE) : buildingValue(LAB_LEVELS, s.level, LAB_BASE_VALUE);
+    if (isBuilding(s)) return buildingValue(s.kind, s.level);
     return s.stats.invested;
   }
 
-  /** Base mode: gold to mend a part fully. */
+  /** Base mode: gold to mend a damaged part fully (ruins and wrecks are rebuilt instead). */
   repairCost(s: Structure): number {
-    return this.base ? repairCost(s.hp, s.maxHp, this.worth(s)) : 0;
+    if (!this.base || s.hp <= 0) return 0;
+    return repairCost(s.hp, s.maxHp, this.worth(s));
   }
 
   private parts(): Structure[] {
     const out: Structure[] = [...this.towers, ...this.fences];
-    if (this.hq) out.push(this.hq);
-    if (this.lab) out.push(this.lab);
+    // The headquarters while the enemy holds it is not the player's to mend.
+    for (const b of this.buildings) if (b.hp > 0) out.push(b);
     return out;
   }
 
@@ -534,6 +652,26 @@ export class Game {
     return any ? { ok: true } : { ok: false, reason: 'noMoney' };
   }
 
+  /** Base mode: what rebuilding a wrecked gun costs (a builder and the time its level took). */
+  rebuildCost(t: Tower): number {
+    return Math.ceil(t.stats.invested * BASE_RULES.repairShare);
+  }
+
+  /** Base mode: put a builder on a wrecked gun. */
+  rebuildGun(id: number): ActionResult {
+    const t = this.towerById(id);
+    if (!t || !this.base) return { ok: false, reason: 'notFound' };
+    if (!isWreck(t) || t.job) return { ok: false, reason: 'busy' };
+    if (this.phase === 'won' || this.phase === 'lost') return { ok: false, reason: 'busy' };
+    if (this.walkerOn(t.cx, t.cy, t.size)) return { ok: false, reason: 'occupied' };
+    const cost = this.rebuildCost(t);
+    if (this.money < cost) return { ok: false, reason: 'noMoney' };
+    if (this.freeBuilders() <= 0) return { ok: false, reason: 'noBuilder' };
+    this.money -= cost;
+    t.job = { kind: 'repair', endsAt: this.now() + (gunJobSeconds(t.def, t.level) * 1000) / (this.base.speed ?? 1) };
+    return { ok: true };
+  }
+
   // ---- queries -------------------------------------------------------------
 
   get mode(): 'path' | 'arc' | 'siege' {
@@ -560,7 +698,8 @@ export class Game {
   /** The tower whose footprint covers this cell. */
   towerAt(cx: number, cy: number): Tower | undefined {
     if (!this.map.grid.inBounds(cx, cy)) return undefined;
-    const id = this.occupied[this.map.grid.index(cx, cy)];
+    const i = this.map.grid.index(cx, cy);
+    const id = this.occupied[i] || this.rubble[i];
     return id ? this.towerById(id) : undefined;
   }
 
@@ -602,7 +741,8 @@ export class Game {
     const { grid } = this.map;
     if (this.mode !== 'siege' || grid.get(cx, cy) !== 'build' || this.entry.has(grid.index(cx, cy))) return 'notBuildable';
     if (!loading && !this.inArea(cx, cy, 1)) return 'notBuildable';
-    if (this.occupied[grid.index(cx, cy)] || this.fenceGrid[grid.index(cx, cy)] || this.walkerOn(cx, cy, 1)) return 'occupied';
+    const i = grid.index(cx, cy);
+    if (this.occupied[i] || this.fenceGrid[i] || this.rubble[i] || this.walkerOn(cx, cy, 1)) return 'occupied';
     return null;
   }
 
@@ -667,7 +807,7 @@ export class Game {
   }
 
   sellValue(tower: Tower): number {
-    return Math.floor(tower.stats.invested * ECONOMY.sellRefund);
+    return Math.floor(tower.stats.invested * ECONOMY.sellRefund * (isWreck(tower) ? BASE_RULES.wreckSale : 1));
   }
 
   /** Why a gun cannot stand with its footprint's top-left cell at (cx, cy), or null when it can. */
@@ -679,7 +819,8 @@ export class Game {
     for (let y = cy; y < cy + size; y++) {
       for (let x = cx; x < cx + size; x++) {
         if (grid.get(x, y) !== 'build' || this.entry.has(grid.index(x, y))) return 'notBuildable';
-        if (this.occupied[grid.index(x, y)] || this.fenceGrid[grid.index(x, y)]) occupied = true;
+        const i = grid.index(x, y);
+        if (this.occupied[i] || this.fenceGrid[i] || this.rubble[i]) occupied = true;
       }
     }
     return occupied ? 'occupied' : null;
@@ -749,6 +890,8 @@ export class Game {
       if (block) return { ok: false, reason: block };
     }
     if (this.mode === 'siege' && this.walkerOn(cx, cy, d.size)) return { ok: false, reason: 'occupied' };
+    // A ruined arsenal sends no new guns to the base.
+    if (this.base && !this.stands('arsenal')) return { ok: false, reason: 'noArsenal' };
     if (this.freeBuilders() <= 0) return { ok: false, reason: 'noBuilder' };
     this.money -= cost;
     const tower = this.newTower(def, cx, cy, 0, cost);
@@ -780,6 +923,7 @@ export class Game {
     const pref = this.aimPrefs[def];
     if (pref && pref !== d.targeting && this.aimModes(def).includes(pref)) tower.aimMode = pref;
     this.towers.push(tower);
+    this.structs.set(tower.id, tower);
     this.markFootprint(tower, tower.id);
     return tower;
   }
@@ -788,6 +932,7 @@ export class Game {
     const { hp } = FENCE_LEVELS[level]!;
     const f: Fence = { id: this.nextId++, kind: 'fence', cx, cy, x: cx + 0.5, y: cy + 0.5, level, hp, maxHp: hp, invested };
     this.fences.push(f);
+    this.structs.set(f.id, f);
     this.fenceGrid[this.map.grid.index(cx, cy)] = f.id;
     return f;
   }
@@ -797,6 +942,7 @@ export class Game {
     if (!t) return { ok: false, reason: 'notFound' };
     const cost = this.upgradeCost(t);
     if (cost === null) return { ok: false, reason: 'maxLevel' };
+    if (isWreck(t)) return { ok: false, reason: 'wreck' };
     if (!this.canRaise(t)) return { ok: false, reason: 'levelLocked' };
     if (t.job) return { ok: false, reason: 'busy' };
     if (this.money < cost) return { ok: false, reason: 'noMoney' };
@@ -822,7 +968,9 @@ export class Game {
     if (!t) return { ok: false, reason: 'notFound' };
     this.money += this.sellValue(t);
     this.markFootprint(t, 0);
+    this.markCells(t.cx, t.cy, t.size, this.rubble, 0);
     this.towers = this.towers.filter((o) => o !== t);
+    this.structs.delete(t.id);
     this.rebuildFlow();
     return { ok: true };
   }
@@ -866,12 +1014,65 @@ export class Game {
 
   startWave(): ActionResult {
     if (this.phase !== 'build' || this.wave >= this.totalWaves) return { ok: false, reason: 'busy' };
+    if (this.retake && !this.towers.some((t) => !isWreck(t) && t.job?.kind !== 'build')) return { ok: false, reason: 'busy' };
     this.wave++;
-    this.currentWave = this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0);
+    this.currentWave = this.retake ? { groups: [], clearBonus: 0 } : this.waves(this.wave, this.level, this.base ? (this.hq?.level ?? 0) : 0);
     this.spawnState = this.currentWave.groups.map((g) => ({ left: g.count, timer: g.delay }));
     this.phase = 'wave';
+    if (this.base && this.wave === 1) {
+      this.startValue = this.baseValue();
+      this.lostValue = 0;
+    }
     this.events.push({ type: 'waveStart', wave: this.wave });
     return { ok: true };
+  }
+
+  /**
+   * Base mode: provoke the next attack. A few riders dash out of the base to
+   * the enemy, turn and race home with the whole army on their heels; the
+   * first wave starts as they turn.
+   */
+  provoke(): ActionResult {
+    if (!this.base || this.retake || this.phase !== 'build' || this.wave !== 0 || this.raidTime !== null || !this.stands('hq')) return { ok: false, reason: 'busy' };
+    this.raidTime = 0;
+    return { ok: true };
+  }
+
+  /** Where the raid rides to: the middle of the edge the first wave comes from. */
+  private raidPoint(): { x: number; y: number } {
+    const cells = this.activeSpawns() as Array<Cell & { off: number }>;
+    const mid = cells.reduce<(Cell & { off: number }) | null>((best, c) => (!best || Math.abs(c.off) < Math.abs(best.off) ? c : best), null);
+    return mid ? { x: mid.x + 0.5, y: mid.y + 0.5 } : { x: 2, y: 2 };
+  }
+
+  /** Seconds the raid takes to reach the enemy. */
+  raidOut(): number {
+    const hq = this.hq!;
+    const p = this.raidPoint();
+    return Math.hypot(p.x - hq.x, p.y - hq.y) / RAID.speed;
+  }
+
+  /** The raiding riders now (empty when there is no raid): where they are and which way they ride. */
+  raiders(): Array<{ x: number; y: number; heading: number }> {
+    const t = this.raidTime;
+    const hq = this.hq;
+    if (t === null || !hq) return [];
+    const p = this.raidPoint();
+    const out = this.raidOut();
+    const out2: Array<{ x: number; y: number; heading: number }> = [];
+    for (let i = 0; i < RAID.riders; i++) {
+      // Each rider a little behind the one before, spread across the way.
+      const ti = t - i * 0.25;
+      if (ti <= 0 || ti >= 2 * out) continue;
+      const back = ti > out;
+      const k = back ? 2 - ti / out : ti / out;
+      const side = (i - (RAID.riders - 1) / 2) * 0.6;
+      const dx = p.x - hq.x;
+      const dy = p.y - hq.y;
+      const len = Math.hypot(dx, dy) || 1;
+      out2.push({ x: hq.x + dx * k - (dy / len) * side, y: hq.y + dy * k + (dx / len) * side, heading: Math.atan2(back ? -dy : dy, back ? -dx : dx) });
+    }
+    return out2;
   }
 
   // ---- simulation ----------------------------------------------------------
@@ -881,6 +1082,12 @@ export class Game {
     if (this.phase === 'won' || this.phase === 'lost') return;
     this.time += dt;
     if (this.base) this.settleJobs();
+    if (this.raidTime !== null) {
+      this.raidTime += dt;
+      const out = this.raidOut();
+      if (this.wave === 0 && this.raidTime >= out) this.startWave();
+      if (this.raidTime >= 2 * out + 0.5) this.raidTime = null;
+    }
     for (const e of this.enemies) {
       e.px = e.x;
       e.py = e.y;
@@ -892,7 +1099,8 @@ export class Game {
     }
     this.spawn(dt);
     this.moveEnemies(dt);
-    if (this.mode === 'siege') this.assault(dt);
+    if (this.base) this.assaultInBase(dt);
+    else if (this.mode === 'siege') this.assault(dt);
     this.fireTowers(dt);
     this.moveProjectiles(dt);
     this.enemies = this.enemies.filter((e) => e.alive);
@@ -926,12 +1134,28 @@ export class Game {
    * cost, so with no gap near it heads into the wall and breaks it.
    */
   private field(detour: number): FlowField {
-    let f = this.fields.get(detour);
+    let f = this.fields.get(`${detour}`);
     if (!f) {
       const { grid } = this.map;
       const wall = (x: number, y: number) => this.occupied[grid.index(x, y)] !== 0 || this.fenceGrid[grid.index(x, y)] !== 0;
       f = new FlowField(grid, this.map.goals, (x, y) => grid.get(x, y) !== 'blocked', (x, y) => (wall(x, y) ? 1 + detour : 1));
-      this.fields.set(detour, f);
+      this.fields.set(`${detour}`, f);
+    }
+    return f;
+  }
+
+  /** Base mode: the way to one building, gun or fence for a unit with this detour (see `field`). */
+  private fieldTo(s: Structure, detour: number): FlowField {
+    const key = `${s.id}:${detour}`;
+    let f = this.fields.get(key);
+    if (!f) {
+      const { grid } = this.map;
+      const size = isFence(s) ? 1 : s.size;
+      const goals: Cell[] = [];
+      for (let y = s.cy; y < s.cy + size; y++) for (let x = s.cx; x < s.cx + size; x++) goals.push({ x, y });
+      const wall = (x: number, y: number) => this.occupied[grid.index(x, y)] !== 0 || this.fenceGrid[grid.index(x, y)] !== 0;
+      f = new FlowField(grid, goals, (x, y) => grid.get(x, y) !== 'blocked', (x, y) => (wall(x, y) ? 1 + detour : 1));
+      this.fields.set(key, f);
     }
     return f;
   }
@@ -952,8 +1176,7 @@ export class Game {
   /** Siege mode: the gun or fence on a cell, by index. */
   private structureAt(i: number): Structure | undefined {
     const tid = this.occupied[i];
-    if (tid && this.lab?.id === tid) return this.lab;
-    if (tid) return this.towerById(tid);
+    if (tid) return this.structs.get(tid);
     const fid = this.fenceGrid[i];
     return fid ? this.fenceById(fid) : undefined;
   }
@@ -1017,6 +1240,21 @@ export class Game {
   }
 
   private spawn(dt: number): void {
+    if (this.retake && this.phase === 'wave' && this.army.length) {
+      // The occupiers come out of the headquarters one after another.
+      this.armyTimer -= dt;
+      const hq = this.hq!;
+      while (this.army.length && this.armyTimer <= 0) {
+        const o = this.army.shift()!;
+        const n = this.spawned++;
+        const cx = hq.cx + (n % 2);
+        const cy = hq.cy + (Math.floor(n / 2) % 2);
+        const e = this.makeEnemy(o.def, o.maxHp, o.reward, cx + 0.5, cy + 0.5, { x: cx, y: cy });
+        e.hp = Math.min(o.hp, o.maxHp);
+        this.enemies.push(e);
+        this.armyTimer += ARMY_INTERVAL;
+      }
+    }
     const w = this.currentWave;
     if (!w) return;
     w.groups.forEach((g, i) => {
@@ -1084,18 +1322,30 @@ export class Game {
     return e;
   }
 
-  /**
-   * Speed right now. Swerving units jerk between bursts and brakes: every
-   * SWERVE_SECONDS each picks a new speed between (1 − swerve) and (1 + swerve)
-   * times its nominal speed. It averages out, so they arrive on time, but a gun
-   * that leads its target lands its round where the rider would have been.
-   */
+  /** Speed right now: weaving riders ease off a little in bends. */
   speedOf(e: Enemy): number {
+    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0));
+  }
+
+  /** Walk a ground unit along a field; a weaving rider swings across its way as it goes. */
+  private stepWalker(e: Enemy, dt: number, field: FlowField): boolean {
     const d = ENEMIES[e.def];
-    const swerve = 'swerve' in d ? d.swerve : 0;
-    if (!swerve) return d.speed;
-    const seg = Math.floor((this.time + e.phase) / SWERVE_SECONDS);
-    return d.speed * (1 + swerve * (2 * hash01(e.id * 7919 + seg * 104729) - 1));
+    const weave = 'weave' in d ? d.weave : 0;
+    if (!weave) return this.walk(e, this.speedOf(e) * dt, field);
+    e.x -= e.wx ?? 0;
+    e.y -= e.wy ?? 0;
+    const ok = this.walk(e, this.speedOf(e) * dt, field);
+    const from = e.dir ?? e.heading;
+    const dir = from + angleDelta(from, e.heading) * Math.min(1, dt / WEAVE_SMOOTH);
+    const rate = dt > 0 ? Math.abs(angleDelta(from, dir)) / dt : 0;
+    e.corner = Math.max(Math.min(1, Math.max(0, rate - CORNER_RATE) / CORNER_RATE), (e.corner ?? 0) - dt * 2);
+    e.dir = dir;
+    const swing = weave * Math.sin(this.time * WEAVE_RATE + e.phase);
+    e.wx = -Math.sin(dir) * swing;
+    e.wy = Math.cos(dir) * swing;
+    e.x += e.wx;
+    e.y += e.wy;
+    return ok;
   }
 
   /** Move a flyer straight towards its goal; false once it arrives. */
@@ -1146,17 +1396,93 @@ export class Game {
   private moveEnemies(dt: number): void {
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      if (this.base) {
+        this.moveInBase(e, dt);
+        continue;
+      }
       if (e.air) {
         if (!this.fly(e, this.speedOf(e) * dt)) this.leak(e);
         continue;
       }
-      if (!this.walk(e, this.speedOf(e) * dt, this.fieldOf(e.def))) {
+      if (!this.stepWalker(e, dt, this.fieldOf(e.def))) {
         this.leak(e);
         continue;
       }
       const tdist = Math.hypot(e.target.x + 0.5 - e.x, e.target.y + 0.5 - e.y);
       e.remaining = (this.ground ?? this.flow).distanceAt(e.target.x, e.target.y) + tdist;
     }
+  }
+
+  /** Base mode: the building, gun or fence a unit is going for, picked again once it is gone. */
+  private goalOf(e: Enemy): Structure | undefined {
+    let s = e.goal ? this.structs.get(e.goal) : undefined;
+    if (!s || s.hp <= 0) {
+      s = this.pickGoal(e);
+      e.goal = s?.id ?? 0;
+    }
+    return s;
+  }
+
+  /** Base mode: what a unit goes for (see BASE_ROLES): the nearest of its kind, else the nearest building or gun. */
+  private pickGoal(e: Enemy): Structure | undefined {
+    const standingTowers = this.towers.filter((t) => !isWreck(t));
+    const standingBuildings = this.buildings.filter((b) => b.hp > 0);
+    let pool: Structure[];
+    switch (BASE_ROLES[e.def].goal) {
+      case 'nearest':
+        pool = [...standingBuildings, ...standingTowers, ...this.fences];
+        break;
+      case 'treasury':
+      case 'hq':
+        pool = standingBuildings.filter((b) => b.kind === BASE_ROLES[e.def].goal);
+        break;
+      case 'gun':
+        pool = standingTowers;
+        break;
+      case 'fence':
+        pool = this.fences;
+        break;
+    }
+    if (!pool.length) pool = [...standingBuildings, ...standingTowers];
+    let best: Structure | undefined;
+    let bestD = Infinity;
+    for (const s of pool) {
+      const d = Math.hypot(s.x - e.x, s.y - e.y);
+      if (d < bestD) {
+        bestD = d;
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  /** Base mode: walk (or fly) towards the goal; ground units stop at the first wall in the way. */
+  private moveInBase(e: Enemy, dt: number): void {
+    const goal = this.goalOf(e);
+    const role = BASE_ROLES[e.def];
+    const hq = this.hq!;
+    if (e.air) {
+      if (!goal) return;
+      // Hover over the goal, close enough to bomb it.
+      const stop = Math.max(0, role.assault.range * 0.6);
+      const dx = goal.x - e.x;
+      const dy = goal.y - e.y;
+      const d = Math.hypot(dx, dy);
+      e.target = { x: Math.floor(goal.x), y: Math.floor(goal.y) };
+      if (d > stop) {
+        const m = Math.min(d - stop, this.speedOf(e) * dt);
+        e.x += (dx / d) * m;
+        e.y += (dy / d) * m;
+        e.heading = Math.atan2(dy, dx);
+      }
+      e.remaining = Math.hypot(hq.x - e.x, hq.y - e.y);
+      return;
+    }
+    const field = goal ? this.fieldTo(goal, role.detour) : this.field(role.detour);
+    // At the goal (or with nothing left to go for) it holds where it is.
+    this.stepWalker(e, dt, field);
+    const tdist = Math.hypot(e.target.x + 0.5 - e.x, e.target.y + 0.5 - e.y);
+    e.remaining = Math.max(0, (this.ground ?? this.flow).distanceAt(e.target.x, e.target.y)) + tdist;
   }
 
   /**
@@ -1215,29 +1541,82 @@ export class Game {
     }
   }
 
-  /** What attackers may shoot at when nearby: guns, and in the base its buildings. */
-  private targetsInBase(): Array<Tower | Building> {
-    if (!this.hq) return this.towers;
-    const out: Array<Tower | Building> = [...this.towers, this.hq];
-    if (this.lab) out.push(this.lab);
-    return out;
+  /** What attackers may shoot at when nearby (the one-off siege levels): the guns. */
+  private targetsInBase(): Tower[] {
+    return this.towers;
+  }
+
+  /** Tiles from a point to the nearest edge of a part. */
+  private edgeDistance(s: Structure, x: number, y: number): number {
+    const size = isFence(s) ? 1 : s.size;
+    return Math.hypot(Math.max(s.cx - x, 0, x - s.cx - size), Math.max(s.cy - y, 0, y - s.cy - size));
+  }
+
+  /**
+   * Base mode: every unit strikes the wall it is stuck at, else its goal once
+   * in reach; riflemen and guns also fire at any building or gun they pass.
+   * Airships bomb what they hover over; sappers blow their charge (and
+   * themselves) at the first fence or their goal.
+   */
+  private assaultInBase(dt: number): void {
+    for (const e of this.enemies) {
+      if (!e.alive) continue;
+      const d = ENEMIES[e.def];
+      const role = BASE_ROLES[e.def];
+      const a = role.assault;
+      e.attackCooldown = Math.max(0, e.attackCooldown - dt);
+      if (e.attackCooldown > 0) continue;
+      const power = Math.sqrt(e.maxHp / d.baseHp);
+      const goal = e.goal ? this.structs.get(e.goal) : undefined;
+      const wall = !e.air && e.wall >= 0 ? this.structureAt(e.wall) : undefined;
+      const reach = a.kind === 'ram' ? a.range + d.radius : a.kind === 'bomb' ? a.range + 0.5 : a.range;
+      const inReach = (s: Structure | undefined) => !!s && s.hp > 0 && this.edgeDistance(s, e.x, e.y) <= reach;
+      let target: Structure | undefined = wall ?? (inReach(goal) ? goal : undefined);
+      if (!target && a.kind === 'shoot') {
+        let best = Infinity;
+        for (const s of [...this.buildings, ...this.towers]) {
+          if (s.hp <= 0) continue;
+          const dist = this.edgeDistance(s, e.x, e.y);
+          if (dist <= reach && dist < best) {
+            best = dist;
+            target = s;
+          }
+        }
+      }
+      if (!target) continue;
+      if (a.kind === 'blast') {
+        this.blast(e, a.damage * power, role.splash ?? 1);
+        continue;
+      }
+      e.attackCooldown = a.interval;
+      this.events.push({ type: 'strike', kind: a.kind, enemyId: e.id, x1: e.x, y1: e.y, x2: target.x, y2: target.y });
+      this.hitStructure(target, a.damage * power);
+    }
+  }
+
+  /** Base mode: sappers blow up their charge: everything within `radius` is hit, and the truck is gone. */
+  private blast(e: Enemy, damage: number, radius: number): void {
+    e.alive = false;
+    this.events.push({ type: 'blast', x: e.x, y: e.y, radius });
+    const hit = this.parts().filter((s) => s.hp > 0 && this.edgeDistance(s, e.x, e.y) <= radius);
+    for (const s of hit) this.hitStructure(s, damage);
   }
 
   private hitStructure(s: Structure, damage: number): void {
-    if (this.phase === 'lost') return;
+    if (this.phase === 'lost' || this.phase === 'won' || s.hp <= 0) return;
     s.hp -= damage;
     if (s.hp > 0) return;
     if (isBuilding(s)) {
+      // The building lies in ruins until it is rebuilt; walkers cross the rubble.
+      s.hp = 0;
+      this.markCells(s.cx, s.cy, s.size, this.occupied, 0);
+      this.markCells(s.cx, s.cy, s.size, this.rubble, s.id);
+      this.ruined.add(s.kind);
+      this.lostValue += this.worth(s);
       this.events.push({ type: 'wrecked', fence: false, building: s.kind, x: s.x, y: s.y, size: s.size });
-      if (s.kind === 'hq') {
-        s.hp = 0;
-        this.phase = 'lost';
-        this.events.push({ type: 'lost' });
-        return;
-      }
-      for (let y = s.cy; y < s.cy + s.size; y++) for (let x = s.cx; x < s.cx + s.size; x++) this.occupied[this.map.grid.index(x, y)] = 0;
-      this.lab = null;
       this.rebuildFlow();
+      if (s.kind === 'hq') this.hqFell = true;
+      this.checkLoss();
       return;
     }
     if (isFence(s)) {
@@ -1247,26 +1626,49 @@ export class Game {
     }
     if (!this.towerById(s.id)) return;
     this.markFootprint(s, 0);
-    this.towers = this.towers.filter((o) => o !== s);
     this.events.push({ type: 'wrecked', fence: false, x: s.x, y: s.y, size: s.size });
+    if (this.base) {
+      // In the base the wreck stays, to be rebuilt.
+      s.hp = 0;
+      delete s.job;
+      s.targetId = 0;
+      s.firing = false;
+      this.markCells(s.cx, s.cy, s.size, this.rubble, s.id);
+      this.lostValue += this.worth(s);
+      this.rebuildFlow();
+      this.checkLoss();
+      return;
+    }
+    this.towers = this.towers.filter((o) => o !== s);
+    this.structs.delete(s.id);
     this.rebuildFlow();
+  }
+
+  /**
+   * Base mode: the battle is lost when the headquarters falls or half the
+   * base's value lies destroyed; retaking the headquarters, also once no gun
+   * stands.
+   */
+  private checkLoss(): void {
+    if (this.phase === 'lost' || this.phase === 'won') return;
+    const noGuns = this.retake && !this.towers.some((t) => !isWreck(t));
+    if (this.hqFell || noGuns || this.lostShare() >= BASE_RULES.lossShare) {
+      this.phase = 'lost';
+      this.raidTime = null;
+      this.events.push({ type: 'lost' });
+    }
   }
 
   private removeFence(f: Fence): void {
     if (!this.fenceById(f.id)) return;
     this.fenceGrid[this.map.grid.index(f.cx, f.cy)] = 0;
     this.fences = this.fences.filter((o) => o !== f);
+    this.structs.delete(f.id);
     this.rebuildFlow();
   }
 
   private leak(e: Enemy): void {
     e.alive = false;
-    if (this.hq) {
-      // In the base whatever gets through strikes the headquarters.
-      this.events.push({ type: 'leak', enemyId: e.id, def: e.def });
-      this.hitStructure(this.hq, ENEMIES[e.def].leakDamage * BASE_RULES.leakHp);
-      return;
-    }
     this.lives = Math.max(0, this.lives - ENEMIES[e.def].leakDamage);
     this.events.push({ type: 'leak', enemyId: e.id, def: e.def });
     if (this.lives <= 0) {
@@ -1279,8 +1681,8 @@ export class Game {
     for (const t of this.towers) {
       t.cooldown = Math.max(0, t.cooldown - dt);
       t.firing = false;
-      // A gun still being built does not fire.
-      if (t.job?.kind === 'build') continue;
+      // A gun still being built (or rebuilt from a wreck) does not fire.
+      if (t.job?.kind === 'build' || isWreck(t)) continue;
       const def: TowerDef = this.defOf(t.def);
       const lvl = this.levelOf(t);
       const target = this.pickTarget(t);
@@ -1559,7 +1961,7 @@ export class Game {
   }
 
   private checkWaveEnd(): void {
-    if (this.phase !== 'wave' || this.spawnLeft > 0) return;
+    if (this.phase !== 'wave' || this.spawnLeft > 0 || this.army.length) return;
     if (this.enemies.length > 0 || this.projectiles.length > 0) return;
     const bonus = this.currentWave?.clearBonus ?? 0;
     this.money += bonus;

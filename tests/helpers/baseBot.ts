@@ -1,5 +1,5 @@
 import { TICK } from '../../src/sim/content';
-import { BASE_MAP, HQ_LEVELS, jobPrice, LAB_LEVELS, newBase, type BaseState } from '../../src/sim/base';
+import { BASE_MAP, jobPrice, liberate, newBase, occupy, settleJobs, startJob, type BaseState } from '../../src/sim/base';
 import { Game, type Wallet } from '../../src/sim/game';
 import { buildArcMap } from '../../src/sim/maps';
 import type { Upgrades } from '../../src/sim/research';
@@ -51,6 +51,20 @@ export class Campaign {
     this.base = { ...this.base, ...this.game.snapshot() };
   }
 
+  /** Ruins are rebuilt between attacks (hours pass); returns whether any was. */
+  private rebuildRuins(): boolean {
+    let any = false;
+    for (const k of ['muster', 'arsenal', 'lab', 'treasury'] as const) {
+      if (this.base.buildings[k].hp > 0) continue;
+      const price = jobPrice(this.base, k);
+      if (!price || price.cost > this.wallet.gold) continue;
+      this.wallet.gold -= price.cost;
+      this.base = settleJobs(startJob(this.base, k, 0), Infinity);
+      any = true;
+    }
+    return any;
+  }
+
   /** Between attacks: skip the clock ahead to when the next gun job is done. */
   private waitForBuilders(): void {
     const g = this.game;
@@ -76,21 +90,26 @@ export class Campaign {
    */
   prepare(): void {
     this.save();
-    let raised = false;
+    let raised = this.rebuildRuins();
     for (const [what, share] of [['hq', 0.5], ['lab', 0.25]] as const) {
+      if (this.base.occupied) break;
       const price = jobPrice(this.base, what);
-      if (!price || price.cost > this.wallet.gold * share) continue;
-      if (what === 'lab' && this.base.lab && this.base.lab.level >= this.base.hq.level) continue;
+      if (!price || price.kind !== 'upgrade' || price.cost > this.wallet.gold * share) continue;
+      if (what === 'lab' && this.base.buildings.lab.level >= this.base.buildings.hq.level) continue;
       // A stronger headquarters draws stronger attacks: only once the guns match what it would draw.
-      if (what === 'hq' && defenceStrength(this.game) < HQ_MARGIN * attackStrength(this.base.attack, undefined, undefined, this.base.hq.level + 1)) continue;
+      if (what === 'hq' && defenceStrength(this.game) < HQ_MARGIN * attackStrength(this.base.attack, undefined, undefined, this.base.buildings.hq.level + 1)) continue;
       this.wallet.gold -= price.cost;
-      if (what === 'hq') this.base = { ...this.base, hq: { level: this.base.hq.level + 1, hp: HQ_LEVELS[this.base.hq.level + 1]!.hp } };
-      else if (this.base.lab) this.base = { ...this.base, lab: { level: this.base.lab.level + 1, hp: LAB_LEVELS[this.base.lab.level + 1]!.hp } };
+      this.base = settleJobs(startJob(this.base, what, 0), Infinity);
       raised = true;
     }
     if (raised) this.open();
     const g = this.game;
     g.repairAll();
+    // Wrecks are rebuilt too, cheapest first, while builders and gold last.
+    for (const t of [...g.towers].filter((x) => x.hp <= 0).sort((a, b) => g.rebuildCost(a) - g.rebuildCost(b))) {
+      if (!g.rebuildGun(t.id).ok) break;
+      this.waitForBuilders();
+    }
     for (let guard = 0; guard < 400; guard++) {
       const before = g.money;
       spend(g);
@@ -100,19 +119,28 @@ export class Campaign {
     }
   }
 
-  /** Fight the next attack; returns whether the base held. */
+  /**
+   * Fight the next attack (or, while the enemy holds the headquarters, the
+   * battle to win it back); returns whether the player won it. Nothing is
+   * wiped: what was destroyed stays so until it is rebuilt.
+   */
   fight(): boolean {
     const g = this.game;
+    const retake = g.retake;
     while (g.phase === 'build') {
-      if (g.wave > 0) spend(g);
-      g.startWave();
+      if (g.wave > 0) {
+        // Between waves: mend what was hit, then spend the rest.
+        g.repairAll();
+        spend(g);
+      }
+      if (!g.startWave().ok) break;
       for (let i = 0; i < 20000 && g.phase === 'wave'; i++) g.step(TICK);
     }
     const won = g.phase === 'won';
-    if (won) {
-      this.save();
-      this.base = { ...this.base, attack: this.base.attack + 1 };
-    } else this.base = newBase();
+    this.save();
+    if (retake) this.base = won ? liberate(this.base) : { ...this.base, occupied: g.survivors() };
+    else if (won) this.base = { ...this.base, attack: this.base.attack + 1 };
+    else if (g.hqFell) this.base = occupy(this.base, g.survivors());
     this.open();
     return won;
   }

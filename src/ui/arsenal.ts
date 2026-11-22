@@ -17,8 +17,8 @@ export interface ArsenalCallbacks {
   onArt(fn: () => void): () => void;
   /** Aim frames per gun (32). */
   directions: number;
-  /** Player closed the screen with this gun selected. */
-  close(def: TowerId): void;
+  /** Player closed the screen with this gun selected; null when shut without picking. */
+  close(def: TowerId | null): void;
   /** False for guns the current map level has not unlocked yet; all unlocked when absent. */
   isUnlocked?(def: TowerId): boolean;
 }
@@ -117,7 +117,8 @@ export class Arsenal {
     this.raf = requestAnimationFrame((now) => this.tick(now));
   }
 
-  close(): void {
+  /** Shut the screen; with `pick`, the gun on screen (or the first unlocked) is armed. */
+  close(pick = true): void {
     if (!this.isOpen) return;
     cancelAnimationFrame(this.raf);
     this.offArt?.();
@@ -130,6 +131,10 @@ export class Arsenal {
     };
     if (this.reduceMotion) done();
     else window.setTimeout(done, 320);
+    if (!pick) {
+      this.cb.close(null);
+      return;
+    }
     // Arm the gun on screen only if it can be built on this map.
     const shown = TOWER_IDS[this.index]!;
     const unlocked = TOWER_IDS.filter((id) => this.cb.isUnlocked?.(id) ?? true);
@@ -151,9 +156,10 @@ export class Arsenal {
       <div class="ars-bg" aria-hidden="true"></div>
       <header class="ars-head">
         <div>
-          <p class="ars-kicker">${t('arsenal.kicker')}</p>
+          <p class="ars-kicker"><span class="not-base">${t('arsenal.kicker')}</span><span class="base-only">${t('arsenal.kickerBase')}</span></p>
           <h1 class="ars-title">${t('arsenal.title')}</h1>
         </div>
+        <button class="win-x" data-ars="dismiss" aria-label="${t('action.close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         <p class="ars-count" aria-live="polite"><b class="ars-count-now">01</b><span>/ ${pad2(TOWER_IDS.length)}</span></p>
       </header>
       <div class="ars-viewport">
@@ -165,7 +171,7 @@ export class Arsenal {
       <footer class="ars-foot">
         ${many ? `<div class="ars-dots" role="tablist">${TOWER_IDS.map((id, i) => `<button class="ars-dot" role="tab" data-ars="goto" data-i="${i}" aria-label="${t(`tower.${id}`)}"></button>`).join('')}</div>
         <p class="ars-hint">${t('arsenal.swipe')}</p>` : ''}
-        <button class="btn go ars-start" data-ars="start">${t('arsenal.start')}<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
+        <button class="btn go ars-start" data-ars="start"><span class="not-base">${t('arsenal.start')}</span><span class="base-only">${t('arsenal.pick')}</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg></button>
       </footer>`;
   }
 
@@ -383,6 +389,7 @@ export class Arsenal {
         case 'next': this.go(this.index + 1); break;
         case 'goto': this.go(Number(btn.dataset.i)); break;
         case 'start': this.close(); break;
+        case 'dismiss': this.close(false); break;
         case 'level': {
           const id = btn.dataset.def as TowerId;
           this.levels.set(id, Number(btn.dataset.lv));
