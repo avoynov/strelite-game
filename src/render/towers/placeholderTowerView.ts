@@ -14,6 +14,14 @@ const KIT: Record<string, { body: number; dark: number }> = {
   greekfire: { body: 0xb07a3a, dark: 0x6b4a22 },
   trebuchet: { body: 0x7d5f38, dark: 0x4e3a22 },
   railgun: { body: 0x6a7c8e, dark: 0x2e3a46 },
+  zadnoper: { body: 0x7a5a34, dark: 0x3e2c18 },
+  flasher: { body: 0xc9b26a, dark: 0x6e5e2c },
+  rockets: { body: 0x8e3b2e, dark: 0x4e1e16 },
+  tarkan: { body: 0x4a4f55, dark: 0x24272b },
+  ricochet: { body: 0x7e8a6a, dark: 0x3c4430 },
+  glass: { body: 0xa8c4d6, dark: 0x4a6478 },
+  harpoon: { body: 0xb9b9ae, dark: 0x5c5c54 },
+  bees: { body: 0xc8a032, dark: 0x5a4612 },
 };
 
 /**

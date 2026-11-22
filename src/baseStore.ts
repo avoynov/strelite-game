@@ -49,10 +49,14 @@ export class BaseStore {
     return null;
   }
 
-  /** Testing: every building job ends now. */
+  /** Testing: every building and gun job ends now. */
   finishNow(now = Date.now()): void {
-    if (!this.s.jobs.some((j) => j.endsAt > now)) return;
-    this.set({ ...this.s, jobs: this.s.jobs.map((j) => ({ ...j, endsAt: Math.min(j.endsAt, now) })) });
+    if (!this.s.jobs.some((j) => j.endsAt > now) && !this.s.guns.some((g) => g.job && g.job.endsAt > now)) return;
+    this.set({
+      ...this.s,
+      jobs: this.s.jobs.map((j) => ({ ...j, endsAt: Math.min(j.endsAt, now) })),
+      guns: this.s.guns.map((g) => (g.job ? { ...g, job: { ...g.job, endsAt: Math.min(g.job.endsAt, now) } } : g)),
+    });
   }
 
   /** Start over (testing builds). */

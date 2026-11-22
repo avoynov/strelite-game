@@ -95,12 +95,17 @@ describe('research', () => {
     expect(s.active).toHaveLength(2);
     expect(startError(s, 'lvl4.crossbow', lab4)).toBe('busy');
     // The headquarters decides how far the tree reaches.
-    const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.trebuchet', 'gun.greekfire'] };
+    const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.zadnoper', 'gun.trebuchet', 'gun.flasher', 'gun.rockets', 'gun.tarkan', 'gun.greekfire', 'gun.ricochet'] };
     expect(startError(railReady, 'gun.railgun')).toBe('hqLevel');
-    expect(startError(railReady, 'gun.railgun', { level: 4, standing: true, hq: 2 })).toBe('hqLevel');
-    // In the tree, it also needs a laboratory raised as far.
-    expect(startError(railReady, 'gun.railgun', { level: 0, standing: true, hq: 3 })).toBe('labLevel');
-    expect(startError(railReady, 'gun.railgun', { level: 3, standing: true, hq: 3 })).toBeNull();
+    expect(startError(railReady, 'gun.railgun', { level: 8, standing: true, hq: 5 })).toBe('hqLevel');
+    // In the tree (act VII), it also needs a laboratory raised as far.
+    expect(startError(railReady, 'gun.railgun', { level: 0, standing: true, hq: 6 })).toBe('labLevel');
+    expect(startError(railReady, 'gun.railgun', { level: 6, standing: true, hq: 6 })).toBeNull();
+    // A gun's level IV needs laboratory III, its level V laboratory VI.
+    expect(startError(rich, 'lvl4.crossbow', { level: 1, standing: true, hq: 8 })).toBe('labLevel');
+    expect(startError(rich, 'lvl4.crossbow', { level: 2, standing: true, hq: 8 })).toBeNull();
+    expect(startError({ ...rich, done: ['lvl4.crossbow'] }, 'lvl5.crossbow', { level: 4, standing: true, hq: 8 })).toBe('labLevel');
+    expect(startError({ ...rich, done: ['lvl4.crossbow'] }, 'lvl5.crossbow', { level: 5, standing: true, hq: 8 })).toBeNull();
     // The deeper (dearer) the item, the higher the headquarters that brings it into the tree.
     for (const r of RESEARCH) for (const req of r.requires) expect(r.hq ?? 1, r.id).toBeGreaterThanOrEqual(RESEARCH.find((x) => x.id === req)!.hq ?? 1);
     expect(RESEARCH.filter((r) => (r.hq ?? 1) === 5).length).toBeGreaterThan(0);

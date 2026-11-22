@@ -26,6 +26,14 @@ const KIT = {
   apc: { body: 0x5a6346, dark: 0x30372a },
   tank: { body: 0x55603d, dark: 0x2e3523 },
   fortress: { body: 0x4a4f3c, dark: 0x262a1f },
+  wagon: { body: 0x7a6244, dark: 0x463624 },
+  rider: { body: 0x6e5a3e, dark: 0x3a2e1e },
+  glider: { body: 0xb8ad8e, dark: 0x6a6250 },
+  armorcar: { body: 0x56603e, dark: 0x2e3422 },
+  sapper: { body: 0x5e5a40, dark: 0x34321f },
+  shield: { body: 0x6a6e70, dark: 0x34383a },
+  boat: { body: 0x7a8088, dark: 0x3c4046 },
+  dreadnought: { body: 0x3e4236, dark: 0x1e2019 },
 } as const;
 /** Height a flyer is drawn above its ground point, in tiles (stand-in; the airship art says its own). */
 export const FLY_HEIGHT = 1.2;
@@ -70,7 +78,8 @@ export class PlaceholderEnemyView implements EnemyView {
     if (Math.abs(f - this.health) < 0.01) return;
     this.health = f;
     const w = Math.max(20, isoX(this.radius * 0.8, -this.radius * 0.8));
-    const y = -RISE * (this.kind === 'infantry' || this.kind === 'moto' ? 0.55 : this.kind === 'drone' ? FLY_HEIGHT + 0.4 : this.kind === 'fortress' ? 1 : 0.75) - 6;
+    const k = this.kind;
+    const y = -RISE * (k === 'infantry' || k === 'moto' || k === 'rider' || k === 'sapper' ? 0.55 : k === 'drone' || k === 'glider' || k === 'boat' ? FLY_HEIGHT + 0.4 : k === 'fortress' || k === 'dreadnought' ? 1 : 0.75) - 6;
     this.bar.clear();
     this.bar.visible = f < 1;
     this.bar.rect(-w / 2 - 1, y - 1, w + 2, 6).fill({ color: 0x000000, alpha: 0.6 });
@@ -92,7 +101,7 @@ export class PlaceholderEnemyView implements EnemyView {
     const kit = KIT[this.kind as keyof typeof KIT] ?? KIT.infantry;
 
     g.clear();
-    if (this.kind === 'infantry') {
+    if (this.kind === 'infantry' || this.kind === 'sapper') {
       // A small squad: five soldiers in a loose wedge.
       for (const [f, side] of [[0.9, 0], [0.1, -0.7], [0.1, 0.7], [-0.8, -0.35], [-0.8, 0.35]] as const) {
         const [x, y] = pt(f * r, side * r);
@@ -102,7 +111,7 @@ export class PlaceholderEnemyView implements EnemyView {
       }
       return;
     }
-    if (this.kind === 'moto') {
+    if (this.kind === 'moto' || this.kind === 'rider') {
       // Three riders in a staggered line.
       for (const [f, side] of [[0.8, -0.4], [0, 0.45], [-0.8, -0.2]] as const) {
         const [x0, y0] = pt(f * r - 0.12, side * r);
@@ -114,7 +123,7 @@ export class PlaceholderEnemyView implements EnemyView {
       }
       return;
     }
-    if (this.kind === 'drone') {
+    if (this.kind === 'drone' || this.kind === 'glider' || this.kind === 'boat') {
       // Shadow on the ground, the craft high above it: four rotors on a cross.
       g.ellipse(4, -1, 9, 4).fill({ color: 0x000000, alpha: 0.22 });
       const h = FLY_HEIGHT;

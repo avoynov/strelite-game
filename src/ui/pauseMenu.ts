@@ -11,12 +11,12 @@ export interface PauseCallbacks {
   setQuality(q: QualityChoice): void;
   installWay(): InstallWay;
   install(): void;
-  /** Testing switches (temporary). */
-  cheats(): Cheats;
-  setCheats(c: Partial<Cheats>): void;
   /** In the base the menu is the settings; in a mission it also leads back to the base. */
   inBase(): boolean;
   toBase(): void;
+  /** Testing switches (temporary). */
+  cheats(): Cheats;
+  setCheats(c: Partial<Cheats>): void;
   /** The menu closed: play on. */
   resume(): void;
 }

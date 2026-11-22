@@ -1,6 +1,7 @@
 import { ENEMY_IDS, FENCE_LEVELS, gunHp, TOWER_IDS, TOWERS, type EnemyId, type TowerId } from './content';
 import { levelArcMap } from './levels';
 import type { ArcMapSpec } from './maps';
+import { isTrapId, type TrapId } from './traps';
 
 /**
  * The player's base: one fixed field the player builds on, kept between
@@ -46,17 +47,23 @@ export interface HqLevel {
   radius: number;
   /** Highest gun level (1-based) the base allows, on top of what research allows. */
   maxGun: number;
+  /** Traps the player may lay on one field. */
+  traps: number;
   /** Gold and real seconds to raise it to this level (level 1 stands from the start). */
   cost: number;
   seconds: number;
 }
 
 export const HQ_LEVELS: readonly HqLevel[] = [
-  { hp: 1200, radius: 7, maxGun: 3, cost: 0, seconds: 0 },
-  { hp: 1800, radius: 9, maxGun: 3, cost: 600, seconds: 15 * MIN },
-  { hp: 2600, radius: 11, maxGun: 4, cost: 1500, seconds: 2 * HOUR },
-  { hp: 3600, radius: 13, maxGun: 4, cost: 3500, seconds: 8 * HOUR },
-  { hp: 5000, radius: 16, maxGun: 5, cost: 7000, seconds: DAY },
+  { hp: 1200, radius: 7, maxGun: 3, traps: 0, cost: 0, seconds: 0 },
+  { hp: 1800, radius: 9, maxGun: 3, traps: 1, cost: 600, seconds: 25 * MIN },
+  { hp: 2500, radius: 10, maxGun: 4, traps: 1, cost: 1500, seconds: 3 * HOUR },
+  { hp: 3200, radius: 11, maxGun: 4, traps: 2, cost: 2400, seconds: 6 * HOUR },
+  { hp: 3900, radius: 12, maxGun: 4, traps: 2, cost: 3500, seconds: 16 * HOUR },
+  { hp: 4600, radius: 13, maxGun: 5, traps: 3, cost: 4800, seconds: DAY },
+  { hp: 5300, radius: 14, maxGun: 5, traps: 3, cost: 6400, seconds: DAY + 8 * HOUR },
+  { hp: 5900, radius: 15, maxGun: 5, traps: 4, cost: 8200, seconds: 2 * DAY },
+  { hp: 6400, radius: 16, maxGun: 5, traps: 5, cost: 10500, seconds: 2 * DAY + 12 * HOUR },
 ];
 
 export interface LabLevel {
@@ -72,10 +79,14 @@ export interface LabLevel {
 /** The laboratory is raised very slowly: the higher levels take days. */
 export const LAB_LEVELS: readonly LabLevel[] = [
   { hp: 600, slots: 1, builders: 1, cost: 0, seconds: 0 },
-  { hp: 900, slots: 1, builders: 1, cost: 600, seconds: 8 * HOUR },
-  { hp: 1300, slots: 1, builders: 2, cost: 1600, seconds: DAY },
-  { hp: 1800, slots: 2, builders: 2, cost: 3500, seconds: 3 * DAY },
-  { hp: 2500, slots: 2, builders: 3, cost: 7000, seconds: 6 * DAY },
+  { hp: 850, slots: 1, builders: 1, cost: 600, seconds: 4 * HOUR },
+  { hp: 1100, slots: 1, builders: 2, cost: 1200, seconds: 12 * HOUR },
+  { hp: 1400, slots: 2, builders: 2, cost: 2000, seconds: DAY },
+  { hp: 1750, slots: 2, builders: 2, cost: 3000, seconds: 1.5 * DAY },
+  { hp: 2100, slots: 2, builders: 2, cost: 4200, seconds: 2 * DAY },
+  { hp: 2500, slots: 2, builders: 3, cost: 5600, seconds: 3 * DAY },
+  { hp: 2900, slots: 2, builders: 3, cost: 7200, seconds: 4 * DAY },
+  { hp: 3400, slots: 2, builders: 3, cost: 9000, seconds: 5 * DAY },
 ];
 
 export interface TreasuryLevel {
@@ -95,17 +106,22 @@ export const TREASURY_LEVELS: readonly TreasuryLevel[] = [
 ];
 
 /** The muster and the arsenal grow with the headquarters: their level is its level. Their health per level. */
-export const MUSTER_HP = [700, 1000, 1400, 1900, 2600] as const;
-export const ARSENAL_HP = [800, 1150, 1600, 2200, 3000] as const;
+export const MUSTER_HP = [700, 950, 1200, 1500, 1800, 2100, 2400, 2700, 3000] as const;
+export const ARSENAL_HP = [800, 1100, 1400, 1700, 2050, 2400, 2750, 3100, 3500] as const;
 
 /** Buildings the player raises on their own; the muster and the arsenal follow the headquarters. */
 export type Raisable = 'hq' | 'lab' | 'treasury';
 export const RAISABLE: readonly Raisable[] = ['hq', 'lab', 'treasury'];
 export const isRaisable = (k: BuildingKind): k is Raisable => k === 'hq' || k === 'lab' || k === 'treasury';
 
+/** Highest level (0-based) of each building: the treasury has 5, the rest follow the headquarters' 9. */
+export function maxBuildingLevel(kind: BuildingKind): number {
+  return kind === 'treasury' ? TREASURY_LEVELS.length - 1 : HQ_LEVELS.length - 1;
+}
+
 /** Full health of a building at a level (0-based). */
 export function buildingHp(kind: BuildingKind, level: number): number {
-  const i = Math.max(0, Math.min(4, level));
+  const i = Math.max(0, Math.min(maxBuildingLevel(kind), level));
   switch (kind) {
     case 'hq':
       return HQ_LEVELS[i]!.hp;
@@ -134,7 +150,7 @@ export function buildingValue(kind: BuildingKind, level: number): number {
 }
 
 /** Real seconds to rebuild a destroyed building: longer the higher it was. */
-export const REBUILD_SECONDS = [10 * MIN, 45 * MIN, 2 * HOUR, 6 * HOUR, 12 * HOUR] as const;
+export const REBUILD_SECONDS = [10 * MIN, 45 * MIN, 2 * HOUR, 4 * HOUR, 6 * HOUR, 9 * HOUR, 12 * HOUR, 18 * HOUR, DAY] as const;
 
 /**
  * Real seconds a builder takes to build a gun (to level 1) or raise it to each
@@ -189,6 +205,14 @@ export interface BaseFence {
   invested: number;
 }
 
+/** A trap on the base's ground; a spent one waits to be re-armed. */
+export interface BaseTrap {
+  kind: TrapId;
+  cx: number;
+  cy: number;
+  armed: boolean;
+}
+
 export interface BaseBuilding {
   /** 0-based. */
   level: number;
@@ -218,6 +242,7 @@ export interface BaseState {
   buildings: Record<BuildingKind, BaseBuilding>;
   guns: BaseGun[];
   fences: BaseFence[];
+  traps: BaseTrap[];
   jobs: BaseJob[];
   /** The army that took the headquarters and holds it; null while it is the player's. */
   occupied: Occupier[] | null;
@@ -237,6 +262,7 @@ export function newBase(): BaseState {
     buildings,
     guns: STARTER_GUNS.map(([def, cx, cy]) => ({ def, level: 0, cx, cy, hp: gunHp(TOWERS[def].size, 0), invested: TOWERS[def].levels[0].cost })),
     fences: [],
+    traps: [],
     jobs: [],
     occupied: null,
   };
@@ -265,7 +291,7 @@ export function sanitizeBase(raw: unknown): BaseState {
     const v = src[k];
     if (!v || typeof v !== 'object') continue;
     const b = v as Record<string, unknown>;
-    const level = int(b.level, 0, 4);
+    const level = int(b.level, 0, maxBuildingLevel(k));
     if (level === null) continue;
     s.buildings[k] = { level, hp: num(b.hp, 0, buildingHp(k, level)) ?? buildingHp(k, level) };
   }
@@ -320,6 +346,16 @@ export function sanitizeBase(raw: unknown): BaseState {
       const hp = num(f.hp, 0, FENCE_LEVELS[level]!.hp);
       if (hp === null || hp <= 0) continue;
       s.fences.push({ cx, cy, level, hp, invested: int(f.invested, 0, 1e9) ?? 0 });
+    }
+  }
+  if (Array.isArray(r.traps)) {
+    for (const v of r.traps as unknown[]) {
+      if (!v || typeof v !== 'object') continue;
+      const tr = v as Record<string, unknown>;
+      const cx = int(tr.cx, 0, BASE_MAP.cols - 1);
+      const cy = int(tr.cy, 0, BASE_MAP.rows - 1);
+      if (!isTrapId(tr.kind) || cx === null || cy === null) continue;
+      s.traps.push({ kind: tr.kind, cx, cy, armed: tr.armed !== false });
     }
   }
   if (Array.isArray(r.jobs)) {
@@ -449,7 +485,7 @@ export function settleJobs(b: BaseState, now: number): BaseState {
   for (const j of done) {
     const bl = s.buildings[j.what];
     if (j.kind === 'rebuild') s = { ...s, buildings: { ...s.buildings, [j.what]: { level: bl.level, hp: buildingHp(j.what, bl.level) } } };
-    else s = setLevel(s, j.what, Math.min(4, bl.level + 1));
+    else s = setLevel(s, j.what, Math.min(maxBuildingLevel(j.what), bl.level + 1));
   }
   return s;
 }
