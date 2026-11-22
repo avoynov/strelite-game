@@ -46,7 +46,7 @@ RING_R = 1.62           # toothed traverse ring (level 4+)
 TRACK_R = 2.45          # trail roller track (level 3+)
 
 STYLE = {
-    1: dict(g="paint_4bo_worn", worn="paint_4bo_worn", barrel="paint_4bo_barrel", soot="paint_4bo_soot",
+    1: dict(g="paint_sand_worn", worn="paint_sand_worn", barrel="paint_sand_barrel", soot="paint_sand_soot",
             steel="gunmetal", trim="gunmetal", ring="paint_red", deck=0.0),
     2: dict(g="paint_4bo", worn="paint_4bo_worn", barrel="paint_4bo_barrel", soot="paint_4bo_soot",
             steel="gunmetal", trim="brass", ring="paint_red", deck=0.05),
@@ -164,6 +164,8 @@ def _carriage(k, t, level):
         k.tube("equil", (sx * 0.26, 0.12, 0.56), (sx * 0.26, 0.3, 1.0), 0.05, G, parent=t, segs=16)
         k.tube("equil_cap", (sx * 0.26, 0.3, 1.0), (sx * 0.26, 0.31, 1.03), 0.035, STEEL, parent=t, segs=12)
 
+        if level == 1:          # level 1 has one small single trail instead (user 2026-11-22)
+            continue
         # --- split tubular trail with spade
         a, b = Vector((sx * 0.26, -0.3, 0.52)), Vector((sx * 1.38, -3.2, 0.17))
         d = (b - a).normalized()
@@ -202,6 +204,16 @@ def _carriage(k, t, level):
                 p = a.lerp(b, f) + Vector((0, 0, 0.075))
                 k.box("rod_clip", (0.12, 0.03, 0.03), p, STEEL, rot=(0, 0, yaw), parent=t, bevel=False)
 
+    if level == 1:              # a single short box trail with a small spade
+        a, b = Vector((0, -0.32, 0.5)), Vector((0, -2.1, 0.16))
+        d = (b - a).normalized()
+        k.beam("trail", a, b, (0.16, 0.13), G, section_end=(0.12, 0.1), parent=t, bevel=0.01)
+        for f in (0.25, 0.6, 0.9):
+            p = a.lerp(b, f)
+            k.beam("band", p - d * 0.03, p + d * 0.03, (0.18, 0.15), WORN, parent=t, bevel=False)
+        sp = b + d * 0.1
+        k.box("spade", (0.3, 0.03, 0.3), (0, sp.y, 0.08), WORN, rot=(math.radians(-25), 0, 0), parent=t, bevel=0.006)
+        k.torus("lunette", 0.06, 0.02, b + d * 0.22 + Vector((0, 0, 0.08)), STEEL, parent=t, segs=20, tube_segs=8)
     # elevation and traverse handwheels, both on the gunner's (left) side
     for y, z, r in ((-0.42, 0.9, 0.11), (-0.64, 0.74, 0.1)):
         k.torus("handwheel", r, 0.012, (-0.34, y, z), STEEL, rot=(0, math.pi / 2, 0), parent=t,
@@ -288,8 +300,9 @@ def _elevating_mass(k, t, level):
     k.box("cradle", (0.21, 1.55, 0.15), (0, 0.3, -0.14), G, parent=piv, bevel=0.01)
     k.tube("brake_cyl", (0, -0.42, -0.19), (0, 1.12, -0.19), 0.068, G, parent=piv, segs=18)
     k.tube("brake_cap", (0, 1.12, -0.19), (0, 1.17, -0.19), 0.045, STEEL, parent=piv, segs=8)
-    k.tube("recup", (0, -0.3, 0.16), (0, 1.32, 0.16), 0.07, G, parent=piv, segs=20)
-    k.tube("recup_cap", (0, 1.32, 0.16), (0, 1.37, 0.16), 0.05, STEEL, parent=piv, segs=8)
+    zr = 0.16 if level < 3 else 0.24
+    k.tube("recup", (0, -0.3, zr), (0, 1.32, zr), 0.07, G, parent=piv, segs=20)
+    k.tube("recup_cap", (0, 1.32, zr), (0, 1.37, zr), 0.05, STEEL, parent=piv, segs=8)
     for y in (-0.22, 0.98):
         k.box("yoke", (0.25, 0.07, 0.46), (0, y, 0.0), G, parent=piv, bevel=0.01)
         _bolts(k, [(x, y + 0.036, z) for x in (-0.09, 0.09) for z in (-0.18, 0.18)], (0, 1, 0), piv,
@@ -298,18 +311,19 @@ def _elevating_mass(k, t, level):
         _bolts(k, [(sx * 0.106, y, -0.12) for y in (-0.3, 0.1, 0.5, 0.85)], (sx, 0, 0), piv, r=0.011, mat=G)
 
     # --- barrel with the double-baffle brake
-    barrel = [(-0.62, 0.0), (-0.62, 0.088), (0.15, 0.088), (0.32, 0.074), (0.9, 0.062),
-              (2.72, 0.05), (2.72, 0.0)]
+    BR = 1.5 if level >= 3 else 1.0                         # thicker barrel from level 3 (user 2026-11-22)
+    barrel = [(y, r * BR) for y, r in [(-0.62, 0.0), (-0.62, 0.088), (0.15, 0.088), (0.32, 0.074), (0.9, 0.062),
+                                       (2.72, 0.05), (2.72, 0.0)]]
     k.lathe("barrel", barrel, BARREL, segs=32, parent=rec)
     for i in range(level):                                  # crimson rings: one per level
         y0, y1 = 2.0 - i * 0.14, 2.07 - i * 0.14
-        r = 0.062 + (0.05 - 0.062) * ((y0 + y1) / 2 - 0.9) / 1.82 + 0.0025
+        r = (0.062 + (0.05 - 0.062) * ((y0 + y1) / 2 - 0.9) / 1.82) * BR + 0.0025
         k.lathe("ring", [(y0, 0.0), (y0, r), (y1, r), (y1, 0.0)], STYLE[level]["ring"], segs=32, parent=rec)
     if level >= 4:      # bigger three-baffle brake
-        ys, rb, end = (2.79, 2.92, 3.05), 0.108, 3.13
+        ys, rb, end = (2.79, 2.92, 3.05), 0.108 * BR, 3.13
     else:
-        ys, rb, end = (2.8, 2.93), 0.086, 3.03
-    k.lathe("brake", [(2.68, 0.0), (2.68, 0.056), (2.74, rb), (end - 0.03, rb), (end, rb * 0.72),
+        ys, rb, end = (2.8, 2.93), 0.086 * BR, 3.03
+    k.lathe("brake", [(2.68, 0.0), (2.68, 0.056 * BR), (2.74, rb), (end - 0.03, rb), (end, rb * 0.72),
                       (end, 0.0)], SOOT, segs=28, parent=rec)
     for sx in (-1, 1):
         for y in ys:
@@ -318,7 +332,7 @@ def _elevating_mass(k, t, level):
         for y in (2.71, end - 0.015):
             k.lathe("brake_band", [(y - 0.012, 0.0), (y - 0.012, rb + 0.006), (y + 0.012, rb + 0.006),
                                    (y + 0.012, 0.0)], TRIM, segs=28, parent=rec)
-    k.cylinder("bore", 0.04, 0.008, (0, end + 0.001, 0), "bore", segs=20, rot=(-math.pi / 2, 0, 0),
+    k.cylinder("bore", 0.04 * BR, 0.008, (0, end + 0.001, 0), "bore", segs=20, rot=(-math.pi / 2, 0, 0),
                parent=rec, bevel=False)
     muzzle = k.empty("muzzle", (0, end + 0.02, 0), parent=rec)
     muzzle["marker"] = "muzzle"
@@ -539,14 +553,14 @@ def _flagstones(k, root, r, top, level):
 
 
 # --------------------------------------------------------------------------
-def _round76(k, parent, loc, rot):
+def _round76(k, parent, loc, rot, shell="paint_shell"):
     """76 mm unitary round, 0.72 m long. Local +Y = nose."""
     e = k.empty("round76", loc, parent=parent)
     e.rotation_euler = rot
     k.lathe("case", [(0.0, 0.0), (0.0, 0.05), (0.012, 0.05), (0.014, 0.045), (0.33, 0.043),
                      (0.385, 0.0392), (0.385, 0.0)], "brass", segs=20, parent=e)
     k.lathe("shell76", [(0.385, 0.0), (0.385, 0.0385), (0.6, 0.0385), (0.69, 0.02), (0.69, 0.0)],
-            "paint_shell", segs=20, parent=e)
+            shell, segs=20, parent=e)
     k.lathe("band76", [(0.4, 0.0), (0.4, 0.04), (0.42, 0.04), (0.42, 0.0)], "copper", segs=20, parent=e)
     k.lathe("fuze76", [(0.69, 0.0), (0.69, 0.02), (0.72, 0.008), (0.722, 0.0)], "steel_worn", segs=14,
             parent=e)
@@ -571,18 +585,21 @@ def _props(k, root, level):
     r0 = 3.5
     stacks = {1: [(-116, 1), (-100, 1)],
               2: [(-122, 2), (-106, 2), (-90, 1)],
-              3: [(-122, 2), (-106, 2), (-90, 2)],
-              4: [(-130, 3), (-114.5, 3), (-99, 2), (-83.5, 2)],
-              5: [(-130, 3), (-114.5, 3), (-99, 3), (-83.5, 2)]}[level]
+              3: [(-130, 3), (-114.5, 3), (-99, 2), (-83.5, 2)],           # more from level 3 (user 2026-11-22)
+              4: [(-130, 3), (-114.5, 3), (-99, 3), (-83.5, 2), (-68, 2)],
+              5: [(-130, 4), (-114.5, 3), (-99, 3), (-83.5, 3), (-68, 2)]}[level]
+    shell = "paint_shell" if level < 3 else "paint_shell_dark"   # darker rounds from level 3
     for i, (deg, high) in enumerate(stacks):
         for j in range(high):
             p = pol(r0 + 0.02 * (j % 2), deg + (1.0 if j % 2 else 0), 0.26 * j)
             fort.crate(k, root, f"crate_{i}_{j}", p, math.radians(deg) + (0.07 if j % 2 else -0.04),
                        **crate76)
     deg0, top = stacks[0][0], 0.26 * stacks[0][1]
-    for i in range(3):
-        p = pol(r0 - 0.1 + 0.1 * i, deg0, top + 0.045)
-        _round76(k, root, p - pol(0.36, deg0 + 90), (0, 0, math.radians(deg0)))
+    for i in range(3 if level < 3 else 6):
+        p = pol(r0 - 0.1 + 0.1 * (i % 3), deg0 + (15.5 if i >= 3 else 0),
+                (top if i < 3 else 0.26 * stacks[1][1]) + 0.045)
+        _round76(k, root, p - pol(0.36, deg0 + (15.5 if i >= 3 else 0) + 90),
+                 (0, 0, math.radians(deg0 + (15.5 if i >= 3 else 0))), shell)
     if level <= 2:
         for i, dd in enumerate((-9.5, -7.5)):
             _round76(k, root, pol(r0 + 0.06 * i, deg0 + dd), (math.pi / 2, 0, i * 1.1))
@@ -598,7 +615,7 @@ def _props(k, root, level):
         for sy in (-1, 1):
             k.box("rack_post", (0.3, 0.04, 0.55), (0, sy * 0.45, 0.275), rack_mat, parent=rk, bevel=0.004)
         for i in range(6):
-            _round76(k, rk, Vector((0.0, -0.36 + i * 0.145, 0.05)), (math.pi / 2, 0, 0))
+            _round76(k, rk, Vector((0.0, -0.36 + i * 0.145, 0.05)), (math.pi / 2, 0, 0), shell)
         if level == 5:
             k.box("rack_trim", (0.32, 0.92, 0.012), (0, 0, 0.51), "brass", parent=rk, bevel=False)
     # spent cases thrown clear to the far left; the heap grows with the level

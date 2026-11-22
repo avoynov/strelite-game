@@ -85,7 +85,7 @@ FIRE = [
     (32, 0.36, True, None, 225),
     (36, 0.16, True, None, 270),
     (38, 0.0, True, None, 315),    # 11 cocked
-    (38, 0.0, True, 0.0, 360),     # 12 the next bolt laid in
+    (38, 0.0, True, 0.0, 360),     # 12 the next bolt laid in (by the loader from level 2)
 ]
 FIRE_FRAMES = len(FIRE)
 RELEASE_FRAME = 2
@@ -102,6 +102,7 @@ def build(style, level=1):
     k = Kit(style)
     s = STYLE[level]
     root = k.empty("scorpion")
+    _RIG_LOADER.clear()
     _trestle(k, root, level, s)
     _bolt_rack(k, root, level, s)
     turret = k.empty("turret", (0, 0, 0), parent=root)
@@ -111,6 +112,10 @@ def build(style, level=1):
     _stock(k, turret, level, s)
     _capitulum(k, turret, level, s)
     _sights(k, turret, level, s)
+    if level >= 3:
+        _feed(k, root, turret, level, s)
+    if level >= 2:
+        _loader(k, turret, level, s)
     m = k.empty("muzzle", (0, FRAME_Y + 0.4, _z(FRAME_Y + 0.4) + 0.12), parent=turret)
     m["marker"] = "muzzle"
     _rig(k, turret, level, s)
@@ -131,7 +136,12 @@ def _trestle(k, root, level, s):
     W = s["wood"]
     top = 1.2 + H
     _beam(k, root, "column", (0, 0, 0.0), (0, 0, top), (0.28, 0.28), W)
-    for i in range(4):
+    if level == 1:                                        # prototype: one post set in the ground, wedged
+        for i in range(4):
+            a = math.radians(45 + 90 * i)
+            d = Vector((math.cos(a), math.sin(a), 0))
+            _beam(k, root, "wedge", d * 0.17 + Vector((0, 0, 0.0)), d * 0.36 + Vector((0, 0, -0.02)), (0.12, 0.08), W)
+    for i in range(4 if level > 1 else 0):
         a = math.radians(45 + 90 * i)
         foot = Vector((1.25 * math.cos(a), 1.25 * math.sin(a), 0.07))
         knee = Vector((0, 0, 0.85 + H))
@@ -141,7 +151,7 @@ def _trestle(k, root, level, s):
         if level > 1:
             k.box("foot_shoe", (0.2, 0.2, 0.04), foot + Vector((0, 0, -0.02)), s["fit"], parent=root,
                   bevel=0.004)
-    for i in range(4):                                    # a square of braces between the legs
+    for i in range(4 if level > 1 else 0):                # a square of braces between the legs
         a0, a1 = math.radians(45 + 90 * i), math.radians(135 + 90 * i)
         p0 = Vector((0.88 * math.cos(a0), 0.88 * math.sin(a0), 0.24))
         p1 = Vector((0.88 * math.cos(a1), 0.88 * math.sin(a1), 0.24))
@@ -278,6 +288,183 @@ def _stock(k, t, level, s):
                segs=12, rot=(0, math.pi / 2, 0), parent=t)
 
 
+def _feed(k, root, t, level, s):
+    """Levels 3-5: a closed bolt feed from a magazine under the ground (user 2026-11-22). A thick
+    boxed duct rises from a hatch beside the trestle to a rotary collar round the column; a
+    second chute on the turret carries the bolts from the collar to the claw. Bolts are not seen."""
+    W, F = s["wood"], s["fit"]
+    top = 1.2 + H
+    hatch = Vector((1.05, 0.0, 0.0))
+    k.box("feed_hatch", (0.62, 0.62, 0.34), hatch + Vector((0, 0, 0.17)), W, parent=root, bevel=0.02)
+    k.box("feed_hatch_lid", (0.66, 0.66, 0.05), hatch + Vector((0, 0, 0.36)), F, parent=root, bevel=0.01)
+    p0, p1 = hatch + Vector((-0.05, 0, 0.36)), Vector((0.34, 0.0, top - 0.42))
+    k.beam("feed_duct", p0, p1, (0.34, 0.34), W, parent=root, bevel=0.015)
+    d = p1 - p0
+    for f in (0.12, 0.45, 0.78):                          # bands round the duct
+        c = p0 + d * f
+        k.beam("feed_band", c, c + d.normalized() * 0.06, (0.38, 0.38), F, parent=root, bevel=0.005)
+    k.cylinder("feed_collar", 0.36, 0.2, (0, 0, top - 0.5), F, segs=32, parent=root)
+    k.cylinder("feed_collar_cap", 0.38, 0.04, (0, 0, top - 0.3), W, segs=32, parent=root)
+    # on the turret: from the collar up to the side of the stock behind the claw
+    q0, q1 = Vector((0.3, -0.15, top - 0.28)), Vector((0.24, CLAW_Y0 + 0.55, _z(CLAW_Y0 + 0.55) - 0.12))
+    k.beam("feed_chute", q0, q1, (0.26, 0.26), W, parent=t, bevel=0.012)
+    e = q1 - q0
+    for f in (0.2, 0.7):
+        c = q0 + e * f
+        k.beam("feed_band", c, c + e.normalized() * 0.05, (0.3, 0.3), F, parent=t, bevel=0.005)
+    k.box("feed_gate", (0.3, 0.3, 0.2), q1 + Vector((-0.04, 0, 0.06)), F, parent=t, bevel=0.01)
+
+
+LOADER = Vector((1.4, -1.0, 0))     # foot of the loading crane (turret space, beside the stock)
+
+
+def _loader(k, t, level, s):
+    """Levels 2-5: a separate pincer crane standing on the ground beside the scorpion (user
+    2026-11-22). It rolls round with the gun on its own little carriage, keeps a few bolts in
+    a rack on its column, and lays the next bolt in the channel; shown holding it above.
+    Pine and iron (2), iron and brass (3), bronze (4), silver and gold (5)."""
+    col, J, F = {2: ("timber_tarred", "iron_forged", "iron_forged"), 3: ("iron_black", "brass", "steel_worn"),
+                 4: ("iron_black", "bronze_old", "bronze_old"), 5: ("silver_satin", "gold_trim", "silver_satin")}[level]
+    P = LOADER
+    # its carriage on the ground: a cross of runners on small wheels (a skid at 2)
+    for a in (0.6, 0.6 + math.pi / 2):
+        d = Vector((math.cos(a), math.sin(a), 0)) * 0.28
+        k.beam("loader_runner", P - d + Vector((0, 0, 0.09)), P + d + Vector((0, 0, 0.09)), (0.09, 0.09), col,
+               parent=t, bevel=0.006)
+        if level >= 3:
+            for e in (-1, 1):
+                c = P + d * e + Vector((0, 0, 0.06))
+                k.cylinder("loader_castor", 0.06, 0.04, c - Vector((0, 0, 0)) + d.normalized().cross(Vector((0, 0, 1)))
+                           * 0.02, J, segs=14, rot=(math.pi / 2, 0, a + math.pi / 2), parent=t)
+    k.cylinder("loader_foot", 0.15, 0.08, P + Vector((0, 0, 0.13)), J, segs=20, parent=t)
+    H = _z(P.y) + 0.65
+    if col.startswith("timber"):
+        _beam(k, t, "loader_column", P + Vector((0, 0, 0.18)), P + Vector((0, 0, H)), (0.14, 0.14), col)
+    else:
+        k.cylinder("loader_column", 0.07, H - 0.18, P + Vector((0, 0, 0.18)), col, segs=16, parent=t)
+    for f in (0.3, 0.7):
+        k.cylinder("loader_collar", 0.095, 0.05, P + Vector((0, 0, 0.18 + (H - 0.18) * f)), J, segs=16, parent=t)
+    for sx in (-1, 1):                                   # struts from the carriage up the column
+        a = 0.6 + (math.pi / 2 if sx > 0 else 0)
+        d = Vector((math.cos(a), math.sin(a), 0)) * 0.3
+        k.beam("loader_strut", P + d + Vector((0, 0, 0.14)), P + Vector((0, 0, 0.9)), (0.04, 0.05), F, parent=t,
+               bevel=False)
+    # the crane: a slewing head on the column, a boom out over the stock, a cable down to a
+    # pincer. It holds the next bolt just above the channel and lays it in; between shots it
+    # swings round to a magazine stand of its own for the next one.
+    ax = Vector((P.x, P.y, 0))
+    slew = k.empty("loader_slew", ax, parent=t)
+    top = Vector((0, 0, H))
+    k.cylinder("loader_head", 0.11, 0.14, top - Vector((0, 0, 0.04)), J, segs=18, parent=slew)
+    d = Vector((0, 1, math.tan(TILT))).normalized()
+    tail0 = Vector((0, CLAW_Y0 - 0.02, _RIG_ZS(level) + 0.09))         # where the laid bolt lies (as the rig's)
+    mid = tail0 + d * (BOLT_LEN * 0.5) - ax
+    hover = LOADER_HOVER
+    el = Vector((mid.x, mid.y, mid.z + hover + 0.55))
+    k.beam("loader_boom", top + Vector((0, 0, 0.06)), el + Vector((0, 0, 0.04)), (0.08, 0.1),
+           col if not col.startswith("timber") else F, parent=slew, bevel=0.008)
+    k.beam("loader_tie", Vector((0, 0, H - 0.5)), top.lerp(el, 0.6), (0.035, 0.035), F, parent=slew, bevel=False)
+    k.cylinder("loader_sheave", 0.07, 0.05, el - Vector((0.025, 0, 0)), J, segs=16, rot=(0, math.pi / 2, 0),
+               parent=slew)
+    cable = k.cylinder("loader_cable", 0.012, 1.0, el, "steel_cable" if level > 2 else "hemp", segs=6,
+                       rot=(math.pi, 0, 0), parent=slew, bevel=False)
+    hand = k.empty("loader_hand", mid + Vector((0, 0, hover)), parent=slew)
+    hb = mid + Vector((0, 0, hover))                     # the hand is built in slew space, then parented
+    objs = [k.box("loader_block", (0.13, 0.18, 0.09), hb + Vector((0, 0, 0.19)), J, parent=slew, bevel=0.008)]
+    jaws = []
+    for sx in (-1, 1):                                   # the pincer jaws, closed round the bolt
+        o = k.beam("loader_jaw", hb + Vector((sx * 0.055, 0, 0.15)), hb + Vector((sx * 0.03, 0, -0.06)),
+                   (0.03, 0.09), F, parent=slew, bevel=0.004)
+        objs.append(o)
+        jaws.append((sx, o))
+    held = set(bpy.data.objects)
+    _bolt(k, slew, mid + Vector((0, 0, hover)) - d * (BOLT_LEN * 0.5), d, level, s)
+    held = list(set(bpy.data.objects) - held)
+    for o in objs + held:
+        _keep_world(o, hand)
+    jaw_rest = {o: o.location.copy() for _, o in jaws}
+    # the magazine stand where it picks the next bolt: a little trestle with a stack of bolts,
+    # placed where the swung pincer comes down
+    tray = k.empty("loader_tray", ax, parent=t)
+    tray.rotation_euler = (0, 0, math.radians(LOADER_TRAY_DEG))
+    zt = mid.z + hover - LOADER_TRAY_DROP                # bolt height on the stand
+    tb = mid + Vector((0, 0, hover - LOADER_TRAY_DROP))
+    dd = Vector((d.x, d.y, 0)).normalized()
+    for e in (-0.55, 0.55):                              # two trestles under the bolts
+        c = tb + dd * e
+        for sx in (-1, 1):
+            k.beam("tray_leg", Vector((c.x + sx * 0.22, c.y, -0.0)), c + Vector((sx * 0.06, 0, -0.07)), (0.05, 0.05),
+                   col, parent=tray, bevel=False)
+        k.beam("tray_bar", c + Vector((-0.12, 0, -0.07)), c + Vector((0.12, 0, -0.07)), (0.06, 0.06), J if level > 2
+               else col, parent=tray, bevel=False)
+    stack = []
+    for i, (dx, dz) in enumerate(((0.0, 0.0), (-0.05, -0.0), (0.05, -0.0))):
+        before = set(bpy.data.objects)
+        _bolt(k, tray, tb + Vector((dx, 0, dz - (0.0 if i == 0 else 0.0))) - d * (BOLT_LEN * 0.5)
+              + Vector((0, 0, 0 if i == 0 else -0.045)), d, level, s)
+        if i == 0:
+            stack = list(set(bpy.data.objects) - before)
+    _RIG_LOADER.clear()
+    _RIG_LOADER.update(slew=slew, hand=hand, hand_rest=hand.location.copy(), cable=cable, el=el, jaws=jaws,
+                       jaw_rest=jaw_rest, held=held, top_bolt=stack, hover=hover)
+
+
+LOADER_HOVER = 0.5           # the held bolt waits this far over the channel
+LOADER_TRAY_DEG = -120       # slew angle of the magazine stand
+LOADER_TRAY_DROP = 1.25      # how far the pincer comes down to the stand
+_RIG_LOADER = {}
+
+
+def _RIG_ZS(level):
+    return _z(CLAW_Y0) + 0.06
+
+
+# Loader motion per firing frame: slew (deg), lift (0 = up, -1 = down at the channel or the
+# stand), jaws open (0/1), held bolt shown, top bolt on the stand shown. The round trip fills
+# the whole shot at an even pace (user 2026-11-22): it lays the bolt in frame 12 and is back
+# at rest over the channel, empty and open; it never holds the gun up.
+LOADER_REST = (0, -1, 1, False, True)
+LOADER_FIRE = [
+    (0, -0.5, 1, False, True),      # 1  rises as the bolt leaves
+    (-20, 0, 1, False, True),       # 2  starts to swing to its stand
+    (-55, 0, 1, False, True),       # 3
+    (-90, 0, 1, False, True),       # 4
+    (-120, -0.5, 1, False, True),   # 5  over the stand, coming down
+    (-120, -1, 0, True, False),     # 6  grips the top bolt
+    (-120, -0.4, 0, True, False),   # 7  lifts it
+    (-95, 0, 0, True, False),       # 8  carries it back, steadily
+    (-65, 0, 0, True, False),       # 9
+    (-32, 0, 0, True, False),       # 10
+    (-5, -0.45, 0, True, False),    # 11 over the channel as the gun is cocked, lowering
+    (0, -1, 1, False, False),       # 12 lays it in and lets go
+]
+
+
+def _apply_loader(slew, lift, jaw, held, top):
+    L = _RIG_LOADER
+    if not L:
+        return
+    L["slew"].rotation_euler = (0, 0, math.radians(slew))
+    f = min(abs(slew) / abs(LOADER_TRAY_DEG), 1.0)        # how far round toward the stand
+    drop = L["hover"] * (1 - f) + LOADER_TRAY_DROP * f
+    dz = lift * drop if lift < 0 else 0.0
+    L["hand"].location = L["hand_rest"] + Vector((0, 0, dz))
+    length = (L["el"].z - (L["hand_rest"].z + dz + 0.24))
+    L["cable"].scale = (1, 1, max(length, 0.02))
+    for sx, o in L["jaws"]:
+        o.location = L["jaw_rest"][o] + Vector((sx * 0.06 * jaw, 0, 0))
+    for o in L["held"]:
+        o.hide_render = not held
+    for o in L["top_bolt"]:
+        o.hide_render = not top
+
+
+def _vsides(level):
+    """Level skeins and arms: the prototype (1) has only the lower one, no upper arm sticking up
+    like an antenna (user 2026-11-21)."""
+    return (-1,) if level == 1 else (-1, 1)
+
+
 def _capitulum(k, t, level, s):
     """The torsion frame: two skeins of rope in a tall frame, wide apart."""
     W = s["wood"]
@@ -289,8 +476,9 @@ def _capitulum(k, t, level, s):
     for x in (-0.82, 0.82):
         _beam(k, t, "stile", (x, y, zb - 0.07), (x, y, zt + 0.07), (0.12, 0.16), W)
     for x in (-0.24, 0.24):                               # centre stiles run on to hold the level skeins
-        _beam(k, t, "stile", (x, y, zc - SKEIN_V - 0.2), (x, y, zc + SKEIN_V + 0.2), (0.12, 0.16), W)
-    for sv in (-1, 1):
+        _beam(k, t, "stile", (x, y, zc - SKEIN_V - 0.2), (x, y, zc + (SKEIN_V + 0.2 if level > 1 else 0.1)),
+              (0.12, 0.16), W)
+    for sv in _vsides(level):
         zv = zc + sv * SKEIN_V
         k.cylinder("skein", 0.12, 0.36, (-0.18, y, zv), s["skein"], segs=16, rot=(0, math.pi / 2, 0), parent=t,
                    bevel=False)
@@ -462,7 +650,7 @@ def _rig(k, t, level, s):
             _keep_world(o, piv)
         arms[sx] = piv
     varms = {}
-    for sv in (-1, 1):                                    # the upper and lower arms
+    for sv in _vsides(level):                             # the upper and lower arms
         a0 = Vector((0, FRAME_Y, zc + sv * SKEIN_V))
         piv = k.empty(f"arm_pivot_{'D' if sv < 0 else 'U'}", a0, parent=t)
         for o in _arm_parts(k, t, level, s, a0, _vdir(sv, COCK_DEG), s["arm_v"]):
@@ -553,8 +741,9 @@ def _rig(k, t, level, s):
     for sx in (-1, 1):
         o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
         strings.append((sx, o))
-        o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
-        vstrings.append((sx, o))
+        if sx in _vsides(level):
+            o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
+            vstrings.append((sx, o))
     _RIG.update(t=t, arms=arms, slider=slider, wheels=axis, carrier=carrier, strings=strings, zs=zs, arm_l=L,
                 varms=varms, vstrings=vstrings, arm_v=s["arm_v"], zc=zc,
                 ropes=ropes,
@@ -600,12 +789,26 @@ def _apply(sweep, slide, hooked, bolt, wheel_deg):
         o.scale = (1, 1, max(d.length, 0.01))
 
 
+def _loader_pose(f):
+    return LOADER_FIRE[f - 1] if f > 0 else LOADER_REST
+
+
 def key_fire_animation(scene):
     prefs = bpy.context.preferences.edit
     old = prefs.keyframe_new_interpolation_type
     prefs.keyframe_new_interpolation_type = "LINEAR"
     for f in range(FIRE_FRAMES + 1):
         _apply(*_pose(f))
+        _apply_loader(*_loader_pose(f))
+        L = _RIG_LOADER
+        if L:
+            L["slew"].keyframe_insert("rotation_euler", frame=f)
+            L["hand"].keyframe_insert("location", frame=f)
+            L["cable"].keyframe_insert("scale", frame=f)
+            for _, o in L["jaws"]:
+                o.keyframe_insert("location", frame=f)
+            for o in L["held"] + L["top_bolt"]:
+                o.keyframe_insert("hide_render", frame=f)
         for piv in list(_RIG["arms"].values()) + list(_RIG["varms"].values()):
             piv.keyframe_insert("rotation_euler", frame=f)
         for o, p in ((_RIG["slider"], "location"), (_RIG["wheels"], "rotation_euler"),
@@ -624,8 +827,15 @@ def set_fire_frame(f, scene=None):
         scene.frame_set(f)
     else:
         _apply(sweep, slide, hooked, bolt, wheel_deg)
+        _apply_loader(*_loader_pose(f))
     for o in _RIG["carrier"].children:
         o.hide_render = bolt is None
+    if _RIG_LOADER:
+        _, _, _, held, top = _loader_pose(f)
+        for o in _RIG_LOADER["held"]:
+            o.hide_render = not held
+        for o in _RIG_LOADER["top_bolt"]:
+            o.hide_render = not top
     bpy.context.view_layer.update()
 
 
