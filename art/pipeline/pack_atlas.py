@@ -43,6 +43,7 @@ NAMES = {
     "greekfire": {"bg": "Гръцки огън", "en": "Greek fire siphon"},
     "railgun": {"bg": "Релсотрон", "en": "Rail cannon"},
     "zis3": {"bg": "Дивизионно оръдие", "en": "Field gun"},
+    "zadnoper": {"bg": "Заднопер", "en": "Air spear gun"},
 }
 
 # Model name -> the game's tower id (src/sim/content.ts), where they differ.
@@ -57,6 +58,7 @@ SHOT_FX = {
     "ballista": [], "scorpion": [], "trebuchet": [],
     "greekfire": ["fire_stream"],
     "railgun": ["rail_charge", "rail_beam"],
+    "zadnoper": [],
 }
 
 
