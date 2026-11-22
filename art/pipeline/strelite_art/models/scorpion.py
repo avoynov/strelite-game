@@ -111,6 +111,8 @@ def build(style, level=1):
     _stock(k, turret, level, s)
     _capitulum(k, turret, level, s)
     _sights(k, turret, level, s)
+    if level >= 3:
+        _feed(k, root, turret, level, s)
     m = k.empty("muzzle", (0, FRAME_Y + 0.4, _z(FRAME_Y + 0.4) + 0.12), parent=turret)
     m["marker"] = "muzzle"
     _rig(k, turret, level, s)
@@ -283,19 +285,53 @@ def _stock(k, t, level, s):
                segs=12, rot=(0, math.pi / 2, 0), parent=t)
 
 
+def _feed(k, root, t, level, s):
+    """Levels 3-5: a closed bolt feed from a magazine under the ground (user 2026-11-22). A thick
+    boxed duct rises from a hatch beside the trestle to a rotary collar round the column; a
+    second chute on the turret carries the bolts from the collar to the claw. Bolts are not seen."""
+    W, F = s["wood"], s["fit"]
+    top = 1.2 + H
+    hatch = Vector((1.05, 0.0, 0.0))
+    k.box("feed_hatch", (0.62, 0.62, 0.34), hatch + Vector((0, 0, 0.17)), W, parent=root, bevel=0.02)
+    k.box("feed_hatch_lid", (0.66, 0.66, 0.05), hatch + Vector((0, 0, 0.36)), F, parent=root, bevel=0.01)
+    p0, p1 = hatch + Vector((-0.05, 0, 0.36)), Vector((0.34, 0.0, top - 0.42))
+    k.beam("feed_duct", p0, p1, (0.34, 0.34), W, parent=root, bevel=0.015)
+    d = p1 - p0
+    for f in (0.12, 0.45, 0.78):                          # bands round the duct
+        c = p0 + d * f
+        k.beam("feed_band", c, c + d.normalized() * 0.06, (0.38, 0.38), F, parent=root, bevel=0.005)
+    k.cylinder("feed_collar", 0.36, 0.2, (0, 0, top - 0.5), F, segs=32, parent=root)
+    k.cylinder("feed_collar_cap", 0.38, 0.04, (0, 0, top - 0.3), W, segs=32, parent=root)
+    # on the turret: from the collar up to the side of the stock behind the claw
+    q0, q1 = Vector((0.3, -0.15, top - 0.28)), Vector((0.24, CLAW_Y0 + 0.55, _z(CLAW_Y0 + 0.55) - 0.12))
+    k.beam("feed_chute", q0, q1, (0.26, 0.26), W, parent=t, bevel=0.012)
+    e = q1 - q0
+    for f in (0.2, 0.7):
+        c = q0 + e * f
+        k.beam("feed_band", c, c + e.normalized() * 0.05, (0.3, 0.3), F, parent=t, bevel=0.005)
+    k.box("feed_gate", (0.3, 0.3, 0.2), q1 + Vector((-0.04, 0, 0.06)), F, parent=t, bevel=0.01)
+
+
+def _vsides(level):
+    """Level skeins and arms: the prototype (1) has only the lower one, no upper arm sticking up
+    like an antenna (user 2026-11-21)."""
+    return (-1,) if level == 1 else (-1, 1)
+
+
 def _capitulum(k, t, level, s):
     """The torsion frame: two skeins of rope in a tall frame, wide apart."""
     W = s["wood"]
     y = FRAME_Y
     zt, zb = _z(y) + 0.52, _z(y) - 0.44
-    for z in ((zt, zb) if level > 1 else (zb,)):          # prototype (1): no top crossbeam (user 2026-11-21)
+    for z in (zt, zb):
         _beam(k, t, "frame_beam", (-0.88, y, z), (0.88, y, z), (0.22, 0.14), W)
     zc = _z(y)
     for x in (-0.82, 0.82):
         _beam(k, t, "stile", (x, y, zb - 0.07), (x, y, zt + 0.07), (0.12, 0.16), W)
     for x in (-0.24, 0.24):                               # centre stiles run on to hold the level skeins
-        _beam(k, t, "stile", (x, y, zc - SKEIN_V - 0.2), (x, y, zc + SKEIN_V + 0.2), (0.12, 0.16), W)
-    for sv in (-1, 1):
+        _beam(k, t, "stile", (x, y, zc - SKEIN_V - 0.2), (x, y, zc + (SKEIN_V + 0.2 if level > 1 else 0.1)),
+              (0.12, 0.16), W)
+    for sv in _vsides(level):
         zv = zc + sv * SKEIN_V
         k.cylinder("skein", 0.12, 0.36, (-0.18, y, zv), s["skein"], segs=16, rot=(0, math.pi / 2, 0), parent=t,
                    bevel=False)
@@ -467,7 +503,7 @@ def _rig(k, t, level, s):
             _keep_world(o, piv)
         arms[sx] = piv
     varms = {}
-    for sv in (-1, 1):                                    # the upper and lower arms
+    for sv in _vsides(level):                             # the upper and lower arms
         a0 = Vector((0, FRAME_Y, zc + sv * SKEIN_V))
         piv = k.empty(f"arm_pivot_{'D' if sv < 0 else 'U'}", a0, parent=t)
         for o in _arm_parts(k, t, level, s, a0, _vdir(sv, COCK_DEG), s["arm_v"]):
@@ -558,8 +594,9 @@ def _rig(k, t, level, s):
     for sx in (-1, 1):
         o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
         strings.append((sx, o))
-        o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
-        vstrings.append((sx, o))
+        if sx in _vsides(level):
+            o = k.cylinder("string", 0.022, 1.0, (0, 0, 0), s["rope"], segs=6, parent=t, bevel=False)
+            vstrings.append((sx, o))
     _RIG.update(t=t, arms=arms, slider=slider, wheels=axis, carrier=carrier, strings=strings, zs=zs, arm_l=L,
                 varms=varms, vstrings=vstrings, arm_v=s["arm_v"], zc=zc,
                 ropes=ropes,

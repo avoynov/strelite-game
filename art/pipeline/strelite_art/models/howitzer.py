@@ -49,7 +49,7 @@ STYLE = {
             trim="gunmetal", ring="paint_red", deck=0.0),
     2: dict(g="paint_olive", worn="paint_olive_worn", barrel="paint_barrel", soot="paint_soot",
             trim="brass", ring="paint_red", deck=0.08),
-    3: dict(g="paint_camo", worn="paint_olive_worn", barrel="paint_barrel", soot="paint_soot",
+    3: dict(g="paint_green_dark", worn="paint_olive_worn", barrel="paint_green_dark_barrel", soot="paint_soot",
             trim="brass", ring="paint_red", deck=0.08),
     4: dict(g="paint_steel", worn="steel_worn", barrel="gunmetal", soot="paint_soot",
             trim="brass", ring="paint_red", deck=0.08),
@@ -132,6 +132,7 @@ def _bolts(k, pts, axis, parent, r=0.017, mat=None):
 
 
 def _carriage(k, t, level=1):
+    T = 1.4 if level >= 3 else 1.0             # thicker stabilisers and trails from level 3 (user 2026-11-22)
     lift = 0.3 if level >= 3 else 0.0          # spades stowed once the trails ride shoes on the rail
     # firing platform on the ground + pedestal
     k.cylinder("baseplate", 0.72, 0.07, (0, 0.25, 0.0), WORN, segs=40, parent=t, radius_top=0.66)
@@ -153,31 +154,31 @@ def _carriage(k, t, level=1):
     for sx in (-1, 1):
         # --- front stabiliser with ground pad
         a, b = Vector((sx * 0.48, 1.05, 0.5)), Vector((sx * 1.5, 2.7, 0.22))
-        k.beam("stab", a, b, (0.17, 0.2), OLIVE, section_end=(0.12, 0.13), parent=t, bevel=0.01)
+        k.beam("stab", a, b, (0.17 * T, 0.2 * T), OLIVE, section_end=(0.12 * T, 0.13 * T), parent=t, bevel=0.01)
         pz = 0.09 - STYLE[level]["deck"] if level >= 3 else 0.0      # pad on the rail
-        k.tube("stab_foot", b + Vector((0, 0, 0.03)), (b.x, b.y, pz + 0.04), 0.045, STEEL, parent=t)
+        k.tube("stab_foot", b + Vector((0, 0, 0.03)), (b.x, b.y, pz + 0.04), 0.045 * T, STEEL, parent=t)
         k.cylinder("stab_pad", 0.21, 0.045, (b.x, b.y, pz), WORN, segs=28, parent=t,
                    radius_top=0.19)
         k.tube("stab_pin", (sx * 0.4, 1.05, 0.5), (sx * 0.58, 1.05, 0.5), 0.06, STEEL, parent=t)
 
         # --- rear trail with self-digging spade
         a, b = Vector((sx * 0.42, -0.45, 0.5)), Vector((sx * 1.3, -4.25, 0.36))
-        k.beam("trail", a, b, (0.26, 0.3), OLIVE, section_end=(0.17, 0.2), parent=t, bevel=0.012)
+        k.beam("trail", a, b, (0.26 * T, 0.3 * T), OLIVE, section_end=(0.17 * T, 0.2 * T), parent=t, bevel=0.012)
         k.tube("trail_pin", (sx * 0.3, -0.5, 0.5), (sx * 0.6, -0.5, 0.5), 0.075, STEEL, parent=t)
         d = (b - a).normalized()
         side = Vector((sx * d.y, -sx * d.x, 0)).normalized()       # outward normal
         for f in (0.3, 0.62):                                       # lifting handles
-            p = a.lerp(b, f) + Vector((0, 0, 0.13))
+            p = a.lerp(b, f) + Vector((0, 0, 0.13 * T))
             k.tube("h1", p, p + Vector((0, 0, 0.1)), 0.012, STEEL, parent=t, segs=8, bevel=False)
             k.tube("h2", p + d * 0.22, p + d * 0.22 + Vector((0, 0, 0.1)), 0.012, STEEL, parent=t,
                    segs=8, bevel=False)
             k.tube("h3", p + Vector((0, 0, 0.1)), p + d * 0.22 + Vector((0, 0, 0.1)), 0.012, STEEL,
                    parent=t, segs=8, bevel=False)
-        _bolts(k, [a.lerp(b, f) + side * 0.11 * (1.15 - 0.4 * f) + Vector((0, 0, dz))
+        _bolts(k, [a.lerp(b, f) + side * 0.11 * T * (1.15 - 0.4 * f) + Vector((0, 0, dz))
                    for f in (0.08, 0.14, 0.5, 0.56, 0.9) for dz in (-0.06, 0.06)], side, t)
         for f0, f1 in ((0.05, 0.42), (0.5, 0.82)):                   # pressed stiffening ribs
             for dz in (-0.07, 0.07):
-                w0, w1 = 0.13 * (1.0 - 0.33 * f0), 0.13 * (1.0 - 0.33 * f1)
+                w0, w1 = 0.13 * T * (1.0 - 0.33 * f0), 0.13 * T * (1.0 - 0.33 * f1)
                 k.beam("trail_rib", a.lerp(b, f0) + side * (w0 + 0.004) + Vector((0, 0, dz * (1 - 0.3 * f0))),
                        a.lerp(b, f1) + side * (w1 + 0.004) + Vector((0, 0, dz * (1 - 0.3 * f1))),
                        (0.02, 0.035), OLIVE, parent=t, bevel=False)
@@ -203,16 +204,16 @@ def _carriage(k, t, level=1):
                section_end=(0.11, 0.16), parent=t, bevel=0.01)
         k.tube("axle", (sx * 0.9, 0.95, 0.66), hub, 0.06, STEEL, parent=t)
         k.tube("gas_strut", (sx * 0.56, 0.75, 0.62), (sx * 0.95, 0.6, 0.58), 0.045, OLIVE, parent=t)
-        _wheel(k, t, hub, sx)
+        _wheel(k, t, hub, sx, "rubber_black" if level >= 3 else "rubber")
 
 
-def _wheel(k, t, hub, sx):
+def _wheel(k, t, hub, sx, rubber="rubber"):
     w = k.empty("wheel", hub, parent=t)
     w.rotation_euler = (0, 0, -math.pi / 2)     # local Y = axle
     tyre = [(-0.085, 0.0), (-0.085, 0.31), (-0.15, 0.35), (-0.158, 0.44), (-0.13, 0.5),
             (-0.07, 0.52), (0.07, 0.52), (0.13, 0.5), (0.158, 0.44), (0.15, 0.35),
             (0.085, 0.31), (0.085, 0.0)]
-    k.lathe("tyre", tyre, "rubber", segs=48, parent=w)
+    k.lathe("tyre", tyre, rubber, segs=48, parent=w)
     rim = [(-0.11, 0.0), (-0.11, 0.1), (-0.095, 0.24), (-0.125, 0.3), (-0.125, 0.318),
            (0.125, 0.318), (0.125, 0.3), (0.095, 0.24), (0.11, 0.1), (0.11, 0.0)]
     k.lathe("rim", rim, OLIVE, segs=40, parent=w)
@@ -229,7 +230,7 @@ def _wheel(k, t, hub, sx):
         for row, off in ((-1, 0.0), (1, 0.5)):
             a = 2 * math.pi * (i + off) / n
             k.box("lug_block", (0.03, 0.125, 0.048),
-                  (0.522 * math.cos(a), row * 0.068, 0.522 * math.sin(a)), "rubber",
+                  (0.522 * math.cos(a), row * 0.068, 0.522 * math.sin(a)), rubber,
                   rot=(0, -a, row * 0.25), parent=w, bevel=False)
 
 

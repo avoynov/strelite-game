@@ -424,11 +424,13 @@ def _frame(k, t, level, s):
         _beam(k, t, "sill", (x, -3.95, z), (x, 2.45, z), sill, W)
         top = Vector((x, 0, PIVOT.z + 0.25))
         _beam(k, t, "post", (x, 0, z + 0.15), top, (0.3, 0.3), W)
-        for y0 in (2.15, -2.25):                             # A-frame struts
+        for y0 in ((2.15, -2.25) if level > 1 else (-2.25,)):   # A-frame struts (level 1: rear only)
             a, b = Vector((x, y0, z + 0.15)), Vector((x, math.copysign(0.14, y0), PIVOT.z - 0.15))
             _beam(k, t, "strut", a, b, (0.24, 0.24), W)
             _band(k, t, a.lerp(b, 0.06), b - a, (0.24, 0.24), level, s)
             _band(k, t, a.lerp(b, 0.93), b - a, (0.24, 0.24), level, s)
+        if level == 1:                                       # prototype: few legs, no braces or props (user 2026-11-22)
+            continue
         for y0 in (1.3, -1.35):                              # X-bracing in the side frame
             a, b = Vector((x, y0, z + 0.2)), Vector((x, 0.0, 2.2))
             _beam(k, t, "brace", a, b, (0.16, 0.16), W)
@@ -440,8 +442,12 @@ def _frame(k, t, level, s):
         _band(k, t, (x, 0, z + 0.45), (0, 0, 1), (0.3, 0.3), level, s)
         k.box("post_cap", (0.36, 0.36, 0.08), (x, 0, PIVOT.z + 0.29), s["fit"] if level > 1 else W, parent=t,
               bevel=0.01)
-    _beam(k, t, "outrigger", (-2.25, 0, z - 0.02), (2.25, 0, z - 0.02), (0.24, 0.24), W)
-    for y in (2.3, -2.5, -3.8):
+    if level > 1:
+        _beam(k, t, "outrigger", (-2.25, 0, z - 0.02), (2.25, 0, z - 0.02), (0.24, 0.24), W)
+    else:                                                    # level 1: the post caps the band would have given
+        for sx in (-1, 1):
+            k.box("post_cap", (0.36, 0.36, 0.08), (sx * 1.05, 0, PIVOT.z + 0.29), W, parent=t, bevel=0.01)
+    for y in ((2.3, -2.5, -3.8) if level > 1 else (2.3, -3.8)):
         _beam(k, t, "tie", (-1.25, y, z + 0.02), (1.25, y, z + 0.02), (0.26, 0.26), W)
     for sx in (-1, 1):
         for y in (2.3, -2.5, -3.8):
@@ -487,8 +493,10 @@ def _arm(k, t, level, s):
         mat = s["fit"] if level > 1 else s["rope"]
         k.beam("hanger", end + Vector((sx * 0.36, 0, 0)), Vector((sx * 0.55, end.y, box_top)), (0.07, 0.03) if level > 1 else (0.05, 0.05), mat, parent=t, bevel=False)
     c = Vector((0, end.y, box_top - 0.55))
-    if level <= 2:
-        _stone_box(k, t, c, s, strapped=level == 2)
+    if level == 1:                                           # a leather sack with a stone in it (user 2026-11-22)
+        _sack(k, t, Vector((0, end.y, box_top - 0.1)), s)
+    elif level == 2:                                         # a clearly smaller strapped box
+        _stone_box(k, t, c + Vector((0, 0, 0.2)), s, strapped=True, scale=0.68)
     elif level <= 4:
         _iron_chest(k, t, c, s)
     else:
@@ -567,9 +575,23 @@ def _projectile(k, t, c, r, level, seed):
     k.torus("band", r * 0.96, 0.03, c, "gold_trim", parent=t, segs=28, tube_segs=6)
 
 
-def _stone_box(k, t, c, s, strapped=False):
+def _sack(k, t, top, s):
+    """Level 1 counterweight: a leather sack tied at the neck, a big field stone bulging inside."""
+    h = 0.95
+    prof = [(-h, 0.0), (-h, 0.22), (-h + 0.08, 0.4), (-h + 0.3, 0.47), (-0.3, 0.42), (-0.12, 0.2),
+            (-0.04, 0.11), (0.0, 0.14), (0.04, 0.0)]
+    bag = k.lathe("cw_sack", [(z, r) for z, r in prof], "leather", segs=24, loc=top, rot=(math.pi / 2, 0, 0),
+                  parent=t)
+    bag.scale = (1.0, 0.92, 1.0)
+    k.torus("cw_sack_tie", 0.12, 0.025, top + Vector((0, 0, -0.06)), s["rope"], parent=t, segs=16, tube_segs=5)
+    _rock(k, t, top + Vector((0.05, 0.02, -0.02)), 0.11, seed=140)
+    k.tube("cw_sack_rope", top + Vector((0, 0, -0.04)), top + Vector((0, 0, 0.12)), 0.03, s["rope"], parent=t,
+           segs=8, bevel=False)
+
+
+def _stone_box(k, t, c, s, strapped=False, scale=1.0):
     W = s["arm"]
-    w, d, h = 1.3, 1.1, 1.1
+    w, d, h = 1.3 * scale, 1.1 * scale, 1.1 * scale
     for i in range(5):                                       # plank walls, nailed to corner posts
         zz = c.z - h / 2 + (i + 0.5) * h / 5
         for sy in (-1, 1):
@@ -584,15 +606,15 @@ def _stone_box(k, t, c, s, strapped=False):
                    (sx * (w / 2 + 0.03), c.y + sy * (d / 2 + 0.03), c.z + h / 2 + 0.04), (0.1, 0.1), W, parent=t,
                    bevel=0.008)
     if strapped:                                             # iron straps round the box
-        for zz in (-0.36, 0.36):
+        for zz in (-0.33 * h, 0.33 * h):
             k.box("cw_strap", (w + 0.1, d + 0.1, 0.07), c + Vector((0, 0, zz)), "iron_forged", parent=t,
                   bevel=0.005)
     k.box("cw_fill", (w - 0.05, d - 0.05, 0.1), (c.x, c.y, c.z + h / 2 - 0.12), "dirt_fill", parent=t,
           bevel=False)
     rnd = random.Random(4)
     for i in range(16):                                      # field stones heaped on top
-        p = Vector((rnd.uniform(-0.48, 0.48), c.y + rnd.uniform(-0.4, 0.4), c.z + h / 2 - 0.02))
-        _rock(k, t, p, rnd.uniform(0.09, 0.17), seed=100 + i)
+        p = Vector((rnd.uniform(-0.37, 0.37) * w / 1.0, c.y + rnd.uniform(-0.36, 0.36) * d, c.z + h / 2 - 0.02))
+        _rock(k, t, p, rnd.uniform(0.09, 0.17) * scale, seed=100 + i)
 
 
 def _iron_chest(k, t, c, s):

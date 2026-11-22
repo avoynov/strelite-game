@@ -40,8 +40,8 @@ DECK_Z = 0.42
 STYLE = {
     1: dict(wood="timber_raw", fit="iron_forged", pipe="hose", nozzle="iron_forged", vessel="clay",
             rope="hemp", plat="timber_raw"),
-    2: dict(wood="timber_tarred", fit="iron_forged", pipe="copper", nozzle="copper", vessel="copper",
-            rope="hemp", plat="timber_tarred"),
+    2: dict(wood="timber_varnish", fit="iron_forged", pipe="copper", nozzle="copper", vessel="copper",
+            rope="hemp", plat="timber_varnish"),                 # copper and lacquered wood (user 2026-11-22)
     3: dict(wood="timber_oak", fit="bronze_old", pipe="bronze_old", nozzle="bronze_old", vessel="bronze_old",
             rope="hemp", plat="timber_oak"),
     4: dict(wood="timber_oak", fit="iron_black", pipe="bronze_old", nozzle="iron_black", vessel="iron_black",
