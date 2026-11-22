@@ -12,10 +12,13 @@ How it works (every part must make sense, user 2026-11-22):
     hauled up the tower, then dropped onto a piston in the air cylinder at its foot; the
     blast goes through a hose into the chamber and throws the spear. Range comes from how
     high the weight falls, not from elevation, so the gun stays at 35 degrees.
-  * Spears come up out of a magazine well under the turning centre along the line of the
-    bore, pointing the way they will fly. The bore line meets the ground in the well, so the
-    feed run (poles, trough or chute) turns with the gun and its foot just circles inside the
-    well. Spears are chained nose to tail (user's idea): when the spear in the bore is
+  * Spears come up out of an underground magazine along the line of the bore, pointing the
+    way they will fly, on an open ramp behind the gun. The ramp's foot goes down through a
+    ring slot round the turntable, so it can go all the way round with the gun. An endless
+    chain with dogs runs up the ramp over a head sprocket (crank, gears or steam) and pushes
+    each spear into the gate.
+  * The loaded spear waits with its head out of the mouth (user 2026-11-22); at level 1 it
+    lies on a sled riding a slotted air pipe, open to view. Spears are chained nose to tail (user's idea): when the spear in the bore is
     thrown, its tail chain draws the waiting spear up through the gate and the next one up
     behind it; the catch at the gate trips the hook so the thrown spear lets go. Straight in
     line, because a rigid 1.9 m spear cannot ride a curved guide.
@@ -59,7 +62,7 @@ LEVELS = (1, 2, 3, 4, 5)
 FRAME_M = 9.0
 TARGET_Z = 1.5
 SPRITE_FRAME_M = 10.0
-SWEEP_M = 3.2
+SWEEP_M = 3.5
 FOOTPRINT_M = 3.0        # 2x2 tiles of 4 m
 ROUND_DIRS = 32          # the flying spear is drawn per heading
 ROUND_FRAME_M = 2.6
@@ -69,13 +72,16 @@ D = Vector((0, math.cos(TILT), math.sin(TILT)))         # along the bore, toward
 N = Vector((0, -math.sin(TILT), math.cos(TILT)))        # up, square to the bore
 GL = 2.9                 # gun length, back plate to mouth
 RB, RM = 0.55, 0.15      # cone radius at the back and at the mouth
-HOLE = Vector((0, -0.6, 0))   # where the line of the bore meets the ground: the feed hole
-FEED_L = 1.55            # feed run from the hole up to the gate, along the bore line
+HOLE = Vector((0, -1.37, 0))  # where the line of the bore meets the ground, in the ring slot
+FEED_L = 2.45            # feed ramp from the slot up to the gate, along the bore line
+SLOT = (1.27, 1.5)       # ring slot in the ground round the turntable: the magazine runs below it
 GATE = HOLE + D * FEED_L # the gate (centre of the back plate)
 TRUN = 0.55              # trunnions this far along the bore (near the heavy wide end)
 SPEAR_L = 1.9
 GAP = 0.14               # chain between one spear's tail and the next one's nose
-WELL_R = 0.8
+TAIL_READY = GL + 0.55 - SPEAR_L   # loaded spear's tail along the bore: its head 0.55 m out of the mouth
+SLED_STOP = GL - 0.3 - TAIL_READY   # how far the sled runs forward before the stop at the mouth
+ON_PIPE = 0.1            # level 1: the spear lies on top of the slotted air pipe, this far off its axis
 DECK = {1: 0.38, 2: 0.32, 3: 0.33, 4: 0.35, 5: 0.37}    # deck top over the ground
 CARRIAGE_Y = 1.8         # front transom of the carriage under the cheeks
 TOWER = Vector((1.12, -0.4, 0))                         # foot of the drop-weight tower (turret space)
@@ -94,10 +100,12 @@ STYLE = {
             weight="silver_satin", cyl="silver_satin", deck="silver_satin", shaft="silver_satin", head="gold_trim"),
 }
 
-# Firing animation, one row per frame: weight drop (0 top .. 1 bottom), feed (0 rest .. 1 the
-# chain has drawn the waiting spear into the bore and the next one into its place).
-FIRE = [(0.45, 0.0), (1.0, 0.0), (1.0, 0.35), (1.0, 0.7), (1.0, 1.0), (0.85, 0.0), (0.6, 0.0), (0.35, 0.0),
-        (0.1, 0.0)]
+# Firing animation, one row per frame: weight drop (0 top .. 1 bottom); feed (0 rest .. 1 the
+# conveyor has pushed the waiting spear into the gate and the next one into its place); the
+# sled/loaded spear along the bore (0 ready with the head out of the mouth, + toward the
+# stop at the mouth, - back toward the gate); whether the loaded spear is shown.
+FIRE = [(0.45, 0.0, 0.0, True), (1.0, 0.0, 1.0, False), (1.0, 0.5, 0.0, False), (1.0, 1.0, -1.0, False),
+        (0.85, 0.0, -0.5, True), (0.6, 0.0, 0.0, True), (0.35, 0.0, 0.0, True), (0.1, 0.0, 0.0, True)]
 FIRE_FRAMES = len(FIRE)
 RELEASE_FRAME = 2
 RELOAD_FROM = 3
@@ -148,8 +156,6 @@ def build(style, level=1):
         _rammer(k, turret, level, s)
     if level >= 3:
         _receiver(k, turret, level, s)
-    if level >= 4:
-        _sprocket(k, turret, level, s)
     if level >= 5:
         _compressor(k, turret, level, s)
     m = k.empty("muzzle", _along(level, GL + 0.06), parent=turret)
@@ -164,36 +170,73 @@ def ground(level):
 
 
 # -- the spear ------------------------------------------------------------------------------
+HEAD_L = 0.44            # blade length; the socket adds 0.12 behind it
+
+
+def _blade(half):
+    """Closed (y, z) outline of a flat blade from half-widths [(y, w), ...] along its length."""
+    right = [(y, -w) for y, w in half]
+    left = [(y, w) for y, w in reversed(half) if w > 0]
+    return right + left
+
+
+# Head shapes per level, as half-widths along the blade (user 2026-11-22: a beautiful head
+# that shows out of the mouth before the throw).
+HEADS = {
+    1: [(0.0, 0.026), (0.07, 0.058), (0.2, 0.066), (0.33, 0.04), (0.44, 0.0)],                 # leaf blade
+    2: [(0.0, 0.028), (0.05, 0.05), (0.16, 0.07), (0.3, 0.05), (0.38, 0.024), (0.46, 0.0)],     # long leaf
+    3: [(0.0, 0.03), (0.01, 0.11), (0.09, 0.066), (0.2, 0.07), (0.34, 0.035), (0.46, 0.0)],     # broad barbed
+    4: [(0.0, 0.03), (0.08, 0.05), (0.32, 0.03), (0.46, 0.0)],                                  # four-flanged bodkin
+    5: [(0.0, 0.03), (0.04, 0.06), (0.12, 0.085), (0.22, 0.078), (0.35, 0.04), (0.48, 0.0)],    # gilded leaf
+}
+
+
 def _spear(k, parent, tail, d, level, s, length=SPEAR_L):
-    """A throwing spear from its tail along d: shaft, socketed head (barbed from 3),
-    fletching from 4, gilded at 5. Returns the objects."""
+    """A throwing spear from its tail along d: shaft, socket and a flat forged blade made to
+    read at game zoom (leaf 1, long leaf 2, barbed 3, four-flanged bodkin 4, gilded leaf 5),
+    fletching from 4. Returns the objects."""
     tail, d = Vector(tail), Vector(d).normalized()
-    head_l = 0.32
-    objs = [k.tube("spear_shaft", tail, tail + d * (length - head_l + 0.04), 0.028, s["shaft"], parent=parent,
-                   segs=10, bevel=False)]
-    h0 = tail + d * (length - head_l)
-    rot = d.to_track_quat("Y", "Z").to_euler()
-    objs.append(k.lathe("spear_head", [(0.0, 0.034), (0.08, 0.04), (0.12, 0.055), (0.32, 0.0)], s["head"],
-                        segs=10, loc=h0, rot=rot, parent=parent))
     side = d.cross(Vector((0, 0, 1)))
     if side.length < 0.1:
         side = Vector((1, 0, 0))
     side.normalize()
     up = side.cross(d).normalized()
-    if level >= 3:                                        # barbs
-        for sv in (-1, 1):
-            b0 = h0 + d * 0.12 + side * sv * 0.05
-            objs.append(k.beam("spear_barb", b0, b0 - d * 0.09 + side * sv * 0.05, (0.012, 0.02), s["head"],
-                               parent=parent, bevel=False))
+    h0 = tail + d * (length - HEAD_L)
+    objs = [k.tube("spear_shaft", tail, h0 - d * 0.06, 0.028, s["shaft"], parent=parent, segs=10, bevel=False)]
+    sock = {1: "iron_forged", 2: "iron_forged", 3: "copper", 4: "bronze_old", 5: "gold_trim"}[level]
+    rot = d.to_track_quat("Y", "Z").to_euler()
+    rz = d.to_track_quat("Z", "Y").to_euler()
+    objs.append(k.lathe("spear_socket", [(-0.13, 0.03), (-0.02, 0.036), (0.0, 0.03), (0.0, 0.0), (-0.13, 0.0)], sock,
+                        segs=12, loc=h0, rot=rot, parent=parent))
+    if level == 1:                                        # the socket lashed to the shaft
+        objs.append(k.torus("spear_lash", 0.032, 0.008, h0 - d * 0.1, "hemp", rot=rz, parent=parent, segs=10,
+                            tube_segs=4))
+    else:
+        objs.append(k.torus("spear_ring", 0.037, 0.01, h0 - d * 0.115, sock, rot=rz, parent=parent, segs=12,
+                            tube_segs=4))
+    # the blade: a flat plate built in a frame whose Y runs along the spear and X is "up"
+    planes = [up] if level != 4 else [up, side]
+    for n_ in planes:
+        hf = k.empty("spear_headframe", h0, parent=parent)
+        m = d.to_track_quat("Y", "X") if n_ is up else d.to_track_quat("Y", "Z")
+        hf.rotation_euler = m.to_euler()
+        bm = s["head"] if level < 5 else "silver_satin"
+        objs.append(k.plate("spear_blade", _blade(HEADS[level]), 0.016, 0.0, bm, parent=hf, bevel=False))
+        objs.append(hf)
+        if level in (2, 5):                               # a raised mid-rib
+            objs.append(k.plate("spear_rib", _blade([(0.0, 0.012), (0.3, 0.008), (0.42, 0.0)]), 0.03, 0.0,
+                                bm if level == 2 else "gold_trim", parent=hf, bevel=False))
+        if level == 5:                                    # gold edging and two little wings at the socket
+            objs.append(k.plate("spear_gilt", _blade([(0.02, 0.07), (0.12, 0.093), (0.22, 0.086), (0.35, 0.047),
+                                                      (0.5, 0.0)]), 0.008, 0.0, "gold_trim", parent=hf, bevel=False))
+            objs.append(k.plate("spear_wings", _blade([(-0.1, 0.03), (-0.06, 0.09), (-0.03, 0.06), (0.0, 0.03)]),
+                                0.012, 0.0, "gold_trim", parent=hf, bevel=False))
     if level >= 4:                                        # three vanes at the tail
         for i in range(3):
             a = 2 * math.pi * i / 3
             v = side * math.cos(a) + up * math.sin(a)
             objs.append(k.beam("spear_vane", tail + d * 0.04 + v * 0.05, tail + d * 0.3 + v * 0.045, (0.006, 0.08),
                                "bronze_old" if level == 4 else "gold_trim", parent=parent, bevel=False))
-    if level == 5:
-        objs.append(k.tube("spear_collar", h0 - d * 0.03, h0 + d * 0.03, 0.036, "gold_trim", parent=parent, segs=10,
-                           bevel=False))
     return objs
 
 
@@ -204,58 +247,66 @@ def _annulus(k, parent, name, r0, r1, z0, h, mat, segs=48):
 
 
 def _well(k, root, level, s):
-    """The magazine well under the turning centre: a dark shaft (the feed chute turns inside
-    it) and a lining round the mouth."""
-    k.cylinder("well_dark", WELL_R - 0.03, 0.02, (0, 0, 0.0), "bore", segs=48, parent=root, bevel=False)
-    lining = {1: "log", 2: "timber_tarred", 3: "stone", 4: "stone", 5: "stone"}[level]
-    if level == 1:                                        # a ring of short logs round a dug pit
-        for i in range(14):
-            a = 2 * math.pi * i / 14
-            c = Vector((math.cos(a), math.sin(a), 0)) * (WELL_R + 0.06)
-            tg = Vector((-math.sin(a), math.cos(a), 0)) * 0.2
-            k.tube("pit_log", c - tg + Vector((0, 0, 0.07)), c + tg + Vector((0, 0, 0.07)), 0.075, "log", parent=root,
+    """The magazine is underground; the feed ramp comes up through a ring slot round the
+    turntable, so the ramp's foot can go all the way round with the gun. Dark slot, curbs."""
+    r0, r1 = SLOT
+    _annulus(k, root, "slot_dark", r0, r1, 0.0, 0.012, "bore", segs=96)
+    if level == 1:                                        # short logs pegged round the outer edge
+        n = 22
+        for i in range(n):
+            a = 2 * math.pi * i / n
+            c = Vector((math.cos(a), math.sin(a), 0)) * (r1 + 0.08)
+            tg = Vector((-math.sin(a), math.cos(a), 0)) * 0.21
+            k.tube("slot_log", c - tg + Vector((0, 0, 0.07)), c + tg + Vector((0, 0, 0.07)), 0.075, "log", parent=root,
                    segs=10)
         return
-    _annulus(k, root, "well_lining", WELL_R - 0.04, WELL_R + 0.1, -0.02, 0.1, lining)
+    lining = {2: "timber_tarred", 3: "stone", 4: "stone", 5: "stone"}[level]
+    _annulus(k, root, "slot_curb", r1, r1 + 0.1, 0.0, 0.1, lining, segs=96)
+    _annulus(k, root, "slot_curb", r0 - 0.08, r0, 0.0, 0.1, lining, segs=96)
+    if level == 5:
+        _annulus(k, root, "slot_gilt", r1 + 0.1, r1 + 0.13, 0.0, 0.1, "gold_trim", segs=96)
+
+
+def _floor(k, root, r, h, mat):
+    """Static floor inside the slot that the turntable turns on."""
+    k.cylinder("floor", r, h, (0, 0, 0), mat, segs=64, parent=root)
 
 
 def _base(k, root, level, s):
     z = DECK[level]
-    if level == 1:                                        # a log crib round the pit; the frame turns on it
+    r0 = SLOT[0] - 0.08
+    if level == 1:                                        # a log crib inside the slot; the frame turns on it
         for sy in (-1, 1):
-            k.tube("crib_log", (-1.2, sy * 1.02, 0.1), (1.2, sy * 1.02, 0.1), 0.1, "log", parent=root, segs=12)
+            k.tube("crib_log", (-0.9, sy * 0.82, 0.1), (0.9, sy * 0.82, 0.1), 0.1, "log", parent=root, segs=12)
         for sx in (-1, 1):
-            k.tube("crib_log", (sx * 1.02, -1.2, 0.12), (sx * 1.02, 1.2, 0.12), 0.1, "log", parent=root, segs=12)
+            k.tube("crib_log", (sx * 0.82, -0.9, 0.12), (sx * 0.82, 0.9, 0.12), 0.1, "log", parent=root, segs=12)
         for sx in (-1, 1):                                # pegs where the logs cross
             for sy in (-1, 1):
-                k.cylinder("crib_peg", 0.03, 0.1, (sx * 1.02, sy * 1.02, 0.2), "timber_raw", segs=8, parent=root)
+                k.cylinder("crib_peg", 0.03, 0.1, (sx * 0.82, sy * 0.82, 0.2), "timber_raw", segs=8, parent=root)
+        k.cylinder("pivot_post", 0.16, z - 0.2, (0, 0, 0), "log", segs=16, parent=root)
         return
-    if level == 2:                                        # plank platform with a hole over the well
+    if level == 2:                                        # a round plank floor inside the slot
         for i in range(12):
             y = -1.1 + i * 0.2
-            if abs(y) < WELL_R + 0.05:
-                for sx in (-1, 1):
-                    k.box("plank", (1.1 - WELL_R - 0.02, 0.19, 0.06), (sx * (WELL_R + 0.02 + (1.1 - WELL_R) / 2), y,
-                                                                    0.03), "timber_tarred", parent=root, bevel=0.005)
-            else:
-                k.box("plank", (2.3, 0.19, 0.06), (0, y, 0.03), "timber_tarred", parent=root, bevel=0.005)
-        for sx in (-1, 1):
-            k.box("sleeper", (0.16, 2.4, 0.1), (sx * 0.95, 0, -0.03), "timber_tarred", parent=root, bevel=0.005)
-        _annulus(k, root, "pivot_ring", WELL_R + 0.02, 1.08, 0.06, z - 0.16, "timber_tarred")
+            w = 2 * math.sqrt(max(r0 ** 2 - (abs(y) + 0.1) ** 2, 0.01))
+            k.box("plank", (w, 0.19, 0.06), (0, y, 0.03), "timber_tarred", parent=root, bevel=0.005)
+        _annulus(k, root, "pivot_ring", 0.3, 1.08, 0.06, z - 0.16, "timber_tarred")
         return
-    if level == 3:                                        # stone platform, toothed ring
-        _annulus(k, root, "platform", WELL_R + 0.1, 2.05, 0.0, 0.1, "stone", segs=64)
-        _annulus(k, root, "pivot_ring", WELL_R + 0.05, 1.1, 0.1, z - 0.18, "timber_oak")
-        R = 1.36
-        _annulus(k, root, "gear_ring", R - 0.08, R, 0.1, 0.1, "iron_black", segs=64)
-        for i in range(60):
-            a = 2 * math.pi * i / 60
+    if level == 3:                                        # stone floor and outer platform, toothed ring outside
+        _floor(k, root, r0, 0.1, "stone")
+        _annulus(k, root, "platform", SLOT[1] + 0.1, 2.15, 0.0, 0.1, "stone", segs=64)
+        _annulus(k, root, "pivot_ring", 0.3, 1.1, 0.1, z - 0.18, "timber_oak")
+        R = 1.78
+        _annulus(k, root, "gear_ring", R - 0.08, R, 0.1, 0.1, "iron_black", segs=96)
+        for i in range(84):
+            a = 2 * math.pi * i / 84
             k.box("gear_tooth", (0.05, 0.035, 0.08), (math.cos(a) * (R + 0.02), math.sin(a) * (R + 0.02), 0.14),
                   "iron_black", rot=(0, 0, a), parent=root, bevel=False)
         return
-    if level == 4:                                        # ring rail for the rollers
-        _annulus(k, root, "platform", WELL_R + 0.1, 2.15, 0.0, 0.1, "stone", segs=64)
-        _annulus(k, root, "pivot_ring", WELL_R + 0.05, 1.1, 0.1, z - 0.2, "iron_black")
+    if level == 4:                                        # ring rail for the carriage rollers
+        _floor(k, root, r0, 0.1, "stone")
+        _annulus(k, root, "platform", SLOT[1] + 0.1, 2.15, 0.0, 0.1, "stone", segs=64)
+        _annulus(k, root, "pivot_ring", 0.3, 1.1, 0.1, z - 0.2, "iron_black")
         _annulus(k, root, "rail", 1.82, 1.9, 0.1, 0.07, "steel_worn", segs=96)
         for i in range(24):
             a = 2 * math.pi * i / 24
@@ -263,8 +314,9 @@ def _base(k, root, level, s):
                   rot=(0, 0, a), parent=root, bevel=0.004)
         return
     # level 5: polished stone, a gilded ring and a ball race
-    _annulus(k, root, "platform", WELL_R + 0.1, 2.15, 0.0, 0.12, "stone", segs=64)
-    _annulus(k, root, "pivot_ring", WELL_R + 0.05, 1.12, 0.12, z - 0.26, "silver_satin", segs=64)
+    _floor(k, root, r0, 0.12, "stone")
+    _annulus(k, root, "platform", SLOT[1] + 0.13, 2.15, 0.0, 0.12, "stone", segs=64)
+    _annulus(k, root, "pivot_ring", 0.3, 1.12, 0.12, z - 0.26, "silver_satin", segs=64)
     _annulus(k, root, "gilded_ring", 1.12, 1.2, 0.12, z - 0.26, "gold_trim", segs=64)
     _annulus(k, root, "race", 1.82, 1.9, 0.12, 0.05, "gold_trim", segs=96)   # outer race for the carriage roller
     for i in range(36):
@@ -346,14 +398,16 @@ def _deck(k, t, level, s):
                   parent=t, bevel=0.008)
         return
     mat = s["deck"]
-    _annulus(k, t, "deck", WELL_R - 0.06, 1.25, z - 0.12, 0.12, mat, segs=48)
+    k.cylinder("deck_hub", 0.32, 0.12, (0, 0, z - 0.12), mat, segs=24, parent=t)
+    n = 30
+    for i in range(n):                                    # radial deck boards, a gap at the back for the ramp
+        a = 2 * math.pi * (i + 0.5) / n
+        if abs(math.atan2(math.sin(a + math.pi / 2), math.cos(a + math.pi / 2))) < math.radians(13):
+            continue
+        d = Vector((math.cos(a), math.sin(a), 0))
+        k.box("deck_board", (0.95, 0.27, 0.12), d * 0.78 + Vector((0, 0, z - 0.06)), mat, rot=(0, 0, a), parent=t,
+              bevel=0.006)
     _carriage(k, t, level, s)
-    if level in (2, 3):                                   # plank seams
-        for i in range(16):
-            a = 2 * math.pi * i / 16
-            d = Vector((math.cos(a), math.sin(a), 0))
-            k.box("deck_seam", (0.42, 0.012, 0.004), d * 1.0 + Vector((0, 0, z + 0.001)), "timber_raw" if level == 2
-                  else "iron_black", rot=(0, 0, a), parent=t, bevel=False)
     if level == 2:                                        # tiller bar at the back to push it round
         a, b = Vector((-0.25, -1.15, z + 0.05)), Vector((-0.3, -2.25, z + 0.35))
         k.beam("tiller", a, b, (0.12, 0.12), "timber_tarred", parent=t, bevel=0.008)
@@ -363,10 +417,10 @@ def _deck(k, t, level, s):
     if level == 3:                                        # crank and pinion on the toothed ring
         p = Vector((-0.95, -0.95, z))
         k.cylinder("pinion_post", 0.06, 0.4, p - Vector((0, 0, 0.5)), "iron_black", segs=12, parent=t)
-        k.cylinder("pinion", 0.1, 0.08, (math.cos(math.radians(225)) * 1.44, math.sin(math.radians(225)) * 1.44, 0.12),
+        k.cylinder("pinion", 0.1, 0.08, (math.cos(math.radians(225)) * 1.86, math.sin(math.radians(225)) * 1.86, 0.12),
                    "iron_black", segs=12, parent=t)
-        k.beam("pinion_arm", p + Vector((0, 0, -0.1)), (math.cos(math.radians(225)) * 1.44,
-                                                         math.sin(math.radians(225)) * 1.44, 0.24), (0.06, 0.06),
+        k.beam("pinion_arm", p + Vector((0, 0, -0.1)), (math.cos(math.radians(225)) * 1.86,
+                                                         math.sin(math.radians(225)) * 1.86, 0.24), (0.06, 0.06),
                "iron_black", parent=t, bevel=False)
         k.tube("crank_shaft", p + Vector((0, 0, -0.1)), p + Vector((0, 0, 0.55)), 0.03, "iron_black", parent=t, segs=10)
         k.beam("crank_arm", p + Vector((0, 0, 0.55)), p + Vector((-0.25, 0, 0.55)), (0.04, 0.04), "iron_black",
@@ -375,7 +429,7 @@ def _deck(k, t, level, s):
                segs=8)
     if level == 5:
         k.torus("deck_trim", 1.25, 0.025, (0, 0, z), "gold_trim", parent=t, segs=64, tube_segs=6)
-        k.torus("deck_trim", WELL_R - 0.06, 0.02, (0, 0, z), "gold_trim", parent=t, segs=40, tube_segs=6)
+        k.torus("deck_trim", 0.32, 0.02, (0, 0, z), "gold_trim", parent=t, segs=40, tube_segs=6)
 
 
 def _carriage(k, t, level, s):
@@ -411,8 +465,15 @@ def _gun(k, t, level, s):
     B = s["band"]
     # back plate and the gate in its centre
     back = s["wood"] if level == 1 else (s["body"] if level >= 3 else "timber_tarred")
-    k.lathe("back_plate", [(-0.09, 0.0), (-0.09, RB), (0.0, RB), (0.0, 0.0)], back, segs=40, loc=G, rot=ROT_D,
-            parent=t)
+    if level == 1:                                        # open back: a ring with four spokes to the gate
+        k.torus("back_ring", RB - 0.04, 0.04, G - D * 0.04, back, rot=ROT_Z_TO_D, parent=t, segs=36, tube_segs=6)
+        for i in range(4):
+            a = math.pi / 4 + i * math.pi / 2
+            k.beam("back_spoke", G - D * 0.04 + _radial(a) * 0.1, G - D * 0.04 + _radial(a) * (RB - 0.05),
+                   (0.05, 0.04), back, parent=t, bevel=0.004)
+    else:
+        k.lathe("back_plate", [(-0.09, 0.0), (-0.09, RB), (0.0, RB), (0.0, 0.0)], back, segs=40, loc=G, rot=ROT_D,
+                parent=t)
     k.box("gate", (0.26, 0.06, 0.26), G - D * 0.11, s["fit"], rot=ROT_D, parent=t, bevel=0.01)
     k.box("gate_hinge", (0.06, 0.08, 0.3), G - D * 0.11 + Vector((-0.14, 0, 0)), s["fit"], rot=ROT_D, parent=t,
           bevel=0.006)
@@ -446,11 +507,16 @@ def _gun(k, t, level, s):
                        bevel=False)
     # the bore and its mouth ring
     if level == 1:
-        k.tube("bore_tube", G, _along(level, GL), 0.075, "wood", parent=t, segs=14)
-    k.lathe("mouth", [(GL - 0.14, 0.0), (GL - 0.14, RM + 0.035), (GL + 0.04, RM + 0.035), (GL + 0.04, 0.0)],
-            s["fit"] if level > 1 else "iron_forged", segs=28, loc=G, rot=ROT_D, parent=t)
-    k.lathe("mouth_bore", [(GL + 0.041, 0.0), (GL + 0.041, 0.07), (GL + 0.043, 0.07), (GL + 0.043, 0.0)], "bore",
-            segs=20, loc=G, rot=ROT_D, parent=t)
+        k.torus("mouth_ring", RM + 0.01, 0.026, _along(level, GL - 0.04), "iron_forged", rot=ROT_Z_TO_D, parent=t,
+                segs=28, tube_segs=6)
+        k.lathe("mouth_bore", [(GL + 0.001, 0.0), (GL + 0.001, 0.05), (GL + 0.003, 0.05), (GL + 0.003, 0.0)], "bore",
+                segs=16, loc=G, rot=ROT_D, parent=t)
+    else:
+        k.lathe("mouth", [(GL - 0.14, 0.0), (GL - 0.14, RM + 0.035), (GL + 0.04, RM + 0.035), (GL + 0.04, 0.0)],
+                s["fit"], segs=28, loc=G, rot=ROT_D, parent=t)
+        k.lathe("mouth_bore", [(GL + 0.041, 0.0), (GL + 0.041, 0.07), (GL + 0.043, 0.07), (GL + 0.043, 0.0)], "bore",
+                segs=20, loc=G, rot=ROT_D, parent=t)
+    _bore_spear(k, t, level, s)
     if level >= 4:                                        # a crown on the mouth
         k.lathe("mouth_crown", [(GL - 0.02, RM + 0.035), (GL + 0.08, RM + 0.06), (GL + 0.1, RM + 0.04),
                                 (GL + 0.1, 0.075), (GL + 0.04, 0.075)], s["band"], segs=28, loc=G, rot=ROT_D, parent=t)
@@ -465,24 +531,64 @@ def _gun(k, t, level, s):
 
 
 def _cage(k, t, level, s):
-    """Level 1: open frame of pine staves and rope-lashed hoops, a leather air bag inside."""
-    for i in range(8):
-        a = 2 * math.pi * i / 8 + math.pi / 8
+    """Level 1, left open so the works show (user 2026-11-22): six thin pine staves and three
+    hoops give the funnel; inside, a leather air chest at the wide end feeds a slotted wooden
+    air pipe; a sled rides on the pipe with a web down through the slot (sealed by a leather
+    flap, like an atmospheric railway), and the spear lies on the sled and on the pipe."""
+    G = _gate(level)
+    for i in range(6):
+        a = 2 * math.pi * i / 6
         k.beam("cage_stave", _along(level, 0.0, _radial(a) * (RB - 0.04)),
-               _along(level, GL - 0.12, _radial(a) * (RM - 0.01)), (0.06, 0.05), "timber_raw", parent=t, bevel=0.006)
-    for sv in (0.04, 1.2, 2.3):
+               _along(level, GL - 0.06, _radial(a) * (RM - 0.01)), (0.045, 0.04), "timber_raw", parent=t, bevel=0.005)
+    for sv in (0.04, 1.3, 2.4):
         rr = _r(sv)
-        k.torus("cage_hoop", rr - 0.02, 0.035, _along(level, sv), "timber_raw", rot=ROT_Z_TO_D, parent=t, segs=36,
+        k.torus("cage_hoop", rr - 0.02, 0.026, _along(level, sv), "timber_raw", rot=ROT_Z_TO_D, parent=t, segs=36,
                 tube_segs=6)
-        for i in range(8):                                # lashings where staves cross the hoops
-            a = 2 * math.pi * i / 8 + math.pi / 8
-            k.torus("lash", 0.045, 0.012, _along(level, sv, _radial(a) * (rr - 0.03)), "hemp", rot=ROT_D, parent=t,
+        for i in range(6):                                # lashings where staves cross the hoops
+            a = 2 * math.pi * i / 6
+            k.torus("lash", 0.04, 0.011, _along(level, sv, _radial(a) * (rr - 0.03)), "hemp", rot=ROT_D, parent=t,
                     segs=10, tube_segs=4)
-    # the leather air bag round the bore, tied at both ends
-    k.lathe("air_bag", [(0.02, 0.08), (0.1, 0.36), (0.5, 0.44), (1.1, 0.4), (1.7, 0.26), (2.0, 0.12), (2.1, 0.08)],
-            "leather", segs=28, loc=_gate(level), rot=ROT_D, parent=t)
-    for sv in (0.06, 2.08):
-        k.torus("bag_tie", 0.09, 0.02, _along(level, sv), "hemp", rot=ROT_Z_TO_D, parent=t, segs=14, tube_segs=5)
+    # the leather air chest at the wide end, tapering into the pipe
+    k.lathe("air_chest", [(0.02, 0.06), (0.04, 0.2), (0.14, 0.24), (0.36, 0.2), (0.5, 0.09), (0.55, 0.06)],
+            "leather", segs=24, loc=G, rot=ROT_D, parent=t)
+    for sv in (0.1, 0.3):
+        k.torus("chest_tie", 0.235 if sv < 0.2 else 0.22, 0.014, _along(level, sv), "hemp",
+                rot=ROT_Z_TO_D, parent=t, segs=24, tube_segs=4)
+    # the slotted air pipe (the bore) and its leather flap over the slot
+    k.tube("air_pipe", _along(level, 0.5), _along(level, GL), 0.06, "timber_oak", parent=t, segs=16)
+    k.beam("pipe_flap", _along(level, 0.6, N * 0.061), _along(level, GL - 0.05, N * 0.061), (0.045, 0.008),
+           "leather", parent=t, bevel=False)
+    for sv in (0.7, 1.15, 1.9, 2.6):                      # half straps under the pipe (the slot stays clear)
+        k.lathe("pipe_strap", [(sv, 0.0), (sv, 0.068), (sv + 0.05, 0.068), (sv + 0.05, 0.0)], "iron_forged", segs=16,
+                loc=G, rot=ROT_D, parent=t)
+    # a fork at the mouth end of the pipe: the stop that catches the sled
+    k.box("sled_stop", (0.12, 0.05, 0.08), _along(level, GL - 0.18, N * 0.09), "iron_forged", rot=ROT_D, parent=t,
+          bevel=0.004)
+
+
+def _bore_spear(k, t, level, s):
+    """The loaded spear in the bore, its head out of the mouth until the throw, on its sled.
+    Level 1 shows the sled riding the pipe; higher levels hide it inside the chamber."""
+    bore = k.empty("bore_carrier", (0, 0, 0), parent=t)
+    _RIG["bore"] = bore
+    off = N * ON_PIPE if level == 1 else Vector((0, 0, 0))
+    before = set(bpy.data.objects)
+    _spear(k, t, _along(level, TAIL_READY) + off, D, level, s)
+    spear = set(bpy.data.objects) - before
+    _RIG["bore_spear"] = list(spear)
+    if level == 1:                                        # the sled: a saddle on the pipe with a fork for the tail
+        c = _along(level, TAIL_READY + 0.1, N * 0.075)
+        sled = [k.box("sled", (0.13, 0.32, 0.04), c, "timber_oak", rot=ROT_D, parent=t, bevel=0.006)]
+        for sx in (-1, 1):
+            sled.append(k.beam("sled_fork", c + X * sx * 0.045 - D * 0.1, c + X * sx * 0.045 - D * 0.1 + N * 0.07,
+                               (0.02, 0.04), "iron_forged", parent=t, bevel=False))
+        sled.append(k.box("sled_web", (0.02, 0.24, 0.05), c - N * 0.03, "iron_forged", rot=ROT_D, parent=t,
+                          bevel=False))
+        sled.append(k.box("sled_heel", (0.1, 0.03, 0.09), c - D * 0.16 + N * 0.04, "iron_forged", rot=ROT_D, parent=t,
+                          bevel=False))
+        spear |= set(sled)
+    for o in spear:
+        _keep_world(o, bore)
 
 
 def _cheeks(k, t, level, s):
@@ -512,16 +618,22 @@ def _F(sv):
 X = Vector((1, 0, 0))
 
 
+CH = 0.085               # conveyor chain runs this far under the spear line
+RS = 0.12                # head sprocket radius
+
+
 def _feed(k, t, level, s):
-    """The feed: the spears come up out of the well along the line of the bore, pointing the
-    way they will fly, chained nose to tail (user's idea). When the spear in the bore is
-    thrown, its tail chain draws the waiting spear up through the gate and the next one up
-    behind it; the catch at the gate trips the hook so the thrown spear lets go.
-    Run: peeled poles (1), an open tarred trough (2), a closed chute (3-5)."""
-    sv0, sv1 = -0.25, FEED_L - 0.14
+    """The feed, left open so the lift reads (user 2026-11-22): the spears come up out of the
+    well along the line of the bore, pointing the way they will fly, chained nose to tail.
+    An endless chain runs up the run under them and over a head sprocket below the gate;
+    a dog on the chain behind each spear's tail pushes it up into the gate. The crew turns
+    the sprocket with a crank (1-3), through gears (4), or the steam engine drives it (5).
+    Run: peeled poles (1), an open tarred trough (2), open rails on cross ties (3-5)."""
+    sv0, sv1 = -0.3, FEED_L - 0.14
     p0, p1 = _F(sv0), _F(sv1)
     zc = DECK[level] - 0.08                               # cross bar on the deck that carries the run
     svc = (zc + 0.08) / math.sin(TILT)
+    wood = {1: "timber_raw", 2: "timber_tarred"}.get(level, s["fit"])
     if level == 1:
         for sx in (-1, 1):
             off = X * sx * 0.065 - N * 0.05
@@ -529,47 +641,115 @@ def _feed(k, t, level, s):
             for sv in (svc, sv1 - 0.1):
                 k.torus("feed_lash", 0.05, 0.012, _F(sv) + off, "hemp", rot=ROT_Z_TO_D, parent=t, segs=10,
                         tube_segs=4)
-        k.beam("feed_bar", (-0.86, _F(svc).y, zc), (0.86, _F(svc).y, zc), (0.12, 0.12), "timber_raw", parent=t,
-               bevel=0.006)
         k.beam("feed_hanger", _F(sv1 - 0.1) - N * 0.08, _gate(level) - N * (RB - 0.02) - D * 0.02, (0.1, 0.05),
                "timber_raw", parent=t, bevel=0.004)
     elif level == 2:
-        k.beam("trough_floor", p0 - N * 0.075, p1 - N * 0.075, (0.2, 0.035), "timber_tarred", parent=t, bevel=0.004)
+        k.beam("trough_floor", p0 - N * 0.11, p1 - N * 0.11, (0.24, 0.03), "timber_tarred", parent=t, bevel=0.004)
         for sx in (-1, 1):
-            k.beam("trough_side", p0 + X * sx * 0.09 - N * 0.02, p1 + X * sx * 0.09 - N * 0.02, (0.03, 0.12),
+            k.beam("trough_side", p0 + X * sx * 0.11 - N * 0.04, p1 + X * sx * 0.11 - N * 0.04, (0.03, 0.14),
                    "timber_tarred", parent=t, bevel=0.003)
-        for sv in (0.15, 0.6, 1.05, sv1 - 0.06):
-            k.beam("trough_band", _F(sv) - N * 0.035, _F(sv + 0.05) - N * 0.035, (0.25, 0.15), "iron_forged", parent=t,
-                   bevel=False)
-        k.beam("feed_bar", (-0.86, _F(svc).y, zc), (0.86, _F(svc).y, zc), (0.14, 0.12), "timber_tarred", parent=t,
-               bevel=0.006)
+        for sv in (0.15, 0.6, sv1 - 0.06):
+            k.beam("trough_band", _F(sv) - N * 0.045, _F(sv + 0.05) - N * 0.045, (0.27, 0.16), "iron_forged",
+                   parent=t, bevel=False)
     else:
-        mat = s["body"]
-        k.beam("chute", p0, p1, (0.24, 0.24), mat, parent=t, bevel=0.015)
-        k.beam("chute_slot", _F(0.25) + N * 0.121, _F(sv1 - 0.15) + N * 0.121, (0.05, 0.004), "bore", parent=t,
+        rail = {3: "iron_black", 4: "iron_black", 5: "silver_satin"}[level]
+        for sx in (-1, 1):
+            k.beam("feed_rail", p0 + X * sx * 0.075 - N * 0.055, p1 + X * sx * 0.075 - N * 0.055, (0.035, 0.05),
+                   rail, parent=t, bevel=0.003)
+            k.tube("feed_guide", p0 + X * sx * 0.1 + N * 0.04 + D * 0.3, p1 + X * sx * 0.1 + N * 0.04, 0.014,
+                   s["band"], parent=t, segs=8, bevel=False)
+        n = 5
+        for i in range(n):
+            sv = 0.05 + i * (sv1 - 0.15) / (n - 1)
+            k.beam("feed_tie", _F(sv) - N * 0.1, _F(sv + 0.05) - N * 0.1, (0.3, 0.04), s["wood"] if level == 3 else
+                   s["body"], parent=t, bevel=0.003)
+            for sx in (-1, 1):                            # little posts holding the guide rods
+                k.beam("guide_post", _F(sv) + X * sx * 0.1 - N * 0.08, _F(sv) + X * sx * 0.1 + N * 0.04,
+                       (0.016, 0.016), s["band"], parent=t, bevel=False)
+    k.beam("feed_bar", (-0.86, _F(svc).y, zc), (0.86, _F(svc).y, zc), (0.13, 0.12), wood, parent=t, bevel=0.006)
+    # the endless chain: up under the spears, over the head sprocket, back down into the well
+    sv_top = sv1 - 0.22
+    O = _F(sv_top) - N * (CH + RS)
+    up_strand = [_F(sv0) - N * CH, _F(sv_top) - N * CH]
+    arc = [O + (N * math.cos(a) + D * math.sin(a)) * RS for a in [i * math.pi / 6 for i in range(7)]]
+    down_strand = [O - N * RS, _F(sv0) - N * (CH + 2 * RS)]
+    _links(k, t, [up_strand[0], up_strand[1]] + arc[1:] + [down_strand[1]])
+    sm = {1: "timber_raw", 2: "iron_forged", 3: "iron_black", 4: "bronze_old", 5: "gold_trim"}[level]
+    k.cylinder("head_sprocket", RS - 0.02, 0.05, O - X * 0.025, sm, segs=24, rot=(0, math.pi / 2, 0), parent=t)
+    for i in range(10):
+        a = 2 * math.pi * i / 10
+        v = N * math.cos(a) + D * math.sin(a)
+        if level == 1:
+            k.tube("sprocket_peg", O + v * (RS - 0.03) - X * 0.04, O + v * (RS - 0.03) + X * 0.04, 0.014,
+                   "timber_oak", parent=t, segs=6, bevel=False)
+        else:
+            k.beam("sprocket_tooth", O + v * (RS - 0.03), O + v * (RS + 0.01), (0.03, 0.04), sm, parent=t, bevel=False)
+    xs = 0.42 if level == 4 else 0.3
+    k.tube("sprocket_shaft", O - X * 0.24, O + X * xs, 0.025, "steel_worn" if level > 1 else "timber_oak", parent=t,
+           segs=10)
+    zd = DECK[level]
+    for sx in (-0.2, 0.2):                                # bearing posts down to a bar on the deck
+        k.beam("sprocket_post", O + X * sx, Vector((O.x + sx, O.y, zd)), (0.07, 0.07), wood, parent=t, bevel=0.004)
+    k.beam("sprocket_bar", (-0.86, O.y, zd - 0.06), (0.86, O.y, zd - 0.06), (0.12, 0.12), wood, parent=t,
+           bevel=0.006)
+    if level <= 3:                                        # a hand crank on the shaft
+        e = O + X * xs
+        k.beam("crank_arm", e, e + N * 0.26, (0.035, 0.03), "timber_raw" if level == 1 else s["fit"], parent=t,
                bevel=False)
-        for sv in (0.2, 0.75, sv1 - 0.05):
-            k.beam("chute_band", _F(sv), _F(sv + 0.06), (0.27, 0.27), s["band"], parent=t, bevel=0.004)
-        if level == 3:
-            for sx in (-1, 1):
-                fx.rivets(k, t, _F(0.3) + X * sx * 0.122, _F(sv1 - 0.1) + X * sx * 0.122, 8, X * sx, r=0.016)
-        k.beam("feed_bar", (-0.86, _F(svc).y, zc), (0.86, _F(svc).y, zc), (0.14, 0.12), s["fit"], parent=t,
-               bevel=0.006)
-    # the chained spears: the waiting one in the run, the next below it in the well
+        k.tube("crank_grip", e + N * 0.26, e + N * 0.26 + X * 0.16, 0.022, "timber_oak", parent=t, segs=8)
+    else:
+        g = O + X * 0.4                                   # drive gear and pinion
+        k.cylinder("drive_gear", 0.2, 0.05, g - X * 0.025, s["fit"], segs=32, rot=(0, math.pi / 2, 0), parent=t)
+        for i in range(18):
+            a = 2 * math.pi * i / 18
+            v = N * math.cos(a) + D * math.sin(a)
+            k.beam("gear_tooth", g + v * 0.19, g + v * 0.23, (0.05, 0.035), s["fit"], parent=t, bevel=False)
+        pn = g - D * 0.28 + N * 0.02
+        k.cylinder("drive_pinion", 0.08, 0.05, pn - X * 0.025, s["band"], segs=14, rot=(0, math.pi / 2, 0), parent=t)
+        k.beam("gear_bracket", pn + X * 0.06, Vector((pn.x + 0.06, pn.y, zd)), (0.05, 0.08), s["fit"], parent=t,
+               bevel=False)
+        if level == 4:
+            k.beam("crank_arm", pn + X * 0.08, pn + X * 0.08 + N * 0.24, (0.035, 0.035), s["fit"], parent=t,
+                   bevel=False)
+            k.tube("crank_grip", pn + X * 0.08 + N * 0.24, pn + X * 0.22 + N * 0.24, 0.022, "timber_oak", parent=t,
+                   segs=8)
+        else:
+            _RIG["sprocket_drive"] = pn + X * 0.1
+    # the chained spears: the waiting one in the run, the next below it in the well, a dog
+    # on the conveyor behind each tail
     carrier = k.empty("feed_carrier", (0, 0, 0), parent=t)
     _RIG["carrier"] = carrier
     before = set(bpy.data.objects)
     nose = _gate(level) - D * 0.13
-    _chain(k, t, nose + D * 0.1, nose, 2)                 # up through the gate to the spear in the bore
     tail = nose - D * SPEAR_L
-    _spear(k, t, tail, D, level, s)
-    nose2 = tail - D * GAP
-    _chain(k, t, tail, nose2, 3)
-    tail2 = nose2 - D * SPEAR_L
-    _spear(k, t, tail2, D, level, s)
-    _chain(k, t, tail2, tail2 - D * GAP, 3)
+    for i in range(2):
+        _spear(k, t, tail, D, level, s)
+        k.beam("conveyor_dog", tail - D * 0.04 - N * (CH - 0.01), tail - D * 0.04 + N * 0.03, (0.05, 0.05),
+               "steel_worn", parent=t, bevel=False)
+        _chain(k, t, tail, tail - D * GAP, 2)
+        tail = tail - D * (SPEAR_L + GAP)
     for o in set(bpy.data.objects) - before:
         _keep_world(o, carrier)
+
+
+def _links(k, t, pts, pitch=0.07):
+    """Forged chain links along a polyline."""
+    i = 0
+    for a, b in zip(pts[:-1], pts[1:]):
+        L = (b - a).length
+        if L < 1e-4:
+            continue
+        d = (b - a) / L
+        q = d.to_track_quat("Y", "Z")
+        n = max(1, round(L / pitch))
+        for j in range(n):
+            p = a + d * (L * (j + 0.5) / n)
+            e = q.to_euler()
+            e.rotate_axis("Y", math.pi / 2 * (i % 2))
+            o = k.torus("chain_link", 0.026, 0.008, p, "steel_worn", parent=t, segs=8, tube_segs=4)
+            o.rotation_euler = e
+            o.scale = (1.0, 1.5, 1.0)
+            i += 1
 
 
 def _chain(k, t, a, b, n):
@@ -704,39 +884,6 @@ def _receiver(k, t, level, s):
                              G + Vector((-0.3, 0, 0.0)) + D * 0.12], 0.035, s["band"], parent=t)
 
 
-def _sprocket(k, t, level, s):
-    """Level 4+: a sprocket on the chute draws the chain up by gears, so the next spear is in
-    the gate before the weight is back up (a crank at 4, the steam engine at 5)."""
-    c = _F(0.95)
-    gold = level == 5
-    M = s["band"]
-    for sx in (-1, 1):                                    # twin sprocket wheels astride the chute
-        cc = c + X * sx * 0.15
-        k.cylinder("sprocket", 0.19, 0.035, cc - X * 0.0175, M, segs=28, rot=(0, math.pi / 2, 0), parent=t)
-        for i in range(12):
-            a = 2 * math.pi * i / 12
-            v = Vector((0, math.cos(a), math.sin(a)))
-            k.box("sprocket_tooth", (0.035, 0.05, 0.05), cc + v * 0.2, M, rot=(a, 0, 0), parent=t, bevel=False)
-    k.tube("sprocket_shaft", c - X * 0.24, c + X * 0.52, 0.03, "steel_worn", parent=t, segs=10)
-    g = c + X * 0.42                                      # drive gear and pinion
-    k.cylinder("drive_gear", 0.22, 0.05, g - X * 0.025, s["fit"], segs=32, rot=(0, math.pi / 2, 0), parent=t)
-    for i in range(20):
-        a = 2 * math.pi * i / 20
-        v = Vector((0, math.cos(a), math.sin(a)))
-        k.box("gear_tooth", (0.05, 0.035, 0.035), g + v * 0.23, s["fit"], rot=(a, 0, 0), parent=t, bevel=False)
-    pn = g + Vector((0, -0.29, 0.06))
-    k.cylinder("drive_pinion", 0.08, 0.05, pn - X * 0.025, s["band"], segs=14, rot=(0, math.pi / 2, 0), parent=t)
-    k.beam("gear_bracket", pn + X * 0.06 - Vector((0, 0, 0.0)), pn + X * 0.06 - Vector((0, 0, pn.z - DECK[level])),
-           (0.05, 0.08), s["fit"], parent=t, bevel=False)
-    if level == 4:
-        k.beam("crank_arm", pn + X * 0.08, pn + X * 0.08 + Vector((0, -0.05, 0.24)), (0.035, 0.035), s["fit"], parent=t,
-               bevel=False)
-        k.tube("crank_grip", pn + X * 0.08 + Vector((0, -0.05, 0.24)), pn + X * 0.22 + Vector((0, -0.05, 0.24)),
-               0.022, "timber_oak", parent=t, segs=8)
-    else:
-        _RIG["sprocket_drive"] = pn + X * 0.1
-
-
 def _compressor(k, t, level, s):
     """Level 5: a small vertical boiler and a steam compressor on the deck, front left."""
     z = DECK[level]
@@ -769,11 +916,11 @@ def _compressor(k, t, level, s):
 # -- animation -------------------------------------------------------------------------------
 def _pose(f):
     if f == 0:
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0, True
     return FIRE[f - 1]
 
 
-def _apply(drop, feed):
+def _apply(drop, feed, pos, shown):
     wt = _RIG["weight"]
     wt.location = _RIG["weight_rest"] + Vector((0, 0, -drop * _RIG["drop"]))
     rope, top0, pulley = _RIG["rope"]
@@ -783,6 +930,7 @@ def _apply(drop, feed):
     rope.rotation_euler = d.to_track_quat("Z", "Y").to_euler()
     rope.scale = (1, 1, max(d.length, 0.01))
     _RIG["carrier"].location = D * feed * (SPEAR_L + GAP)
+    _RIG["bore"].location = D * (pos * (SLED_STOP if pos > 0 else TAIL_READY))
 
 
 def key_fire_animation(scene):
@@ -791,18 +939,21 @@ def key_fire_animation(scene):
     prefs.keyframe_new_interpolation_type = "LINEAR"
     for f in range(FIRE_FRAMES + 1):
         _apply(*_pose(f))
-        _RIG["weight"].keyframe_insert("location", frame=f)
-        _RIG["carrier"].keyframe_insert("location", frame=f)
+        for o in (_RIG["weight"], _RIG["carrier"], _RIG["bore"]):
+            o.keyframe_insert("location", frame=f)
         for p in ("location", "rotation_euler", "scale"):
             _RIG["rope"][0].keyframe_insert(p, frame=f)
     prefs.keyframe_new_interpolation_type = old
 
 
 def set_fire_frame(f, scene=None):
+    pose = _pose(f)
     if scene is not None and _RIG["weight"].animation_data is not None:
         scene.frame_set(f)
     else:
-        _apply(*_pose(f))
+        _apply(*pose)
+    for o in _RIG["bore_spear"]:
+        o.hide_render = not pose[3]
     bpy.context.view_layer.update()
 
 

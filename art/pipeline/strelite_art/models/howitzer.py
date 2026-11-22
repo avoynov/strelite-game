@@ -199,10 +199,12 @@ def _carriage(k, t, level=1):
                a.lerp(b, 0.7) + Vector((0, 0, 0.14)), 0.02, "chrome", parent=t, segs=12)
 
         # --- road wheel, lifted off the ground on its suspension arm
-        hub = Vector((sx * 1.3, 0.95, 0.66))
+        hub = Vector((sx * 1.16, 0.95, 0.66))               # tyre's inner face sits on the arm's hub boss
         k.beam("arm", (sx * 0.55, 0.3, 0.5), (sx * 0.98, 0.93, 0.64), (0.13, 0.22), OLIVE,
                section_end=(0.11, 0.16), parent=t, bevel=0.01)
-        k.tube("axle", (sx * 0.9, 0.95, 0.66), hub, 0.06, STEEL, parent=t)
+        k.tube("axle", (sx * 0.9, 0.95, 0.66), hub, 0.09, STEEL, parent=t)
+        k.cylinder("hub_boss", 0.15, 0.08, (sx * 0.94, 0.95, 0.66), OLIVE, segs=20,
+                   rot=(0, sx * math.pi / 2, 0), parent=t)
         k.tube("gas_strut", (sx * 0.56, 0.75, 0.62), (sx * 0.95, 0.6, 0.58), 0.045, OLIVE, parent=t)
         _wheel(k, t, hub, sx, "rubber_black" if level >= 3 else "rubber")
 
@@ -231,7 +233,7 @@ def _wheel(k, t, hub, sx, rubber="rubber"):
             a = 2 * math.pi * (i + off) / n
             k.box("lug_block", (0.03, 0.125, 0.048),
                   (0.522 * math.cos(a), row * 0.068, 0.522 * math.sin(a)), rubber,
-                  rot=(0, -a, row * 0.25), parent=w, bevel=False)
+                  rot=(row * 0.25, -a, 0), parent=w, bevel=False)   # chevron twist about the radial axis
 
 
 def _saddle(k, t, level=1):
