@@ -31,7 +31,7 @@ import random
 
 import bmesh
 import bpy
-from mathutils import Matrix, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 from .geo import Kit
 
@@ -270,6 +270,78 @@ def _boolean(obj, cutter):
         m.use_hole_tolerant = True
     except AttributeError:
         pass
+
+
+def _hull_proxy(parts):
+    """One invisible mesh holding every vertex of `parts` in world space, to simulate them as one
+    rigid body (its convex hull) and then move the real parts by the same transform."""
+    bpy.context.view_layer.update()
+    dg = bpy.context.evaluated_depsgraph_get()
+    bm = bmesh.new()
+    for o in parts:
+        me = bpy.data.meshes.new_from_object(o.evaluated_get(dg))
+        me.transform(o.matrix_world)
+        bm.from_mesh(me)
+        bpy.data.meshes.remove(me)
+    c = sum((v.co for v in bm.verts), Vector()) / max(1, len(bm.verts))
+    bmesh.ops.translate(bm, verts=bm.verts, vec=-c)
+    me = bpy.data.meshes.new("turret_proxy")
+    bm.to_mesh(me)
+    bm.free()
+    obj = bpy.data.objects.new("turret_proxy", me)
+    bpy.context.scene.collection.objects.link(obj)
+    obj.location = c
+    obj.hide_render = True
+    bpy.context.view_layer.update()
+    d = obj.dimensions
+    obj["rb_mass"] = max(1.0, d.x * d.y * d.z * 0.5)
+    obj["rb_damping"] = 0.6
+    return obj
+
+
+def _stable_rest(obj, rnd, com=None):
+    """Rotation (quaternion, object space) that sets `obj` down on its most stable face: of the
+    convex hull's faces whose plane holds the centre of mass inside the face, the one nearest to
+    it. Faces within 5 cm of the best are taken at random, so wrecks of one gun differ."""
+    bm = bmesh.new()
+    bm.from_mesh(obj.data)
+    hull = bmesh.ops.convex_hull(bm, input=bm.verts[:])
+    bmesh.ops.delete(bm, geom=[v for v in hull["geom_interior"] + hull["geom_unused"]
+                               if isinstance(v, bmesh.types.BMVert) and v.is_valid], context="VERTS")
+    bmesh.ops.dissolve_limit(bm, angle_limit=math.radians(3), verts=bm.verts[:], edges=bm.edges[:])
+    bm.normal_update()
+    # centre of mass of the solid hull
+    vol, com_h = 0.0, Vector()
+    bm.verts.ensure_lookup_table()
+    o = bm.verts[0].co.copy() if bm.verts else Vector()
+    for f in bm.faces:
+        vs = [v.co for v in f.verts]
+        for i in range(1, len(vs) - 1):
+            v6 = (vs[0] - o).dot((vs[i] - o).cross(vs[i + 1] - o))
+            vol += v6
+            com_h += v6 * (o + vs[0] + vs[i] + vs[i + 1]) / 4
+    if com is None:
+        com = com_h / vol if abs(vol) > 1e-9 else sum((v.co for v in bm.verts), Vector()) / max(1, len(bm.verts))
+    rests = []
+    for f in bm.faces:
+        n = f.normal.normalized()
+        d = (com - f.verts[0].co).dot(n)          # negative: the centre is inside the hull
+        p = com - n * d                           # the centre dropped onto the face plane
+        inside = True
+        for e in f.edges:
+            a, b = e.verts[0].co, e.verts[1].co
+            if (b - a).cross(p - a).dot(n) * (b - a).cross(f.calc_center_median() - a).dot(n) < 0:
+                inside = False
+                break
+        if inside and f.calc_area() > 1e-4:
+            rests.append((abs(d), n))
+    bm.free()
+    if not rests:
+        return Quaternion()
+    rests.sort(key=lambda r: r[0])
+    best = [r for r in rests if r[0] < rests[0][0] + 0.05]
+    _, n = rnd.choice(best)
+    return n.rotation_difference(Vector((0, 0, -1)))
 
 
 def _bake_modifiers(objs):
@@ -678,9 +750,121 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
                     debris.remove(o)
                 bpy.data.objects.remove(o)
 
+    # --- a wrecked gun is broken into a few chunks that each fall on their most stable side;
+    #     one chunk and part of the small pieces are gone (blown away) ---------------------
+    proxies = []                                # (proxy, start matrix, parts)
+    turret_parts = []
+    if state == "wreck" and tilt is not None and tilt[0].name in bpy.data.objects:
+        dset = set(debris)
+        turret_parts = [o for o in tilt[0].children_recursive
+                        if o.type == "MESH" and o.name in bpy.data.objects and o not in dset
+                        and not o.hide_render and o.data.polygons]
+        tset = set(turret_parts)
+        tb = [b for b in (_world_bbox(o) for o in turret_parts) if b is not None]
+        tlo = Vector((min(b[0].x for b in tb) - 0.3, min(b[0].y for b in tb) - 0.3, 0)) if tb else None
+        thi = Vector((max(b[1].x for b in tb) + 0.3, max(b[1].y for b in tb) + 0.3, 0)) if tb else None
+        for o in list(scene.objects) if tb else []:   # the timber or metal stand goes too; masonry stays
+            if (o.type != "MESH" or o in tset or o in dset or o.get("terrain") or o.hide_render
+                    or o.name.startswith(KEEP) or not o.data.polygons or not o.data.materials):
+                continue
+            b = _world_bbox(o)
+            mat = _mat_name(o)
+            if (b is not None and b[1].z > 0.6 and not any(s_ in mat for s_ in STONE)
+                    and b[0].x > tlo.x and b[1].x < thi.x and b[0].y > tlo.y and b[1].y < thi.y):
+                turret_parts.append(o)
+        for o in turret_parts:
+            _unparent(o)
+        bpy.context.view_layer.update()
+        boxes_t = {o: _world_bbox(o) for o in turret_parts}
+
+        def _w(o):
+            d = o.dimensions
+            return max(1e-6, d.x * d.y * d.z)
+
+        def _ctr(o):
+            return (boxes_t[o][0] + boxes_t[o][1]) / 2
+
+        # k chunks by weighted k-means on part centres
+        k_n = max(3, min(5, round(len(turret_parts) / 12))) if len(turret_parts) >= 6 else 1
+        cents = [_ctr(o) for o in rnd.sample(turret_parts, k_n)]
+        for _ in range(12):
+            lab = {o: min(range(k_n), key=lambda i: (_ctr(o) - cents[i]).length) for o in turret_parts}
+            for i in range(k_n):
+                mem = [o for o in turret_parts if lab[o] == i]
+                if mem:
+                    ws = sum(_w(o) for o in mem)
+                    cents[i] = sum((_ctr(o) * _w(o) for o in mem), Vector()) / ws
+        pad = 0.03
+
+        def _touch(a_, b_):
+            return all(a_[0][i] - pad < b_[1][i] and b_[0][i] - pad < a_[1][i] for i in range(3))
+
+        chunks, loose = [], []
+        total = sum(_w(o) for o in turret_parts)
+        for i in range(k_n):                    # each chunk splits again where nothing holds it together
+            left = {o for o in turret_parts if lab[o] == i}
+            while left:
+                s0 = left.pop()
+                grp, stack = [s0], [s0]
+                while stack:
+                    cur = stack.pop()
+                    near = [o for o in left if _touch(boxes_t[cur], boxes_t[o])]
+                    for o in near:
+                        left.discard(o)
+                        grp.append(o)
+                        stack.append(o)
+                if sum(_w(o) for o in grp) > 0.03 * total and len(grp) > 1:
+                    chunks.append(grp)
+                else:
+                    loose.extend(grp)
+        chunks.sort(key=lambda g: -sum(_w(o) for o in g))
+        if len(chunks) >= 3 and rnd.random() < 0.85:        # one chunk blown away entirely
+            gone_c = chunks.pop(rnd.randrange(1, len(chunks)))
+            for o in gone_c:
+                bpy.data.objects.remove(o)
+        rnd.shuffle(loose)
+        for o in loose[: int(len(loose) * 0.4)]:            # and part of the small pieces
+            bpy.data.objects.remove(o)
+        loose = loose[int(len(loose) * 0.4):]
+        debris.extend(loose)
+        turret_parts = [o for g in chunks for o in g]
+        dset = set(debris)
+        pset = set(turret_parts) | dset
+        standing = [b for b in (_world_bbox(o) for o in scene.objects
+                                if o.type == "MESH" and o not in pset and not o.get("terrain")
+                                and not o.hide_render and o.data.vertices) if b is not None and b[1].z > 0.3]
+        away = Vector((-hit.x, -hit.y, 0))
+        away = away.normalized() if away.length > 1e-3 else Vector((1, 0, 0))
+        for g in chunks:
+            proxy = _hull_proxy(g)
+            start = proxy.matrix_world.copy()
+            wsum = sum(_w(o) for o in g)
+            com = sum((_ctr(o) * _w(o) for o in g), Vector()) / wsum
+            q = _stable_rest(proxy, rnd, com - proxy.location)
+            proxy.rotation_mode = "QUATERNION"
+            proxy.rotation_quaternion = Quaternion((0, 0, 1), rnd.uniform(0, 2 * math.pi)) @ q
+            bpy.context.view_layer.update()
+            lo, hi = _world_bbox(proxy)
+            ang = rnd.uniform(0, 2 * math.pi)
+            d = (away * rnd.uniform(0.2, 0.9) + Vector((math.cos(ang), math.sin(ang), 0)) * rnd.uniform(0.2, 0.9))
+            proxy.location += Vector((d.x, d.y, -lo.z + 0.03))
+            bpy.context.view_layer.update()
+            step = Vector((d.x, d.y, 0)).normalized() if d.length > 1e-3 else away
+            for _ in range(12):                  # slide clear of what stands and of chunks already down
+                lo, hi = _world_bbox(proxy)
+                if not any(b[0].x < hi.x and b[1].x > lo.x and b[0].y < hi.y and b[1].y > lo.y for b in standing):
+                    break
+                if (proxy.location.xy + step.xy * 0.2).length > footprint * 0.7:
+                    break
+                proxy.location += step * 0.2
+                bpy.context.view_layer.update()
+            standing.append(_world_bbox(proxy))
+            proxies.append((proxy, start, g))
+            debris.append(proxy)
+
     # --- let it fall -------------------------------------------------------------------
     active = [o for o in debris if o.name in bpy.data.objects]
-    aset = set(active)
+    aset = set(active) | set(turret_parts)
     reach = (R + 4.0) if state != "rubble" else footprint * 2
     passive = []
     for o in scene.objects:
@@ -699,7 +883,31 @@ def apply(scene, state, seed=1, footprint=4.0, hit=None, tilt=None, style="photo
         blast = (hit - Vector((0.6, -0.6, 0.2)), 14.0, R * 1.5)
     elif state == "wreck":
         blast = (hit * 0.6, 40.0, R * 2.0)
-    _simulate(scene, active, passive, blast=blast, frames=frames)
+    for proxy, _, _ in proxies:                # start clear of the mount it stood on, so Bullet does not eject it
+        plo, phi = _world_bbox(proxy)
+        top = None
+        for o in passive:
+            b = _world_bbox(o)
+            if b is None or b[1].z < plo.z:
+                continue
+            if b[0].x < phi.x and b[1].x > plo.x and b[0].y < phi.y and b[1].y > plo.y and b[0].z < phi.z:
+                top = b[1].z if top is None else max(top, b[1].z)
+        if top is not None:
+            proxy.location.z += min(2.5, top - plo.z + 0.03)
+            bpy.context.view_layer.update()
+    placed = {proxy: proxy.matrix_world.copy() for proxy, _, _ in proxies}
+    _simulate(scene, active, passive, blast=blast, frames=frames if not proxies else max(frames, 110))
+    for proxy, start, g in proxies:
+        end = proxy.matrix_world
+        if ((end.translation.xy - placed[proxy].translation.xy).length > 1.0
+                or end.translation.xy.length > footprint * 0.8):
+            end = placed[proxy]                 # thrown off by a bad contact: keep the pose it was set down in
+        delta = end @ start.inverted()
+        for o in g:
+            o.matrix_world = delta @ o.matrix_world
+        active.remove(proxy)
+        bpy.data.objects.remove(proxy)
+    bpy.context.view_layer.update()
     for o in active:                            # anything that fell through or flew off the patch
         if o.name not in bpy.data.objects:
             continue
