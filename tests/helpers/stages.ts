@@ -13,7 +13,7 @@ export const STAGES: string[][] = [
   ['gun.greekfire', 'fx.scorpion', 'lvl4.scorpion', 'boost.gold2'],
   ['fx.trebuchet', 'lvl4.trebuchet', 'lvl5.howitzer', 'boost.damage3'],
   ['gun.railgun', 'fx.greekfire', 'lvl4.greekfire', 'lvl5.scorpion'],
-  ['fx.railgun', 'lvl4.railgun', 'lvl5.trebuchet', 'lvl5.greekfire', 'lvl5.railgun'],
+  ['fx.railgun', 'lvl4.railgun', 'lvl5.trebuchet', 'lvl5.greekfire', 'lvl5.railgun', 'aim.crossbow'],
 ];
 
 /** Every item of stages 0..k. */

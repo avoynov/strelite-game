@@ -1,6 +1,6 @@
 import { ENEMIES } from './content';
 import { arcHpFactor, levelWaves } from './levels';
-import { baseHpFactor } from './base';
+import { baseHpFactor, hqThreat } from './base';
 import type { Game } from './game';
 import { waveSpec, type WaveSpec } from './waves';
 
@@ -35,12 +35,13 @@ export function defenceStrength(g: Game): number {
   return Math.round(dps * STRENGTH.scale);
 }
 
-export function attackStrength(attack: number, waves: (n: number, level: number) => WaveSpec = waveSpec, total = levelWaves(attack)): number {
-  const hpFactor = arcHpFactor(attack) * baseHpFactor(attack);
+/** `hq`: the headquarters' 0-based level (a stronger one draws stronger attackers). */
+export function attackStrength(attack: number, waves: (n: number, level: number, hq?: number) => WaveSpec = waveSpec, total = levelWaves(attack), hq = 0): number {
+  const hpFactor = arcHpFactor(attack) * baseHpFactor(attack) * hqThreat(hq);
   let hardest = 0;
   for (let n = 1; n <= total; n++) {
     let toughness = 0;
-    for (const grp of waves(n, attack).groups) {
+    for (const grp of waves(n, attack, hq).groups) {
       const e = ENEMIES[grp.enemy];
       toughness += grp.count * grp.hp * hpFactor * (1 + STRENGTH.armour * e.armor) * e.speed ** STRENGTH.speed;
     }

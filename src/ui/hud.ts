@@ -1,9 +1,10 @@
 import { t, type MessageKey } from '../i18n';
-import { TOWER_IDS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
+import { TOWER_IDS, type Targeting, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import { isWreck, type ActionResult, type Building, type Game, type Structure } from '../sim/game';
 import type { Armed, Selection } from '../render/boardRenderer';
 import { BASE_RULES, builders, isRaisable, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, TREASURY_LEVELS, type BaseState, type BuildingKind, type JobError } from '../sim/base';
 import { formatDuration } from './lab';
+import { writeAimPrefs } from '../aimPrefs';
 
 /** How an attack on the base (or the battle to win the headquarters back) ended. */
 export interface BaseResult {
@@ -33,7 +34,7 @@ export interface BaseHud {
   provoked(): void;
 }
 
-const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney', occupied: 'reason.occupiedHq' };
+const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', hqLevel: 'reason.labOverHq', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney', occupied: 'reason.occupiedHq' };
 
 /** Icons drawn in line with the HUD's own (24×24, stroked). */
 const ICON = {
@@ -393,6 +394,7 @@ export class Hud {
             <div class="title">${escapeHtml(t(`tower.${tower.def}`))} · ${t('tower.level', { n: tower.level + 1 })}</div>
             ${tower.job ? `<div class="stats job"><span>${t(tower.job.kind === 'build' ? 'job.build' : 'job.upgrade', { n: tower.level + 2, time: formatDuration((tower.job.endsAt - Date.now()) / 1000) })}</span></div>` : ''}
             ${this.statsHtml(g.defOf(tower.def), lvl)}
+            ${this.aimHtml(tower)}
             <div class="stats muted">
               ${g.mode === 'siege' ? `<span>${t('stat.hp')} ${Math.ceil(tower.hp)}/${tower.maxHp}</span>` : ''}
               <span>${t('stat.dealt')} ${Math.round(s.dealt)}</span>
@@ -445,7 +447,7 @@ export class Hud {
     let fx: string;
     let main = '';
     if (ruined) fx = t(`ruin.${what}`);
-    else if (what === 'hq') fx = t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun });
+    else if (what === 'hq') fx = t('building.hqFx', { r: HQ_LEVELS[level]!.radius, g: HQ_LEVELS[level]!.maxGun, n: level + 1 });
     else if (what === 'lab') fx = t('building.labFx', { n: level + 1, slots: LAB_LEVELS[level]!.slots, b: LAB_LEVELS[level]!.builders });
     else if (what === 'treasury') fx = t('building.treasuryFx', { n: TREASURY_LEVELS[level]!.protect });
     else fx = t(`building.${what}Fx`);
@@ -504,6 +506,18 @@ export class Hud {
     </div>`;
   }
 
+  /** What the gun aims at, as a switch once research opened a second mode. */
+  private aimHtml(tower: { id: number; def: TowerId }): string {
+    const g = this.game;
+    const modes = g.aimModes(tower.def);
+    if (modes.length < 2) return '';
+    const now = g.aimOf(g.towerById(tower.id)!);
+    const opts = modes
+      .map((m) => `<button class="aim-opt" data-action="aim" data-def="${m}" aria-pressed="${m === now}">${escapeHtml(t(`aim.${m}` as MessageKey))}</button>`)
+      .join('');
+    return `<div class="aim" role="group" aria-label="${escapeHtml(t('target.label'))}"><span>${t('target.label')}</span>${opts}</div>`;
+  }
+
   private onAction(action: string, def?: string): void {
     const g = this.game;
     const sel = this.cb.getSelection();
@@ -532,6 +546,14 @@ export class Hud {
         this.cb.setSelection(null);
         this.cb.setArmed(null);
         break;
+      case 'aim': {
+        const tower = sel?.kind === 'tower' ? g.towerById(sel.id) : undefined;
+        if (!tower || !def) break;
+        const r = g.setAim(tower.id, def as Targeting);
+        if (r.ok) writeAimPrefs(g.aimPrefs);
+        else this.showResult(r);
+        break;
+      }
       case 'upgrade':
       case 'sell': {
         const tower = sel?.kind === 'tower' ? g.towerById(sel.id) : undefined;

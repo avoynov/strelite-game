@@ -5,11 +5,12 @@ import { BoardRenderer, type Armed, type Selection } from './render/boardRendere
 import { PALETTE } from './render/palette';
 import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
-import { TICK, TOWERS } from './sim/content';
+import { ENEMIES, TICK, TOWERS } from './sim/content';
 import { FixedStep } from './sim/fixedStep';
 import { Game } from './sim/game';
 import { buildArcMap, buildPathMap, type Mode } from './sim/maps';
 import { levelArcMap, levelMap } from './sim/levels';
+import { readAimPrefs } from './aimPrefs';
 import { LevelSelect } from './ui/levels';
 import { attachGestures } from './ui/gestures';
 import { Arsenal } from './ui/arsenal';
@@ -26,6 +27,7 @@ import type { SoundName } from './audio/synth';
 import { installWay, onInstallChange, promptInstall } from './pwa/install';
 import { AUTO_STEPS, FrameWatch, qualityFor, readChoice, saveAutoStep, saveChoice, startStep, type QualityChoice } from './perf';
 import { PauseMenu } from './ui/pauseMenu';
+import { CHEAT_GOLD, readCheats, writeCheats } from './cheats';
 import type { EnemyId, TowerId } from './sim/content';
 
 const ART_URL = `${import.meta.env.BASE_URL}art`;
@@ -146,8 +148,8 @@ async function start(): Promise<void> {
   };
   /** Research follows the laboratory in the base: its level, and whether it stands. */
   const syncLab = () => {
-    const l = baseStore.state.buildings.lab;
-    research.setLab({ level: l.level, standing: l.hp > 0 });
+    const b = baseStore.state.buildings;
+    research.setLab({ level: b.lab.level, standing: b.lab.hp > 0, hq: b.hq.level });
   };
   baseStore.settle();
   syncLab();
@@ -164,6 +166,7 @@ async function start(): Promise<void> {
       return new Game(buildArcMap(BASE_MAP, 'siege'), {
         level: baseStore.state.attack,
         upgrades: research.upgrades(),
+        aimPrefs: readAimPrefs(),
         base: {
           get state() {
             return baseStore.state;
@@ -173,7 +176,7 @@ async function start(): Promise<void> {
         },
       });
     }
-    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades() });
+    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades(), aimPrefs: readAimPrefs() });
   };
   // A battle left running last time picks up where it stopped (unless a level was asked for in the address).
   const saved = params.has('level') ? null : readBattle();
@@ -218,7 +221,7 @@ async function start(): Promise<void> {
     }
     baseStore.set({ ...st, buildings, guns: snap.guns, fences: snap.fences });
   };
-  let enemyStrength = { attack: 0, value: 0 };
+  let enemyStrength = { attack: 0, hq: -1, value: 0 };
   const baseHud: BaseHud = {
     state: () => baseStore.state,
     startJob: (what) => {
@@ -228,7 +231,8 @@ async function start(): Promise<void> {
       return err;
     },
     strength: () => {
-      if (enemyStrength.attack !== game.level) enemyStrength = { attack: game.level, value: attackStrength(game.level) };
+      const hq = game.hq?.level ?? 0;
+      if (enemyStrength.attack !== game.level || enemyStrength.hq !== hq) enemyStrength = { attack: game.level, hq, value: attackStrength(game.level, undefined, undefined, hq) };
       return { you: defenceStrength(game), enemy: enemyStrength.value };
     },
     result: () => baseResult,
@@ -321,6 +325,20 @@ async function start(): Promise<void> {
     watch.reset();
     relayout();
   };
+  /** Testing switches from the pause screen: endless gold, no waiting. */
+  let cheats = readCheats();
+  const applyCheats = () => {
+    if (cheats.gold) {
+      if (game.money < CHEAT_GOLD) game.money = CHEAT_GOLD;
+      if (research.state.gold < CHEAT_GOLD) research.setGold(CHEAT_GOLD);
+    }
+    if (cheats.instant) {
+      const now = Date.now();
+      research.finishNow(now);
+      baseStore.finishNow(now);
+      for (const tw of game.towers) if (tw.job && tw.job.endsAt > now) tw.job.endsAt = now;
+    }
+  };
   const pauseMenu = new PauseMenu({
     audio: () => audio.settings,
     setAudio: (s) => audio.set(s),
@@ -334,6 +352,13 @@ async function start(): Promise<void> {
     install: () => void promptInstall().then(() => pauseMenu.invalidate()),
     inBase: () => !!game.base,
     toBase: () => goTo('siege'),
+    cheats: () => cheats,
+    setCheats: (c) => {
+      cheats = { ...cheats, ...c };
+      writeCheats(cheats);
+      applyCheats();
+      hud.update();
+    },
     resume: () => {
       paused = false;
       loop.paused = false;
@@ -541,6 +566,7 @@ async function start(): Promise<void> {
   }
 
   app.ticker.add((ticker) => {
+    if (cheats.gold || cheats.instant) applyCheats();
     const frame = ticker.deltaMS / 1000;
     const alpha = loop.advance(frame);
     for (const ev of game.drainEvents()) {
@@ -555,7 +581,7 @@ async function start(): Promise<void> {
         playAt('burst', ev.x, ev.y, Math.min(1, 0.6 + ev.radius * 0.2));
       }
       else if (ev.type === 'impact') {
-        board.onImpact(ev.x, ev.y);
+        board.onImpact(ev.x, ev.y, ev.air);
         playAt('impact', ev.x, ev.y);
       }
       else if (ev.type === 'rail') {
@@ -564,7 +590,7 @@ async function start(): Promise<void> {
       }
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
-        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c);
+        board.addFloat(`+${ev.reward}`, ev.x, ev.y, 0xf2c94c, 'air' in ENEMIES[ev.def]);
         playAt(DEATH_SOUND[ev.def], ev.x, ev.y, ev.def === 'moto' ? 0.6 : 1);
       }
       else if (ev.type === 'leak') audio.play('leak');
