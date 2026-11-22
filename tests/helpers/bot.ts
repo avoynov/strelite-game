@@ -1,5 +1,6 @@
 import { ENEMIES, ENEMY_IDS, FENCE_LEVELS, TICK, TOWER_IDS, TOWERS, type TowerId } from '../../src/sim/content';
 import type { Game } from '../../src/sim/game';
+import { TRAP_IDS, TRAPS, trapOpen, type TrapId } from '../../src/sim/traps';
 
 /**
  * How much each cell is walked: 1 per road cell in path mode; in arc mode the
@@ -116,10 +117,12 @@ function fortify(g: Game, upgrade: boolean): boolean {
   return bought;
 }
 
+/** A sensible player stops building new guns at about this many and raises the ones it has. */
+const MAX_GUNS = 16;
 /** How much of its money a sensible player puts into each gun, relative to the others. */
 const MIX: Record<TowerId, number> = {
   crossbow: 2, scorpion: 1.5, zis3: 2, howitzer: 2, greekfire: 1.5, trebuchet: 1.5, railgun: 1,
-  zadnoper: 1.5, flasher: 0.8, rockets: 0.8, tarkan: 1.5, ricochet: 1.2, glass: 1, harpoon: 1, bees: 1.2,
+  zadnoper: 1.5, flasher: 0.4, rockets: 0.6, tarkan: 1.5, ricochet: 1.2, glass: 1, harpoon: 1, bees: 1.5,
 };
 
 /**
@@ -128,7 +131,31 @@ const MIX: Record<TowerId, number> = {
  * upgrading every other purchase once it has a few guns. `only` limits it to
  * some guns (to show that one gun alone does not win).
  */
+/**
+ * Traps: the bot lays what the headquarters allows along the middle of the
+ * enemies' way, the newest kinds first, and lets them re-arm themselves.
+ */
+function layTraps(g: Game): void {
+  if (g.traps.length >= g.trapLimit) return;
+  const kinds = TRAP_IDS.filter((k) => trapOpen(k, g.trapHq)).reverse();
+  if (!kinds.length) return;
+  const { grid } = g.map;
+  const cells: { x: number; y: number; d: number }[] = [];
+  const t = trafficOf(g);
+  for (let y = 0; y < grid.rows; y++) for (let x = 0; x < grid.cols; x++) if (t[grid.index(x, y)]) cells.push({ x, y, d: g.flow.distanceAt(x, y) });
+  if (!cells.length) return;
+  cells.sort((a, b) => b.d - a.d);
+  for (let i = g.traps.length; i < g.trapLimit; i++) {
+    const kind: TrapId = kinds[i % kinds.length]!;
+    if (g.money < TRAPS[kind].cost) return;
+    // Spread over the middle of the way, where most guns reach.
+    const from = Math.floor(cells.length * (0.35 + (0.3 * i) / Math.max(1, g.trapLimit)));
+    for (let j = from; j < cells.length; j++) if (g.buildTrap(kind, cells[j]!.x, cells[j]!.y).ok) break;
+  }
+}
+
 export function spend(g: Game, only?: readonly TowerId[]): void {
+  if (!only && g.towers.length >= 4) layTraps(g);
   const allowed = (only ?? TOWER_IDS).filter((id) => g.isUnlocked(id));
   if (!allowed.length) return;
   // Siege: close (or repair) the ring first, once that still leaves money for a gun.
@@ -146,8 +173,10 @@ export function spend(g: Game, only?: readonly TowerId[]): void {
       .map((t) => ({ t, cost: g.upgradeCost(t) }))
       .filter((u): u is { t: (typeof g.towers)[number]; cost: number } => u.cost !== null && g.canRaise(u.t))
       .sort((a, b) => a.cost - b.cost)[0];
-    // Alternate: every other purchase is an upgrade when one is affordable.
-    if (upgradable && g.money >= upgradable.cost && g.towers.length >= 4 && guard % 2 === 1) {
+    // Alternate: every other purchase is an upgrade when one is affordable; with the good spots taken, only upgrades.
+    const full = g.towers.length >= MAX_GUNS;
+    if (full && !upgradable) break;
+    if (upgradable && g.money >= upgradable.cost && g.towers.length >= 4 && (guard % 2 === 1 || full)) {
       g.upgrade(upgradable.t.id);
       continue;
     }

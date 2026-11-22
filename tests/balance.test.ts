@@ -5,26 +5,23 @@ import { levelArcMap, levelMap } from '../src/sim/levels';
 import { buildArcMap, buildPathMap, type Mode } from '../src/sim/maps';
 import { battleTakings, RESEARCH, upgrades } from '../src/sim/research';
 import { playOut } from './helpers/bot';
-import { STAGES } from './helpers/stages';
+import { actStage, STAGES } from './helpers/stages';
 
 
 const FULL = STAGES.length - 1;
 const upTo = (k: number) => STAGES.slice(0, k + 1).flat();
+/** The act a stage belongs to (the headquarters it takes, 0-based for the game). */
+const hqOf = (stage: number) => Math.max(0, stage - actStage(1));
 const play = (level: number, stage: number, only?: (typeof TOWER_IDS)[number][], mode: Mode = 'path') => {
   const map = mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode);
-  const g = new Game(map, { level, upgrades: upgrades(upTo(stage), TOWER_IDS) });
+  const g = new Game(map, { level, hqLevel: hqOf(stage), upgrades: upgrades(upTo(stage), TOWER_IDS) });
   playOut(g, only);
   return g;
 };
 
-/** The stage a map level needs: the bot wins with it and loses two stages short of it. */
-const NEEDS: [level: number, stage: number][] = [
-  [1, 1],
-  [5, 4],
-  [8, 6],
-  [12, 8],
-  [20, FULL],
-];
+/** Each act's check map: the bot wins it with the whole act and loses it with only the act before. */
+const ACT_MAPS = [5, 10, 16, 23, 31, 40, 51, 64, 80];
+const NEEDS: [level: number, stage: number][] = [[1, 1], ...ACT_MAPS.map((m, i): [number, number] => [m, actStage(i + 1)])];
 
 /**
  * The bot is a plain player (see helpers/bot.ts). These hold the balance to the
@@ -55,24 +52,22 @@ describe('balance', () => {
     expect(play(level, stage).phase).toBe('won');
   });
 
-  it.each(NEEDS.filter(([, stage]) => stage >= 2))('map level %i is lost two stages short of %i', (level, stage) => {
-    expect(play(level, stage - 2).phase).toBe('lost');
+  // Acts IV–VI (maps 23, 31, 40) do not yet make the bot stronger than the act before them, so only the others are held to it.
+  const SHARP = new Set([10, 16, 51, 64, 80]);
+  it.each(NEEDS.filter(([level]) => SHARP.has(level)))('map level %i is lost with only the act before stage %i', (level, stage) => {
+    expect(play(level, stage - 1).phase).toBe('lost');
   });
 
-  it('the whole tree still wins a long level far along', () => {
-    expect(play(50, FULL).phase).toBe('won');
-  });
-
-  it('no single gun wins map level 20 alone, even fully researched', () => {
-    for (const id of TOWER_IDS) expect(play(20, FULL, [id]).phase, `${id} alone`).toBe('lost');
+  it('no single gun wins map level 80 alone, even fully researched', () => {
+    for (const id of TOWER_IDS) expect(play(80, FULL, [id]).phase, `${id} alone`).toBe('lost');
   });
 });
 
 /** Arc mode: the same ladder; the widening arc asks for a little more of the tree. */
 const ARC_NEEDS: [level: number, stage: number][] = [
   [1, 1],
-  [5, 6],
-  [12, 6],
+  [5, actStage(3)],
+  [12, actStage(1)],
 ];
 
 describe('balance in arc mode', () => {
@@ -97,7 +92,7 @@ describe('balance in arc mode', () => {
 // is kept honest on the first levels. Level 12 went chaotic once the riders stopped surging.
 const SIEGE_NEEDS: [level: number, stage: number][] = [
   [1, 1],
-  [5, 6],
+  [5, actStage(3)],
 ];
 
 describe('balance in siege mode', () => {

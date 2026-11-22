@@ -30,7 +30,7 @@ const SWARM = new Set<EnemyId>(['infantry', 'moto', 'drone', 'rider', 'glider', 
  * `strengthStep`: each map level starts this much stronger than the one before,
  * up to `maxFirstStrength`.
  */
-export const TUNING = { hpScale: 1.7, firstStrength: 4, strengthStep: 0.5, maxFirstStrength: 10 };
+export const TUNING = { hpScale: 1.7, firstStrength: 4, strengthStep: 0.125, maxFirstStrength: 10 };
 /** …and by this fraction of the base for each map level above the first… */
 export const LEVEL_HP_GROWTH = 0.04;
 /** …up to this map level… */
@@ -39,9 +39,43 @@ export const LEVEL_HP_CAP = 20;
 export const LATE_HP_GROWTH = 0.03;
 export const LATE_HP_CAP = 80;
 
+/**
+ * The bot's fit: a correction to enemy health on each act's check map (map
+ * level, factor), log-interpolated between them and held past the last. It
+ * puts every check map between what the act before it can hold and what the
+ * act itself can (see tests/balance.test.ts). `probe` is for that search only.
+ */
+export const DIFFICULTY = {
+  fit: [
+    [1, 1],
+    [5, 0.96],
+    [10, 0.92],
+    [16, 0.84],
+    [23, 0.81],
+    [31, 0.565],
+    [40, 0.48],
+    [51, 0.9],
+    [64, 0.58],
+    [80, 0.84],
+  ] as Array<[level: number, factor: number]>,
+  probe: 1,
+};
+
+function fitAt(level: number): number {
+  const f = DIFFICULTY.fit;
+  if (level <= f[0]![0]) return f[0]![1];
+  for (let i = 1; i < f.length; i++) {
+    const [l1, v1] = f[i]!;
+    const [l0, v0] = f[i - 1]!;
+    if (level <= l1) return Math.exp(Math.log(v0) + ((Math.log(v1) - Math.log(v0)) * (level - l0)) / (l1 - l0));
+  }
+  return f[f.length - 1]![1];
+}
+
 /** Every enemy's health on a map level, relative to its base (before the wave's own growth). */
 export function levelHpScale(level: number): number {
-  return TUNING.hpScale * (1 + LEVEL_HP_GROWTH * (Math.min(level, LEVEL_HP_CAP) - 1) + LATE_HP_GROWTH * Math.max(0, Math.min(level, LATE_HP_CAP) - LEVEL_HP_CAP));
+  const plan = TUNING.hpScale * (1 + LEVEL_HP_GROWTH * (Math.min(level, LEVEL_HP_CAP) - 1) + LATE_HP_GROWTH * Math.max(0, Math.min(level, LATE_HP_CAP) - LEVEL_HP_CAP));
+  return plan * fitAt(level) * DIFFICULTY.probe;
 }
 /** Gold per kill grows by this fraction of the base each step of strength. */
 export const REWARD_GROWTH = 0.08;

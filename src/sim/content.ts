@@ -328,9 +328,9 @@ export const TOWERS = {
     turnRate: deg(240),
     projectile: 'direct',
     targeting: 'sureKill',
-    pierce: 0.15,
+    pierce: 0.3,
     hitsAir: false,
-    levels: levels({ cost: 85, damage: 18, fireInterval: 0.45, range: 6, projectileSpeed: 20 }),
+    levels: levels({ cost: 85, damage: 28, fireInterval: 0.45, range: 6, projectileSpeed: 20 }),
   },
   /** Рикошетен топ: a heavy disc that bounces on from enemy to enemy. */
   ricochet: {

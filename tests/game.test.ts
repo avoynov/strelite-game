@@ -213,9 +213,10 @@ describe('balance', () => {
   it('starts each map level a little stronger, up to a cap', () => {
     expect(waveStrength(1, 1)).toBe(4);
     expect(waveStrength(3, 1)).toBe(6);
-    expect(waveStrength(1, 3)).toBe(5);
+    expect(waveStrength(1, 3)).toBe(4);
+    expect(waveStrength(1, 9)).toBe(5);
     expect(waveStrength(1, 1000)).toBe(10);
     expect(waveStrength(40, 1000)).toBe(18);
-    expect(waveSpec(2, 3)).toEqual(waveOfStrength(6, 3));
+    expect(waveSpec(2, 3)).toEqual(waveOfStrength(5, 3));
   });
 });

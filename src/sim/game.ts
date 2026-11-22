@@ -332,8 +332,9 @@ const BOSS_PCT = 0.5;
 const BIG_FLASH_EVERY = 3;
 /** Flyers count this many tiles further from a flash than they are (they are up high). */
 const FLASH_AIR_EXTRA = 1.5;
-/** Seconds a stunned boss cannot be stunned again, after the stun. */
+/** Seconds a stunned boss (or any other unit) cannot be stunned again, after the stun, so flashes never hold one for good. */
 const BOSS_STUN_GUARD = 3;
+const STUN_GUARD = 1.5;
 /** Darts: seconds between darts of a burst; seconds of the loop each makes before heading in; seconds one circles with nothing to strike before it drops. */
 const DART_GAP = 0.07;
 const DART_LOOP = 0.35;
@@ -2152,8 +2153,8 @@ export class Game {
    * Flash: everything in the cone in front stands stunned, the nearer the
    * longer (the furthest half as long); flyers count further off, being high.
    * Every third flash (with research every second) is a big one, twice as long,
-   * and with research it also burns a little. Bosses take half and then
-   * cannot be stunned for a few seconds.
+   * and with research it also burns a little. A stunned unit cannot be stunned
+   * again until a moment after it wakes; bosses take half, and wait longer.
    */
   private flash(t: Tower, def: TowerDef, lvl: TowerLevel): void {
     const m = this.upgrades?.gun[t.def];
@@ -2172,12 +2173,10 @@ export class Game {
       hitAny = true;
       const far = Math.min(1, (d + (e.air ? FLASH_AIR_EXTRA : 0)) / lvl.range);
       let secs = full * (1 - 0.5 * far);
-      if (isBoss(e.def)) {
-        if (e.stunGuard > 0) secs = 0;
-        else {
-          secs *= 0.5;
-          e.stunGuard = secs + BOSS_STUN_GUARD;
-        }
+      if (e.stunGuard > 0) secs = 0;
+      else {
+        if (isBoss(e.def)) secs *= 0.5;
+        e.stunGuard = secs + (isBoss(e.def) ? BOSS_STUN_GUARD : STUN_GUARD);
       }
       e.stun = Math.max(e.stun, secs);
       if (big && lvl.damage > 0) t.stats.wasted += this.damageEnemy(e, lvl.damage, t, this.armorOf(e), def.pierce);
