@@ -389,14 +389,20 @@ html, body {
   .ars-val b { font-size: 17px; }
 }
 
-.ars-slide.locked .ars-gun { filter: grayscale(1) brightness(0.55) drop-shadow(0 18px 18px rgba(0, 0, 0, 0.45)); }
+/* A gun not unlocked yet: only a black shape, a padlock hung in front of it. */
+.ars-slide.locked .ars-gun { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.45)) drop-shadow(0 18px 18px rgba(0, 0, 0, 0.45)); opacity: 0.92; }
 .ars-lock {
-  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%); margin: 0;
-  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; white-space: nowrap;
-  background: rgba(11, 14, 10, 0.8); border: 1px solid rgba(241, 234, 216, 0.2);
-  font: 600 12px/1 var(--display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text);
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); margin: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 8px; white-space: nowrap; pointer-events: none;
+  font: 600 13px/1 var(--display); letter-spacing: 0.16em; text-transform: uppercase; color: var(--brass-hi);
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
 }
-.ars-lock svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ars-lock svg {
+  width: 58px; height: 58px; padding: 12px; box-sizing: content-box;
+  fill: rgba(11, 14, 10, 0.85); stroke: var(--brass-hi); stroke-width: 1.8; stroke-linejoin: round;
+  background: radial-gradient(circle, rgba(211, 154, 63, 0.28), transparent 70%);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.8));
+}
 
 /* --------------------------------------------------------------------- Lab */
 
@@ -734,15 +740,15 @@ html, body {
   background: radial-gradient(circle at 50% 40%, rgba(211, 154, 63, 0.28), transparent 70%);
 }
 .lt-card .lt-pic { position: absolute; left: 4px; top: 6px; width: 66px; height: 54px; overflow: hidden; border-radius: 9px; }
-.lt-card.st-locked .lt-pic, .lt-card.st-lab .lt-pic { filter: grayscale(1) brightness(0.22) contrast(1.4); }
+.lt-card.st-locked .lt-pic, .lt-card.st-lab .lt-pic { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.4)); }
 .lt-card.st-go .lt-pic, .lt-card.st-ready .lt-pic, .lt-card.st-active .lt-pic { filter: grayscale(0.6) brightness(0.65); }
 .lt-card.st-go::after {
   content: ''; position: absolute; inset: -6px; border-radius: 18px; z-index: -1;
   background: radial-gradient(closest-side, rgba(231, 172, 79, 0.45), transparent);
   animation: lt-pulse 1.8s ease-in-out infinite;
 }
-.lt-lock { position: absolute; left: 50%; top: 33px; transform: translate(-50%, -50%); color: rgba(241, 234, 216, 0.5); }
-.lt-lock svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
+.lt-lock { position: absolute; left: 50%; top: 33px; transform: translate(-50%, -50%); z-index: 1; color: #ffd27a; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.9)); }
+.lt-lock svg { width: 26px; height: 26px; fill: rgba(11, 14, 10, 0.85); stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; }
 .lt-card .lt-check { right: -5px; top: -5px; }
 .lt-strip {
   position: absolute; left: 50%; bottom: 5px; transform: translateX(-50%);
@@ -822,3 +828,193 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .lt *, .lt *::before, .lt *::after { animation: none !important; transition: none !important; }
 }
+
+/* ============================================================ War paint
+ * One look for every screen: gunmetal plates with cut corners, brass edges,
+ * condensed capitals. No soft pills: everything is a stamped steel part.
+ * Circles stay only where they are round things (coins, medals, knobs).
+ */
+:root {
+  --display: 'Oswald', 'Arial Narrow', system-ui, sans-serif;
+  --brass: #d39a3f;
+  --brass-hi: #ffd27a;
+  --edge: rgba(211, 154, 63, 0.42);
+  --steel: linear-gradient(180deg, #262b24 0%, #171b15 55%, #10130e 100%);
+  --hot: #c4412b;
+  --c: 9px;
+  --cut4: polygon(var(--c) 0, calc(100% - var(--c)) 0, 100% var(--c), 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, var(--c) 100%, 0 calc(100% - var(--c)), 0 var(--c));
+  --cut2: polygon(var(--c) 0, 100% 0, 100% calc(100% - var(--c)), calc(100% - var(--c)) 100%, 0 100%, 0 var(--c));
+  --slant: polygon(var(--c) 0, 100% 0, calc(100% - var(--c)) 100%, 0 100%);
+  --radius: 0px;
+}
+
+/* Top bar: a steel strip with a brass seam and a notched end. */
+.hud-top {
+  background: var(--steel);
+  border-bottom: 0;
+  box-shadow: inset 0 -2px 0 var(--edge), 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+.hud-top .stat {
+  min-height: 34px; padding: 0 12px 0 10px; border: 0;
+  background: rgba(0, 0, 0, 0.38); color: var(--text); font: inherit;
+  clip-path: var(--slant);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.hud-top .stat b { font: 600 18px/1 var(--display); letter-spacing: 0.02em; }
+.hud-top .wave { background: none; clip-path: none; padding: 0; font-family: var(--display); text-transform: uppercase; letter-spacing: 0.06em; }
+.chip {
+  border: 0; border-radius: 0; clip-path: var(--cut2);
+  background: linear-gradient(180deg, #343a31, #1e231b);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -2px 0 rgba(0, 0, 0, 0.4);
+  font: 600 15px/1 var(--display); letter-spacing: 0.04em; text-transform: uppercase;
+}
+.chip:active:not(:disabled) { filter: brightness(1.2); }
+
+/* Bottom panel: an armoured plate, corners cut, a brass seam on top. */
+.hud-panel {
+  border: 0; border-radius: 0;
+  background: var(--steel);
+  clip-path: polygon(16px 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 0 100%, 0 16px);
+  box-shadow: inset 0 2px 0 var(--edge);
+}
+
+.btn {
+  border: 0; border-radius: 0; clip-path: var(--cut2);
+  background: linear-gradient(180deg, #3a4036, #22271f);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12), inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+  font: 600 15px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase;
+}
+.btn.primary {
+  background: linear-gradient(180deg, #ffd27a 0%, #e0a33a 45%, #a86d1c 100%);
+  color: #1b1306;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -3px 0 rgba(90, 52, 8, 0.6);
+}
+/* The battle button: hazard red with stripes, the loudest thing on screen. */
+.btn.go {
+  background:
+    repeating-linear-gradient(-45deg, rgba(0, 0, 0, 0.16) 0 10px, transparent 10px 20px),
+    linear-gradient(180deg, #e0573a, #9b2d18);
+  color: #fff4e6; font-size: 18px; letter-spacing: 0.12em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.5);
+  clip-path: var(--slant); --c: 16px;
+}
+.btn.go:disabled { opacity: 0.55; filter: saturate(0.4); }
+.btn .cost { font-family: system-ui, sans-serif; letter-spacing: 0; text-transform: none; font-size: 13px; }
+
+.card, .lv-mode, .lt-run, .lt-next, .ars-target, .pm-install, .lt-summary, .lt-banner {
+  border-radius: 0; clip-path: var(--cut2);
+}
+.card.armed { box-shadow: inset 0 0 0 2px var(--brass); }
+.gun-ico, .lt-mini-gun { border-radius: 0; clip-path: var(--cut2); --c: 7px; }
+.title, .end-card h2 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+.title { font-size: 17px; }
+
+.toast {
+  border-radius: 0; clip-path: var(--slant); --c: 12px; padding: 9px 22px;
+  background: linear-gradient(180deg, rgba(40, 44, 36, 0.96), rgba(16, 19, 14, 0.96));
+  box-shadow: inset 0 -2px 0 var(--edge);
+  font: 500 15px/1.1 var(--display); letter-spacing: 0.04em;
+}
+.end-card {
+  border: 0; border-radius: 0; clip-path: var(--cut4); --c: 18px;
+  background: var(--steel); box-shadow: inset 0 3px 0 var(--edge);
+}
+.end-card h2 { font-size: 28px; color: var(--brass-hi); }
+
+/* Settings and the level list. */
+.pm-card, .lt-sheet {
+  border-radius: 0; border: 0;
+  clip-path: polygon(20px 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 0 100%, 0 20px);
+  box-shadow: inset 0 2px 0 var(--edge);
+}
+@media (min-width: 720px), (min-height: 820px) {
+  .pm-card { border-radius: 0; border: 0; clip-path: var(--cut4); --c: 20px; }
+}
+.pm-toggle, .pm-seg, .pm-seg button, .ars-start, .lt-reqs li, .ars-lv { border-radius: 0; clip-path: var(--cut2); --c: 6px; }
+.pm-toggle i { border-radius: 0; clip-path: var(--slant); --c: 6px; }
+.pm-toggle i::after { border-radius: 0; }
+.ars-start { --c: 14px; }
+
+/* ------------------------------------------------- Floating building menu */
+/* Hangs under the tapped gun or building and follows it as the map moves. */
+.hud-float {
+  position: absolute; left: 0; top: 0; z-index: 5;
+  width: min(340px, calc(100vw - 16px));
+  will-change: transform;
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.55));
+}
+.hud-float[hidden] { display: none; }
+/* The pointer at the object: a brass wedge on the side facing it. */
+.hud-float::before {
+  content: ''; position: absolute; left: calc(var(--ax, 50%) - 11px); top: -10px;
+  width: 22px; height: 11px; background: var(--brass);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.hud-float.above::before { top: auto; bottom: -10px; clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.float-card {
+  --c: 14px;
+  position: relative; padding: 12px 12px 12px 14px;
+  background: var(--steel);
+  clip-path: var(--cut4);
+  box-shadow: inset 0 2px 0 var(--brass), inset 3px 0 0 rgba(211, 154, 63, 0.25);
+}
+.hud-float.pop .float-card { animation: float-pop 170ms cubic-bezier(0.2, 0.9, 0.3, 1.3); transform-origin: var(--ax, 50%) 0; }
+.hud-float.above.pop .float-card { transform-origin: var(--ax, 50%) 100%; }
+@keyframes float-pop { from { transform: scale(0.82); opacity: 0; } }
+.float-card .row { flex-direction: column; align-items: stretch; gap: 10px; }
+.float-card .title { margin-bottom: 6px; color: var(--brass-hi); }
+.float-card .actions { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+.float-card .actions .btn { flex: 1 1 auto; min-height: 42px; padding: 0 12px; }
+.float-card .actions .btn.primary { flex-basis: 100%; }
+.float-card .strength, .float-card .muted-note { flex-basis: 100%; }
+@media (prefers-reduced-motion: reduce) { .hud-float.pop .float-card { animation: none; } }
+.float-card .strength { font: 500 14px/1.2 var(--display); letter-spacing: 0.04em; color: #f0b3a6; }
+.float-card .strength.ahead { color: #a8e09b; }
+.float-card .muted-note { font-size: 12px; color: var(--muted); }
+.hud-panel { transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.hud-panel.tucked { transform: translateY(calc(100% - 10px)); }
+@media (min-width: 720px) { .hud-panel.tucked { transform: translate(-50%, calc(100% - 10px)); } }
+
+/* ------------------------------------------------------ Windows in the base */
+/* Opened from a building, a screen is a window over the base, which stays in sight. */
+body.in-base .arsenal, body.in-base .lab, body.in-base .levels {
+  inset: auto; left: 50%; top: calc(50% + var(--safe-top) / 2);
+  transform: translate(-50%, -50%);
+  width: min(calc(100vw - 20px), 560px);
+  height: min(calc(100dvh - 96px - var(--safe-top) - var(--safe-bottom)), 820px);
+  border: 2px solid var(--edge); border-top: 3px solid var(--brass);
+  clip-path: var(--cut4); --c: 18px;
+  animation: win-in 200ms cubic-bezier(0.2, 0.9, 0.3, 1.15);
+}
+@keyframes win-in { from { transform: translate(-50%, -46%) scale(0.94); opacity: 0; } }
+body.in-base:has(.arsenal:not([hidden]), .lab:not([hidden]), .levels:not([hidden]))::after {
+  content: ''; position: fixed; inset: 0; z-index: 15;
+  background: rgba(5, 7, 4, 0.38);
+}
+@media (prefers-reduced-motion: reduce) { body.in-base .arsenal, body.in-base .lab, body.in-base .levels { animation: none; } }
+.lt-lock svg rect { fill: rgba(11, 14, 10, 0.85); }
+.lt-lock svg path, .ars-lock svg path { fill: none; }
+/* Words that differ in the base, both in the markup; the body's class picks. */
+.base-only { display: none; }
+body.in-base .base-only { display: inline; }
+body.in-base .not-base { display: none; }
+/* The window's close cross: only where the screen is a window (the base). */
+.win-x { display: none; }
+body.in-base .win-x {
+  display: grid; place-items: center; flex: none; align-self: start;
+  width: 40px; height: 40px; margin-left: auto; padding: 0; border: 0;
+  background: linear-gradient(180deg, #d9573a, #8f2a16); color: #fff4e6;
+  clip-path: var(--cut2); --c: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), inset 0 -2px 0 rgba(0, 0, 0, 0.35);
+}
+body.in-base .win-x svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+body.in-base .ars-head { display: flex; align-items: flex-start; gap: 12px; }
+body.in-base .ars-count { display: none; }
+/* Smaller than the screen, so the base shows round it. */
+body.in-base .arsenal, body.in-base .lab, body.in-base .levels {
+  width: min(calc(100vw - 28px), 540px);
+  height: min(calc(100dvh - 150px - var(--safe-top) - var(--safe-bottom)), 780px);
+}
+/* A gun not unlocked: a black shape behind a padlock. */
+.lt-card.veiled .lt-pic { filter: brightness(0) drop-shadow(0 0 1px rgba(211, 154, 63, 0.4)); }
+body.in-base .lab-head, body.in-base .ars-head { padding-top: 16px; }

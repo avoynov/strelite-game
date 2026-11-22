@@ -1,5 +1,5 @@
 import { TOWER_IDS } from './sim/content';
-import { bank, FIRST_LAB, newResearch, pause, resume, sanitize, setGold, settle, start, startError, upgrades, type LabInfo, type ResearchState, type StartError, type Upgrades } from './sim/research';
+import { bank, FIRST_LAB, labDestroyed, newResearch, pause, resume, sanitize, setGold, settle, start, startError, upgrades, type LabInfo, type ResearchState, type StartError, type Upgrades } from './sim/research';
 
 const KEY = 'strelite.research';
 
@@ -59,6 +59,13 @@ export class ResearchStore {
     const err = startError(this.state, id, this.labInfo);
     if (!err) this.set(start(this.s, id, Date.now(), this.speed, this.labInfo));
     return err;
+  }
+
+  /** The laboratory was destroyed: research in it is lost (see labDestroyed). Returns the items lost. */
+  loseToRuin(): string[] {
+    const { state, lost } = labDestroyed(this.state);
+    if (lost.length) this.set(state);
+    return lost;
   }
 
   bank(gold: number): void {

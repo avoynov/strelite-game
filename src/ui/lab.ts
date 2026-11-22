@@ -3,6 +3,7 @@ import type { GunPortrait } from '../render/towers/spriteTowerView';
 import type { TowerId } from '../sim/content';
 import {
   completeSets,
+  itemCost,
   itemSeconds,
   labSlots,
   MASTERY_DAMAGE,
@@ -446,7 +447,7 @@ export class Lab {
       this.footKey = footKey;
       this.foot.innerHTML = `
         <div class="lab-treasury" title="${t('lab.treasury')}"><span class="ico ico-gold" aria-hidden="true"></span><b>${s.gold}</b></div>
-        <button class="btn primary" data-lt="close">${t('lab.close')}</button>`;
+        <button class="btn primary" data-lt="close"><span class="not-base">${t('lab.close')}</span><span class="base-only">${t('action.close')}</span></button>`;
     }
     this.tick(s);
     // Fonts and pictures can shift the layout after it was drawn.
@@ -492,6 +493,7 @@ export class Lab {
           <p class="lab-kicker">${t('lab.kicker')}</p>
           <h1 class="lab-title">${t('lab.title')}</h1>
         </div>
+        <button class="win-x" data-lt="close" aria-label="${t('action.close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </header>
       <section class="lt-summary${tree.done === tree.total ? ' all' : ''}">
         <div class="lt-sum-top">
@@ -519,7 +521,7 @@ export class Lab {
     const now = this.now(s);
     const runs = s.active.map((a) => {
       const item = researchItem(a.id)!;
-      const total = itemSeconds(item, this.cb.speed);
+      const total = itemSeconds(item, this.cb.speed, this.cb.state());
       return `
         <button class="lt-run" data-lt="node" data-id="${item.id}">
           ${this.miniHtml(item, 'active')}
@@ -539,7 +541,7 @@ export class Lab {
       const set = setOf(next);
       const p = set ? setProgress(set, s.done) : null;
       const toMedal = p ? p.total - p.done : 0;
-      const why = err === 'noGold' ? `<span class="lt-run-sub poor">${t('lab.needGold', { n: item.cost - s.gold })}</span>` : p ? `<span class="lt-run-sub">${esc(setName(set!.id))} ${p.done}/${p.total} · ${t('lab.toMedal', { n: toMedal })}</span>` : '';
+      const why = err === 'noGold' ? `<span class="lt-run-sub poor">${t('lab.needGold', { n: itemCost(item, this.cb.state()) - s.gold })}</span>` : p ? `<span class="lt-run-sub">${esc(setName(set!.id))} ${p.done}/${p.total} · ${t('lab.toMedal', { n: toMedal })}</span>` : '';
       nextHtml = `
         <div class="lt-next">
           <button class="lt-next-main" data-lt="node" data-id="${item.id}">
@@ -552,7 +554,7 @@ export class Lab {
           </button>
           <button class="btn primary lt-go" data-lt="start" data-id="${item.id}" ${err ? 'aria-disabled="true"' : ''}>
             <span>${t('lab.start')}</span>
-            <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span> · ${formatDuration(itemSeconds(item, this.cb.speed))}</span>
+            <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${itemCost(item, this.cb.state())}</span> · ${formatDuration(itemSeconds(item, this.cb.speed, this.cb.state()))}</span>
           </button>
         </div>`;
     }
@@ -617,20 +619,20 @@ export class Lab {
     const known = st === 'done';
     const name = t(`tower.${gun}` as MessageKey);
     const active = unlock ? s.active.find((a) => a.id === unlock.id) : undefined;
-    const total = unlock ? itemSeconds(unlock, this.cb.speed) : 1;
+    const total = unlock ? itemSeconds(unlock, this.cb.speed, this.cb.state()) : 1;
     const fresh = unlock ? this.freshClass(unlock.id, st) : '';
     let strip = '';
     if (!unlock) strip = `<span class="lt-strip starter">${t('lab.starter')}</span>`;
     else if (st === 'active' && active) strip = `<span class="lt-strip time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
     else if (st === 'lab') strip = `<span class="lt-strip gate">${t('lab.labShort', { n: ROMAN[unlock.lab ?? 1]! })}</span>`;
-    else if (!known) strip = `<span class="lt-strip${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < unlock.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${unlock.cost}</span>`;
+    else if (!known) strip = `<span class="lt-strip${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < itemCost(unlock, this.cb.state()) ? ' poor' : ''}"><span class="ico ico-gold"></span>${itemCost(unlock, this.cb.state())}</span>`;
     const label = `${name}. ${t(`lab.state.${st}` as MessageKey)}`;
     const attrs = unlock ? `data-lt="node" data-id="${unlock.id}"` : 'disabled';
     return `
-      <button class="lt-card st-${st}${fresh}" ${attrs} aria-label="${esc(label)}">
+      <button class="lt-card st-${st}${known ? '' : ' veiled'}${fresh}" ${attrs} aria-label="${esc(label)}">
         ${shapeSvg(CARD, st === 'active', active?.endsAt, total, '0 0 74 84')}
         <span class="lt-pic" data-pic="${gun}" data-lv="${known ? this.gunLevel(gun, s) : 1}" data-w="66" data-h="54" data-z="1.45"></span>
-        ${st === 'locked' ? `<span class="lt-lock">${ICON.lock}</span>` : ''}
+        ${known ? '' : `<span class="lt-lock">${ICON.lock}</span>`}
         ${known && unlock ? `<span class="lt-check">${ICON.check}</span>` : ''}
         ${fresh ? `<span class="lt-new">${t('lab.new')}</span>` : ''}
         ${strip}
@@ -641,12 +643,12 @@ export class Lab {
   private slotHtml(item: ResearchItem, s: ResearchState, lab: LabInfo, place: string): string {
     const st = this.nodeState(s, lab, item.id);
     const active = s.active.find((a) => a.id === item.id);
-    const total = itemSeconds(item, this.cb.speed);
+    const total = itemSeconds(item, this.cb.speed, this.cb.state());
     const fresh = this.freshClass(item.id, st);
     let cap: string;
     if (st === 'active' && active) cap = `<span class="lt-cap time" data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span>`;
     else if (st === 'lab') cap = `<span class="lt-cap gate">${t('lab.labShort', { n: ROMAN[item.lab ?? 1]! })}</span>`;
-    else if (st !== 'done') cap = `<span class="lt-cap${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < item.cost ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span>`;
+    else if (st !== 'done') cap = `<span class="lt-cap${st === 'go' ? ' go' : ''}${st === 'ready' && s.gold < itemCost(item, this.cb.state()) ? ' poor' : ''}"><span class="ico ico-gold"></span>${itemCost(item, this.cb.state())}</span>`;
     else cap = '<span class="lt-cap"></span>';
     const label = `${itemName(item)}. ${t(`lab.state.${st}` as MessageKey)}`;
     return `
@@ -694,17 +696,17 @@ export class Lab {
       reqs.push(`<li class="${ok ? 'ok' : 'no'}">${ok ? ICON.check : ICON.lock}${esc(t('lab.labLevelReq', { n: item.lab! }))}</li>`);
     }
     const active = s.active.find((a) => a.id === id);
-    const total = itemSeconds(item, this.cb.speed);
+    const total = itemSeconds(item, this.cb.speed, this.cb.state());
     let action: string;
     if (st === 'done') action = `<p class="lt-sheet-state done">${ICON.check}${t('lab.done')}</p>`;
     else if (st === 'active' && active)
       action = `<p class="lt-sheet-state active">${ICON.clock}${t('lab.inProgress')} · <span data-ends="${active.endsAt}" data-total="${total}">${formatDuration((active.endsAt - this.now(s)) / 1000)}</span></p>`;
     else {
-      const reason = err && err !== 'noGold' ? `<p class="lt-sheet-why">${esc(t(ERR[err]))}</p>` : err === 'noGold' ? `<p class="lt-sheet-why">${t('lab.needGold', { n: item.cost - s.gold })}</p>` : '';
+      const reason = err && err !== 'noGold' ? `<p class="lt-sheet-why">${esc(t(ERR[err]))}</p>` : err === 'noGold' ? `<p class="lt-sheet-why">${t('lab.needGold', { n: itemCost(item, this.cb.state()) - s.gold })}</p>` : '';
       action = `${reason}
         <button class="btn primary lt-go wide" data-lt="start" data-id="${id}" ${err ? 'aria-disabled="true"' : ''}>
           <span>${t('lab.start')}</span>
-          <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${item.cost}</span> · ${formatDuration(total)}</span>
+          <span class="lt-go-meta"><span class="cost${err === 'noGold' ? ' poor' : ''}"><span class="ico ico-gold"></span>${itemCost(item, this.cb.state())}</span> · ${formatDuration(total)}</span>
         </button>`;
     }
     const setLine = set && p

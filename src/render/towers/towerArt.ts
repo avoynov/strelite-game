@@ -22,6 +22,8 @@ export interface TowerArtLevel {
   muzzleM: [number, number, number][];
   /** The shot itself, rendered per direction; loaded only for the way the gun faces. */
   fire?: TowerFireArt;
+  /** Siege mode: the gun destroyed, one frame drawn alone (no aim layer), anchored like `base`. */
+  states?: { wreck?: { sheet: string; frame: string } };
 }
 
 /**
@@ -142,6 +144,8 @@ export interface BuildingArtDef {
   sheet: string;
   levels: string[];
   tiles: number;
+  /** Per level, like `levels`: hit hard (below half health), in ruins, and (headquarters) held by the enemy. */
+  states?: { sheet: string; damaged?: string[]; rubble?: string[]; occupied?: string[] };
 }
 
 /**
@@ -203,8 +207,10 @@ export interface TowerArtManifest {
   /** Seamless ground textures: `field` under everything, `road` cut to the road's shape. */
   ground?: { field?: GroundArtDef; road?: GroundArtDef };
   enemies?: Record<string, EnemyArtDef>;
-  /** The base's headquarters and laboratory. */
-  buildings?: Partial<Record<'hq' | 'lab', BuildingArtDef>>;
+  /** The player's own units, laid out like enemies (the raiders who provoke an attack). */
+  allies?: Record<string, EnemyArtDef>;
+  /** The base's buildings. */
+  buildings?: Partial<Record<'hq' | 'lab' | 'muster' | 'arsenal' | 'treasury', BuildingArtDef>>;
   /** Rounds seen in flight (bolts, stones), by gun id. */
   projectiles?: Record<string, ProjectileArtDef>;
   effects?: Record<string, EffectArtDef>;
