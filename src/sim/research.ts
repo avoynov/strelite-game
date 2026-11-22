@@ -59,8 +59,10 @@ export interface Upgrades {
   goldBonus: number;
   /** Targeting modes research opened per gun, on top of the gun's own. */
   aims: Record<TowerId, Targeting[]>;
-  /** Per trap, what its action is multiplied by (levels II and III, and the full set). */
+  /** Per trap, what its action is multiplied by (its levels, and the full set). */
   traps: Record<TrapId, number>;
+  /** Per trap, the level research has raised it to (1 with none); it picks the trap's look. */
+  trapLevels: Record<TrapId, number>;
   /** Greek fire lights tar patches. */
   burningTar: boolean;
 }
@@ -131,8 +133,8 @@ const lvl4 = (g: TowerId, act: number, cost: number, seconds: number, requires: 
 const lvl5 = (g: TowerId, act: number, cost: number, seconds: number) => item(`lvl5.${g}`, 'levels', Math.max(act, LEVEL5_LAB), cost, seconds, [`lvl4.${g}`], lvl(g, 5));
 /** A trap's level II or III: +60% to what it does, in the act its headquarters brings it. */
 const TRAP_STEP = 0.6;
-const trapLvl = (tr: TrapId, act: number, level: 2 | 3, cost: number, seconds: number) =>
-  item(`trap.${tr}.${level}`, 'traps', act, cost, seconds, level === 3 ? [`trap.${tr}.2`] : [], { kind: 'trap', trap: tr, level, add: TRAP_STEP });
+const trapLvl = (tr: TrapId, act: number, level: 2 | 3 | 4, cost: number, seconds: number) =>
+  item(`trap.${tr}.${level}`, 'traps', act, cost, seconds, level > 2 ? [`trap.${tr}.${level - 1}`] : [], { kind: 'trap', trap: tr, level, add: TRAP_STEP });
 
 /**
  * The tree. Guns come one by one in the agreed order, each in its act; levels
@@ -222,6 +224,7 @@ export const RESEARCH: readonly ResearchItem[] = [
   // Traps: each kind's levels II and III, then the set's effect.
   trapLvl('mine', 2, 2, 900, HOUR),
   trapLvl('mine', 2, 3, 2000, 8 * HOUR),
+  trapLvl('mine', 4, 4, 3000, 12 * HOUR),
   trapLvl('pit', 4, 2, 1800, 6 * HOUR),
   trapLvl('pit', 4, 3, 3200, 14 * HOUR),
   trapLvl('leg', 6, 2, 3000, 12 * HOUR),
@@ -425,6 +428,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[], la
   const maxLevel = Object.fromEntries(gunIds.map((id) => [id, FREE_LEVELS])) as Record<TowerId, number>;
   const aims = Object.fromEntries(gunIds.map((id) => [id, [] as Targeting[]])) as Record<TowerId, Targeting[]>;
   const traps = Object.fromEntries(TRAP_IDS.map((id) => [id, 1])) as Record<TrapId, number>;
+  const trapLevels = Object.fromEntries(TRAP_IDS.map((id) => [id, 1])) as Record<TrapId, number>;
   let burningTar = false;
   for (const id of done) {
     const e = BY_ID.get(id)?.effect;
@@ -438,7 +442,10 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[], la
     else if (e.kind === 'aim') {
       if (aims[e.gun] && !aims[e.gun]!.includes(e.mode)) aims[e.gun]!.push(e.mode);
     }
-    else if (e.kind === 'trap') traps[e.trap] += e.add;
+    else if (e.kind === 'trap') {
+      traps[e.trap] += e.add;
+      trapLevels[e.trap] = Math.max(trapLevels[e.trap], e.level);
+    }
     else if (e.kind === 'burningTar') burningTar = true;
     else {
       const m = per[e.gun];
@@ -470,7 +477,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[], la
   const full = new Set(completeSets(done, lab));
   for (const id of gunIds) if (full.has(id)) per[id]!.damage *= 1 + MASTERY_DAMAGE;
   if (full.has('traps')) for (const id of TRAP_IDS) traps[id] *= 1 + MASTERY_DAMAGE;
-  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0, aims, traps, burningTar };
+  return { guns: gunIds.filter((id) => guns.has(id)), maxLevel, startGold, lives, gun: per, goldBonus: full.has('fortress') ? MASTERY_GOLD : 0, aims, traps, trapLevels, burningTar };
 }
 
 // ------------------------------------------------------------------- sets

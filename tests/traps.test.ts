@@ -117,10 +117,15 @@ describe('traps', () => {
     expect(slowed).toBeGreaterThan(30);
   });
 
-  it('research: levels II and III each add 60%; the set has every trap research', () => {
+  it('research: each trap level adds 60%; the mine has a level IV; the set has every trap research', () => {
     const u = upgrades(['trap.mine.2', 'trap.mine.3'], TOWER_IDS);
     expect(u.traps.mine).toBeCloseTo(2.2);
     expect(u.traps.pit).toBe(1);
+    expect(u.trapLevels.mine).toBe(3);
+    const four = upgrades(['trap.mine.2', 'trap.mine.3', 'trap.mine.4'], TOWER_IDS);
+    expect(four.traps.mine).toBeCloseTo(2.8);
+    expect(four.trapLevels).toMatchObject({ mine: 4, pit: 1 });
+    expect(RESEARCH.find((r) => r.id === 'trap.mine.4')!.requires).toEqual(['trap.mine.3']);
     const set = RESEARCH_SETS.find((s) => s.id === 'traps')!;
     expect(set.items).toEqual(RESEARCH.filter((r) => r.branch === 'traps').map((r) => r.id));
     expect(set.items).toContain('fx.tar');

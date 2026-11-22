@@ -1219,6 +1219,11 @@ export class Game {
     return { ok: true };
   }
 
+  /** The level a trap kind stands at (1 to 4), from its research; it picks the look. */
+  trapLevel(kind: TrapId): number {
+    return this.upgrades?.trapLevels[kind] ?? 1;
+  }
+
   /** What a trap's action is multiplied by (its research). */
   private trapPower(kind: TrapId): number {
     return this.upgrades?.traps[kind] ?? 1;

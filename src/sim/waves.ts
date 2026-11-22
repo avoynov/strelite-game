@@ -56,7 +56,7 @@ export const DIFFICULTY = {
     [40, 0.48],
     [51, 0.9],
     [64, 0.58],
-    [80, 0.84],
+    [80, 0.72],
   ] as Array<[level: number, factor: number]>,
   probe: 1,
 };
