@@ -95,7 +95,7 @@ describe('research', () => {
     expect(s.active).toHaveLength(2);
     expect(startError(s, 'lvl4.crossbow', lab4)).toBe('busy');
     // The headquarters decides how far the tree reaches.
-    const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.trebuchet', 'gun.greekfire'] };
+    const railReady = { ...rich, done: ['gun.howitzer', 'gun.scorpion', 'gun.zadnoper', 'gun.trebuchet', 'gun.flasher', 'gun.rockets', 'gun.tarkan', 'gun.greekfire', 'gun.ricochet'] };
     expect(startError(railReady, 'gun.railgun')).toBe('hqLevel');
     expect(startError(railReady, 'gun.railgun', { level: 8, standing: true, hq: 5 })).toBe('hqLevel');
     // In the tree (act VII), it also needs a laboratory raised as far.

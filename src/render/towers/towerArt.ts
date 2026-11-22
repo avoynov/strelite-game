@@ -189,6 +189,15 @@ export const DEFAULT_SHOT_EFFECTS: Record<string, string[]> = {
   howitzer: ['muzzle_flash', 'muzzle_smoke'],
   greekfire: ['fire_stream'],
   railgun: ['rail_charge', 'rail_beam'],
+  // The new guns: stand-in drawing (boardRenderer) until their art brings its own.
+  zadnoper: [],
+  flasher: [],
+  rockets: ['muzzle_smoke'],
+  tarkan: ['muzzle_flash', 'muzzle_smoke'],
+  ricochet: ['muzzle_smoke'],
+  glass: [],
+  harpoon: ['muzzle_smoke'],
+  bees: [],
 };
 
 /** The effects a gun shows when it fires: the manifest's word first, then the default above. */

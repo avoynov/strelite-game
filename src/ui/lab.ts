@@ -1,6 +1,6 @@
 import { t, type MessageKey } from '../i18n';
 import type { GunPortrait } from '../render/towers/spriteTowerView';
-import type { TowerId } from '../sim/content';
+import { TOWERS, type TowerId } from '../sim/content';
 import {
   completeSets,
   inTree,
@@ -111,6 +111,16 @@ export function itemEffect(item: ResearchItem): string {
       if (m.reload) parts.push(t('lab.fx.reload', { n: pct(1 - m.reload) }));
       if (m.rampTime) parts.push(t('lab.fx.ramp', { n: Math.round(1 / m.rampTime) }));
       if (m.damage) parts.push(t('lab.fx.damage', { n: pct(m.damage - 1) }));
+      if (m.stun) parts.push(t('lab.fx.stun', { n: pct(m.stun - 1) }));
+      if (m.cone) parts.push(t('lab.fx.cone', { n: Math.round(((TOWERS.flasher.cone + m.cone) * 360) / Math.PI) }));
+      if (m.flashDamage) parts.push(t('lab.fx.flashDamage'));
+      if (m.bigEvery) parts.push(t('lab.fx.bigEvery', { n: m.bigEvery }));
+      if (m.bounces) parts.push(t('lab.fx.bounces', { n: m.bounces }));
+      if (m.bounceLoss) parts.push(t('lab.fx.bounceLoss', { n: pct(TOWERS.ricochet.bounceLoss + m.bounceLoss) }));
+      if (m.killGold) parts.push(t('lab.fx.killGold', { n: pct(m.killGold) }));
+      if (m.retarget) parts.push(t('lab.fx.retarget', { n: m.retarget }));
+      if (m.spool) parts.push(t('lab.fx.spool', { n: 40, s: 1.5 }));
+      if (m.darts) parts.push(t('lab.fx.darts', { n: m.darts }));
       return `${t(`tower.${e.gun}` as MessageKey)}: ${parts.join(', ')}`;
     }
   }
@@ -197,6 +207,14 @@ const SET_TINT: Record<SetId, string> = {
   trebuchet: '176, 162, 132',
   greekfire: '214, 108, 62',
   railgun: '96, 184, 222',
+  zadnoper: '150, 120, 84',
+  flasher: '236, 214, 120',
+  rockets: '214, 82, 72',
+  tarkan: '160, 140, 112',
+  ricochet: '170, 176, 184',
+  glass: '244, 196, 92',
+  harpoon: '170, 196, 200',
+  bees: '200, 200, 210',
   fortress: '211, 168, 92',
 };
 

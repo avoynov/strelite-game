@@ -24,6 +24,26 @@ export interface GunMods {
   passThrough: number;
   /** Multiplies how long a flame takes to reach full heat. */
   rampTime: number;
+  /** Flash: multiplies how long it stuns. */
+  stun: number;
+  /** Flash: radians added to the cone's half-angle. */
+  cone: number;
+  /** Flash: damage the big flash deals (at level 1; it grows with the level). */
+  flashDamage: number;
+  /** Flash: every this many flashes is a big one (0: the gun's own, every third). */
+  bigEvery: number;
+  /** Disc: more bounces. */
+  bounces: number;
+  /** Disc: added to the share lost per bounce (negative: less lost). */
+  bounceLoss: number;
+  /** Share more gold for every kill the gun makes. */
+  killGold: number;
+  /** Lens: seconds between moving on to the healthiest (0: the gun's own). */
+  retarget: number;
+  /** Harpoon: the hook slows its target (1 when researched). */
+  spool: number;
+  /** Darts: more per burst. */
+  darts: number;
 }
 
 export interface Upgrades {
@@ -114,9 +134,17 @@ export const RESEARCH: readonly ResearchItem[] = [
   // Guns: the agreed unlock order, act by act.
   item('gun.howitzer', 'guns', 1, 500, 20 * MIN, [], gun('howitzer')),
   item('gun.scorpion', 'guns', 1, 800, HOUR, ['gun.howitzer'], gun('scorpion')),
-  item('gun.trebuchet', 'guns', 3, 1500, 4 * HOUR, ['gun.scorpion'], gun('trebuchet')),
-  item('gun.greekfire', 'guns', 5, 3200, 14 * HOUR, ['gun.trebuchet'], gun('greekfire')),
-  item('gun.railgun', 'guns', 7, 4600, DAY, ['gun.greekfire'], gun('railgun')),
+  item('gun.zadnoper', 'guns', 2, 1100, 2 * HOUR, ['gun.scorpion'], gun('zadnoper')),
+  item('gun.trebuchet', 'guns', 3, 1500, 4 * HOUR, ['gun.zadnoper'], gun('trebuchet')),
+  item('gun.flasher', 'guns', 3, 1900, 6 * HOUR, ['gun.trebuchet'], gun('flasher')),
+  item('gun.rockets', 'guns', 4, 2300, 8 * HOUR, ['gun.flasher'], gun('rockets')),
+  item('gun.tarkan', 'guns', 5, 2700, 10 * HOUR, ['gun.rockets'], gun('tarkan')),
+  item('gun.greekfire', 'guns', 5, 3200, 14 * HOUR, ['gun.tarkan'], gun('greekfire')),
+  item('gun.ricochet', 'guns', 6, 3800, 18 * HOUR, ['gun.greekfire'], gun('ricochet')),
+  item('gun.railgun', 'guns', 7, 4600, DAY, ['gun.ricochet'], gun('railgun')),
+  item('gun.glass', 'guns', 7, 5600, 1.5 * DAY, ['gun.railgun'], gun('glass')),
+  item('gun.harpoon', 'guns', 8, 6600, 2 * DAY, ['gun.glass'], gun('harpoon')),
+  item('gun.bees', 'guns', 9, 8000, 3 * DAY, ['gun.harpoon'], gun('bees')),
 
   // Gun levels 4 and 5 (1–3 are open from the start).
   lvl4('crossbow', 1, 400, 20 * MIN, []),
@@ -133,6 +161,22 @@ export const RESEARCH: readonly ResearchItem[] = [
   lvl5('trebuchet', 3, 5000, 2 * DAY),
   lvl5('greekfire', 5, 6500, 2.5 * DAY),
   lvl5('railgun', 7, 8000, 3.5 * DAY),
+  lvl4('zadnoper', 2, 2000, 8 * HOUR, ['gun.zadnoper']),
+  lvl5('zadnoper', 2, 3600, DAY),
+  lvl4('flasher', 3, 3000, 12 * HOUR, ['gun.flasher']),
+  lvl5('flasher', 3, 4800, 1.5 * DAY),
+  lvl4('rockets', 4, 3400, 16 * HOUR, ['gun.rockets']),
+  lvl5('rockets', 4, 5200, 2 * DAY),
+  lvl4('tarkan', 5, 3800, 18 * HOUR, ['gun.tarkan']),
+  lvl5('tarkan', 5, 5600, 2 * DAY),
+  lvl4('ricochet', 6, 5000, 1.5 * DAY, ['gun.ricochet']),
+  lvl5('ricochet', 6, 7000, 3 * DAY),
+  lvl4('glass', 7, 7000, 2.5 * DAY, ['gun.glass']),
+  lvl5('glass', 7, 9000, 4 * DAY),
+  lvl4('harpoon', 8, 8000, 3 * DAY, ['gun.harpoon']),
+  lvl5('harpoon', 8, 10000, 4 * DAY),
+  lvl4('bees', 9, 10000, 4 * DAY, ['gun.bees']),
+  lvl5('bees', 9, 12500, 5 * DAY),
 
   // Boosts: for every gun.
   item('boost.gold1', 'boosts', 1, 200, 2 * MIN, [], { kind: 'startGold', add: 100 }),
@@ -151,6 +195,18 @@ export const RESEARCH: readonly ResearchItem[] = [
   item('fx.trebuchet', 'effects', 3, 2600, 12 * HOUR, ['gun.trebuchet', 'fx.scorpion'], mod('trebuchet', { splash: 0.5, pierce: 0.3 })),
   item('fx.greekfire', 'effects', 5, 4500, DAY, ['gun.greekfire', 'fx.trebuchet'], mod('greekfire', { rampTime: 0.5, range: 0.5 })),
   item('fx.railgun', 'effects', 7, 6000, 2 * DAY, ['gun.railgun', 'fx.greekfire'], mod('railgun', { reload: 0.8 })),
+  item('fx.zadnoper', 'effects', 2, 2000, 8 * HOUR, ['gun.zadnoper'], mod('zadnoper', { pierce: 0.3, range: 1 })),
+  item('fx.flasher', 'effects', 3, 2400, 10 * HOUR, ['gun.flasher'], mod('flasher', { cone: (15 * Math.PI) / 180 })),
+  item('fx.flasher.stun', 'effects', 3, 3000, 12 * HOUR, ['fx.flasher'], mod('flasher', { stun: 1.4 })),
+  item('fx.flasher.fire', 'effects', 3, 3600, DAY, ['fx.flasher.stun'], mod('flasher', { flashDamage: 40 })),
+  item('fx.flasher.rhythm', 'effects', 3, 4800, 1.5 * DAY, ['fx.flasher.fire'], mod('flasher', { bigEvery: 2 })),
+  item('fx.rockets', 'effects', 4, 3400, 16 * HOUR, ['gun.rockets'], mod('rockets', { splash: 0.4, pierce: 0.2 })),
+  item('fx.tarkan', 'effects', 5, 3800, 18 * HOUR, ['gun.tarkan'], mod('tarkan', { killGold: 0.2 })),
+  item('fx.ricochet', 'effects', 6, 5000, 1.5 * DAY, ['gun.ricochet'], mod('ricochet', { bounces: 1, bounceLoss: -0.05 })),
+  item('fx.glass', 'effects', 7, 7000, 2.5 * DAY, ['gun.glass'], mod('glass', { retarget: 8 })),
+  item('fx.glass.2', 'effects', 7, 9000, 4 * DAY, ['fx.glass'], mod('glass', { retarget: 6 })),
+  item('fx.harpoon', 'effects', 8, 8000, 3 * DAY, ['gun.harpoon'], mod('harpoon', { spool: 1 })),
+  item('fx.bees', 'effects', 9, 10000, 4 * DAY, ['gun.bees'], mod('bees', { darts: 4, reload: 0.85 })),
 
   // Aiming: targeting modes the player can set on a gun.
   item('aim.crossbow', 'effects', 3, 700, HOUR, ['lvl4.crossbow'], { kind: 'aim', gun: 'crossbow', mode: 'weakest' }),
@@ -335,7 +391,7 @@ export function battleTakings(moneyLeft: number, earned: number, won: boolean, l
   return Math.max(0, Math.min(moneyLeft, earned)) + (won ? victoryBonus(level) : 0);
 }
 
-const NO_MODS: GunMods = { damage: 1, reload: 1, range: 0, splash: 0, pierce: 0, passThrough: 0, rampTime: 1 };
+const NO_MODS: GunMods = { damage: 1, reload: 1, range: 0, splash: 0, pierce: 0, passThrough: 0, rampTime: 1, stun: 1, cone: 0, flashDamage: 0, bigEvery: 0, bounces: 0, bounceLoss: 0, killGold: 0, retarget: 0, spool: 0, darts: 0 };
 
 /** The upgrades a set of finished items gives. */
 export function upgrades(done: readonly string[], gunIds: readonly TowerId[], lab: LabInfo = WHOLE_TREE): Upgrades {
@@ -369,6 +425,16 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[], la
       m.pierce += e.mods.pierce ?? 0;
       m.passThrough += e.mods.passThrough ?? 0;
       m.rampTime *= e.mods.rampTime ?? 1;
+      m.stun *= e.mods.stun ?? 1;
+      m.cone += e.mods.cone ?? 0;
+      m.flashDamage += e.mods.flashDamage ?? 0;
+      if (e.mods.bigEvery) m.bigEvery = m.bigEvery ? Math.min(m.bigEvery, e.mods.bigEvery) : e.mods.bigEvery;
+      m.bounces += e.mods.bounces ?? 0;
+      m.bounceLoss += e.mods.bounceLoss ?? 0;
+      m.killGold += e.mods.killGold ?? 0;
+      if (e.mods.retarget) m.retarget = m.retarget ? Math.min(m.retarget, e.mods.retarget) : e.mods.retarget;
+      m.spool += e.mods.spool ?? 0;
+      m.darts += e.mods.darts ?? 0;
     }
   }
   for (const m of Object.values(per)) {
@@ -384,7 +450,7 @@ export function upgrades(done: readonly string[], gunIds: readonly TowerId[], la
 // ------------------------------------------------------------------- sets
 
 /** The guns in the order they are unlocked: the order of the sets on the research screen. */
-export const GUN_ORDER: readonly TowerId[] = ['crossbow', 'zis3', 'howitzer', 'scorpion', 'trebuchet', 'greekfire', 'railgun'];
+export const GUN_ORDER: readonly TowerId[] = ['crossbow', 'zis3', 'howitzer', 'scorpion', 'zadnoper', 'trebuchet', 'flasher', 'rockets', 'tarkan', 'greekfire', 'ricochet', 'railgun', 'glass', 'harpoon', 'bees'];
 
 export type SetId = TowerId | 'fortress';
 
@@ -404,8 +470,8 @@ export interface ResearchSet {
 export const RESEARCH_SETS: readonly ResearchSet[] = [
   ...GUN_ORDER.map((g): ResearchSet => {
     const starter = START_GUNS.includes(g);
-    const aims = RESEARCH.filter((r) => r.effect.kind === 'aim' && r.effect.gun === g).map((r) => r.id);
-    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, `fx.${g}`, ...aims] };
+    const fx = RESEARCH.filter((r) => r.branch === 'effects' && 'gun' in r.effect && r.effect.gun === g).map((r) => r.id);
+    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, ...fx] };
   }),
   { id: 'fortress', starter: false, items: RESEARCH.filter((r) => r.branch === 'boosts').map((r) => r.id) },
 ];

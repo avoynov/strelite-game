@@ -117,7 +117,10 @@ function fortify(g: Game, upgrade: boolean): boolean {
 }
 
 /** How much of its money a sensible player puts into each gun, relative to the others. */
-const MIX: Record<TowerId, number> = { crossbow: 2, scorpion: 1.5, zis3: 2, howitzer: 2, greekfire: 1.5, trebuchet: 1.5, railgun: 1 };
+const MIX: Record<TowerId, number> = {
+  crossbow: 2, scorpion: 1.5, zis3: 2, howitzer: 2, greekfire: 1.5, trebuchet: 1.5, railgun: 1,
+  zadnoper: 1.5, flasher: 0.8, rockets: 0.8, tarkan: 1.5, ricochet: 1.2, glass: 1, harpoon: 1, bees: 1.2,
+};
 
 /**
  * A plain, sensible player: keeps its spending on each allowed gun close to

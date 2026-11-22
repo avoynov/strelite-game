@@ -35,7 +35,11 @@ const ART_URL = `${import.meta.env.BASE_URL}art`;
 const BATTLE_KEY = 'strelite.battle';
 
 /** Each gun's report. The flamethrower is a held loop instead; the railgun has its own event. */
-const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = { crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet' };
+// The new guns borrow the nearest old sound until they get their own.
+const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = {
+  crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet',
+  zadnoper: 'scorpion', rockets: 'crossbow', tarkan: 'zis3', ricochet: 'howitzer', harpoon: 'scorpion',
+};
 const DEATH_SOUND: Record<EnemyId, SoundName> = { infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig' };
 
 const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
@@ -587,6 +591,11 @@ async function start(): Promise<void> {
       else if (ev.type === 'rail') {
         board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
         playAt('railgun', ev.x1, ev.y1);
+      }
+      else if (ev.type === 'flash') board.onFlash(ev.towerId, ev.x, ev.y, ev.aim, ev.cone, ev.range, ev.big);
+      else if (ev.type === 'bounce') {
+        board.onBounce(ev.x1, ev.y1, ev.x2, ev.y2);
+        playAt('impact', ev.x2, ev.y2);
       }
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);

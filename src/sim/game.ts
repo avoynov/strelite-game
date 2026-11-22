@@ -1,6 +1,6 @@
 import { afterArmor, applyDamage } from './damage';
 import type { Upgrades } from './research';
-import { BASE_ROLES, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
+import { BASE_ROLES, DAMAGE_GROWTH, ECONOMY, ENEMIES, FENCE_LEVELS, gunHp, PUSH_DPS, TOWERS, type Assault, type EnemyId, type Targeting, type TowerDef, type TowerId, type TowerLevel } from './content';
 import { FlowField } from './flowField';
 import type { Cell } from './grid';
 import type { BuiltMap } from './maps';
@@ -86,6 +86,12 @@ export interface Enemy {
   wall: number;
   /** Siege mode: seconds until it can strike again. */
   attackCooldown: number;
+  /** Seconds it still stands stunned (a flash); it neither moves nor strikes. */
+  stun: number;
+  /** Bosses: seconds before a flash can stun it again. */
+  stunGuard: number;
+  /** Seconds a harpoon's hook still drags on it (slower). */
+  hooked: number;
 }
 
 export interface TowerStats {
@@ -117,8 +123,18 @@ export interface Tower {
   aimMode?: Targeting;
   /** Flame: seconds spent on the current target (the flame heats up). */
   heat: number;
-  /** Flame: true while it is burning a target this step. */
+  /** Flame and lens: true while it is burning a target this step. */
   firing: boolean;
+  /** Rear: how far its target still had to go when the gun took it, in cells. */
+  lockRemaining: number;
+  /** Flash: flashes so far (every third is a big one). */
+  flashes: number;
+  /** Lens: seconds until it looks again for the enemy with most health now. */
+  retargetIn: number;
+  /** Lens: enemies it gave up on (too little health left to be worth it). */
+  dropped?: number[];
+  /** Darts: darts still to loose in this burst. */
+  burst: number;
   /** Siege mode: health; the gun is wrecked at 0 (in the base it stays as a wreck to rebuild). Unused elsewhere. */
   hp: number;
   maxHp: number;
@@ -181,7 +197,8 @@ export const isWreck = (t: Tower): boolean => t.hp <= 0;
 export interface Projectile {
   id: number;
   towerId: number;
-  kind: 'direct' | 'shell';
+  /** `rocket`, `disc` and `dart` follow their target like a direct round (see ProjectileKind). */
+  kind: 'direct' | 'shell' | 'rocket' | 'disc' | 'dart';
   /** Enemy a direct round follows; 0 for shells. */
   targetId: number;
   damage: number;
@@ -203,6 +220,14 @@ export interface Projectile {
   /** Flight progress 0..1, and its value at the start of the last step. */
   t: number;
   pt: number;
+  /** Disc: bounces left; enemies it already struck. */
+  bounces?: number;
+  hit?: number[];
+  /** Dart: seconds of its loop before it heads in, and seconds it has circled with nothing to strike. */
+  loop?: number;
+  idle?: number;
+  /** Harpoon: the hook slows what it strikes. */
+  hook?: boolean;
 }
 
 export type GameEvent =
@@ -213,6 +238,10 @@ export type GameEvent =
   /** A direct round struck; `air` when the target flies (the hit is up where it is). */
   | { type: 'impact'; x: number; y: number; air?: boolean }
   | { type: 'fizzle'; projectileId: number; x: number; y: number }
+  /** A flash lamp blazed over its cone; `big` for every third (longer) one. */
+  | { type: 'flash'; towerId: number; x: number; y: number; aim: number; cone: number; range: number; big: boolean }
+  /** A disc bounced on from one enemy to the next. */
+  | { type: 'bounce'; x1: number; y1: number; x2: number; y2: number }
   /** A railgun fired: everything on the segment was hit. */
   | { type: 'rail'; towerId: number; x1: number; y1: number; x2: number; y2: number }
   | { type: 'kill'; enemyId: number; def: EnemyId; reward: number; x: number; y: number }
@@ -257,6 +286,30 @@ const BEAM_HITS_PER_SECOND = 2;
 const RAIL_HALF_WIDTH = 0.35;
 /** A round passing through looks for its next victim this far from the impact. */
 const PASS_THROUGH_REACH = 1.2;
+/** Bosses take this share of a share-of-health hit (lens, harpoon) and of a stun. */
+const BOSS_PCT = 0.5;
+/** Every this many flashes is a big one, twice as long. */
+const BIG_FLASH_EVERY = 3;
+/** Flyers count this many tiles further from a flash than they are (they are up high). */
+const FLASH_AIR_EXTRA = 1.5;
+/** Seconds a stunned boss cannot be stunned again, after the stun. */
+const BOSS_STUN_GUARD = 3;
+/** Darts: seconds between darts of a burst; seconds of the loop each makes before heading in; seconds one circles with nothing to strike before it drops. */
+const DART_GAP = 0.07;
+const DART_LOOP = 0.35;
+const DART_IDLE = 2;
+/** Rockets: a rocket whose target is gone bursts where it is. */
+/** Harpoon: the hook (research) slows its target by this share, for this many seconds. */
+const HOOK_SLOW = 0.4;
+const HOOK_SECONDS = 1.5;
+/** Rear: a gun's way through range, in cells, is taken as this many times its range. */
+const REAR_PATH = 1.5;
+
+/** Bosses: the fortress and the dreadnought. */
+export function isBoss(def: EnemyId): boolean {
+  const d = ENEMIES[def];
+  return 'boss' in d && d.boss === true;
+}
 
 /** Siege mode: what stepping into a wall costs a unit that never breaks one (it goes round any way there is). */
 const NO_BREAK = 1000;
@@ -760,7 +813,8 @@ export class Game {
       l = m
         ? {
             ...base,
-            damage: Math.round(base.damage * m.damage * 10) / 10,
+            damage: Math.round((base.damage + m.flashDamage * (DAMAGE_GROWTH[level] ?? 1)) * m.damage * 10) / 10,
+            ...(base.pct !== undefined ? { pct: base.pct * m.damage } : {}),
             fireInterval: Math.round(base.fireInterval * m.reload * 1000) / 1000,
             range: base.range + m.range,
             ...(base.splash ? { splash: Math.round((base.splash + m.splash) * 100) / 100 } : {}),
@@ -916,6 +970,10 @@ export class Game {
       targetId: 0,
       heat: 0,
       firing: false,
+      lockRemaining: 0,
+      flashes: 0,
+      retargetIn: 0,
+      burst: 0,
       hp: gunHp(d.size, level),
       maxHp: gunHp(d.size, level),
       stats: { dealt: 0, wasted: 0, kills: 0, invested },
@@ -1308,6 +1366,9 @@ export class Game {
       phase: (id * 2.399963) % TWO_PI,
       wall: -1,
       attackCooldown: 0,
+      stun: 0,
+      stunGuard: 0,
+      hooked: 0,
     };
     if (air) {
       // Flyers ignore the road and head straight for the goal.
@@ -1324,7 +1385,8 @@ export class Game {
 
   /** Speed right now: weaving riders ease off a little in bends. */
   speedOf(e: Enemy): number {
-    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0));
+    if (e.stun > 0) return 0;
+    return ENEMIES[e.def].speed * (1 - CORNER_SLOW * (e.corner ?? 0)) * (e.hooked > 0 ? 1 - HOOK_SLOW : 1);
   }
 
   /** Walk a ground unit along a field; a weaving rider swings across its way as it goes. */
@@ -1396,6 +1458,13 @@ export class Game {
   private moveEnemies(dt: number): void {
     for (const e of this.enemies) {
       if (!e.alive) continue;
+      e.stunGuard = Math.max(0, e.stunGuard - dt);
+      e.hooked = Math.max(0, e.hooked - dt);
+      if (e.stun > 0) {
+        // Stunned: it stands where it is.
+        e.stun = Math.max(0, e.stun - dt);
+        continue;
+      }
       if (this.base) {
         this.moveInBase(e, dt);
         continue;
@@ -1510,7 +1579,7 @@ export class Game {
    */
   private assault(dt: number): void {
     for (const e of this.enemies) {
-      if (!e.alive || e.air) continue;
+      if (!e.alive || e.air || e.stun > 0) continue;
       const d = ENEMIES[e.def];
       // Blows grow with the unit: the square root of how much its wave raised its health.
       const power = Math.sqrt(e.maxHp / d.baseHp);
@@ -1560,7 +1629,8 @@ export class Game {
    */
   private assaultInBase(dt: number): void {
     for (const e of this.enemies) {
-      if (!e.alive) continue;
+      // A stunned unit strikes nothing.
+      if (!e.alive || e.stun > 0) continue;
       const d = ENEMIES[e.def];
       const role = BASE_ROLES[e.def];
       const a = role.assault;
@@ -1678,6 +1748,7 @@ export class Game {
   }
 
   private fireTowers(dt: number): void {
+    this.incoming = null;
     for (const t of this.towers) {
       t.cooldown = Math.max(0, t.cooldown - dt);
       t.firing = false;
@@ -1685,6 +1756,11 @@ export class Game {
       if (t.job?.kind === 'build' || isWreck(t)) continue;
       const def: TowerDef = this.defOf(t.def);
       const lvl = this.levelOf(t);
+      // Darts: a burst under way goes on, each dart with its own target.
+      if (def.projectile === 'darts') {
+        this.fireDarts(t, def, lvl, dt);
+        continue;
+      }
       const target = this.pickTarget(t);
       if (!target) {
         t.targetId = 0;
@@ -1694,6 +1770,7 @@ export class Game {
       if (target.id !== t.targetId) {
         t.targetId = target.id;
         t.heat = 0;
+        t.lockRemaining = target.remaining;
       }
 
       // Aim point: the target itself, or for a lobbed shell the place it will have reached.
@@ -1717,6 +1794,12 @@ export class Game {
         if (aimed) this.burn(t, def, lvl, target, dt);
         continue;
       }
+      if (def.projectile === 'lens') {
+        if (t.retargetIn <= 0) t.retargetIn = this.retargetSeconds(t.def);
+        if (t.dropped && t.dropped.length > 40) t.dropped = t.dropped.filter((id) => this.enemies.some((e) => e.id === id && e.alive));
+        if (aimed) this.lens(t, def, lvl, target, dt);
+        continue;
+      }
       if (t.cooldown > 0 || !aimed) continue;
       t.cooldown += lvl.fireInterval;
 
@@ -1724,30 +1807,190 @@ export class Game {
         this.fireRail(t, def, lvl);
         continue;
       }
-      const id = this.nextId++;
-      this.projectiles.push({
-        id,
-        towerId: t.id,
-        kind: def.projectile,
-        targetId: def.projectile === 'direct' ? target.id : 0,
-        damage: lvl.damage,
-        pierce: def.pierce,
-        passThrough: def.passThrough ?? 0,
-        speed: lvl.projectileSpeed,
-        splash: lvl.splash ?? 0,
-        ox: t.x,
-        oy: t.y,
-        tx: ax,
-        ty: ay,
-        x: t.x,
-        y: t.y,
-        px: t.x,
-        py: t.y,
-        t: 0,
-        pt: 0,
-      });
-      this.events.push({ type: 'shot', towerId: t.id, projectileId: id });
+      if (def.projectile === 'flash') {
+        this.flash(t, def, lvl);
+        continue;
+      }
+      // A harpoon's hit is a share of its target's full health (bosses take half).
+      const damage = lvl.pct !== undefined ? lvl.pct * target.maxHp * this.pctFactor(target) : lvl.damage;
+      const kind = def.projectile === 'rocket' || def.projectile === 'disc' ? def.projectile : def.projectile === 'shell' ? 'shell' : 'direct';
+      const p = this.launch(t, kind, kind === 'shell' ? 0 : target.id, damage, def, lvl, ax, ay);
+      if (kind === 'disc') {
+        p.bounces = (lvl.bounces ?? 0) + (this.upgrades?.gun[t.def].bounces ?? 0);
+        p.hit = [];
+      }
+      if (lvl.pct !== undefined && (this.upgrades?.gun[t.def].spool ?? 0) > 0) p.hook = true;
+      this.addIncoming(p);
     }
+  }
+
+  /** Put a round in flight from a gun. */
+  private launch(t: Tower, kind: Projectile['kind'], targetId: number, damage: number, def: TowerDef, lvl: TowerLevel, tx: number, ty: number): Projectile {
+    const id = this.nextId++;
+    const p: Projectile = {
+      id,
+      towerId: t.id,
+      kind,
+      targetId,
+      damage,
+      pierce: def.pierce,
+      passThrough: def.passThrough ?? 0,
+      speed: lvl.projectileSpeed,
+      splash: lvl.splash ?? 0,
+      ox: t.x,
+      oy: t.y,
+      tx,
+      ty,
+      x: t.x,
+      y: t.y,
+      px: t.x,
+      py: t.y,
+      t: 0,
+      pt: 0,
+    };
+    this.projectiles.push(p);
+    this.events.push({ type: 'shot', towerId: t.id, projectileId: id });
+    return p;
+  }
+
+  /** Bosses take half of any share-of-health hit (lens, harpoon). */
+  private pctFactor(e: Enemy): number {
+    return isBoss(e.def) ? BOSS_PCT : 1;
+  }
+
+  /** Damage already on its way to each enemy, after armour (rounds that follow it, shells bursting on it). */
+  private incoming: Map<number, number> | null = null;
+
+  private incomingTo(e: Enemy): number {
+    if (!this.incoming) {
+      this.incoming = new Map();
+      for (const p of this.projectiles) this.addIncoming(p);
+    }
+    return this.incoming.get(e.id) ?? 0;
+  }
+
+  private addIncoming(p: Projectile): void {
+    const m = this.incoming;
+    if (!m) return;
+    if (p.kind === 'shell') {
+      for (const e of this.enemies) {
+        if (!e.alive || e.air || Math.hypot(e.x - p.tx, e.y - p.ty) > p.splash + ENEMIES[e.def].radius) continue;
+        m.set(e.id, (m.get(e.id) ?? 0) + afterArmor(p.damage, this.armorOf(e), p.pierce));
+      }
+      return;
+    }
+    const e = this.enemies.find((o) => o.id === p.targetId);
+    if (e) m.set(e.id, (m.get(e.id) ?? 0) + afterArmor(p.damage, this.armorOf(e), p.pierce));
+  }
+
+  /** An enemy the rounds already in flight will kill. */
+  private doomed(e: Enemy): boolean {
+    return this.incomingTo(e) >= e.hp;
+  }
+
+  /** Lens: seconds between looks for the healthiest. */
+  private retargetSeconds(def: TowerId): number {
+    return this.upgrades?.gun[def].retarget || this.defOf(def).retarget || 10;
+  }
+
+  /**
+   * Flash: everything in the cone in front stands stunned, the nearer the
+   * longer (the furthest half as long); flyers count further off, being high.
+   * Every third flash (with research every second) is a big one, twice as long,
+   * and with research it also burns a little. Bosses take half and then
+   * cannot be stunned for a few seconds.
+   */
+  private flash(t: Tower, def: TowerDef, lvl: TowerLevel): void {
+    const m = this.upgrades?.gun[t.def];
+    t.flashes++;
+    const every = m?.bigEvery || BIG_FLASH_EVERY;
+    const big = t.flashes % every === 0;
+    const cone = (def.cone ?? 0) + (m?.cone ?? 0);
+    const full = (lvl.stun ?? 0) * (m?.stun ?? 1) * (big ? 2 : 1);
+    this.events.push({ type: 'flash', towerId: t.id, x: t.x, y: t.y, aim: t.aim, cone, range: lvl.range, big });
+    let hitAny = false;
+    for (const e of this.enemies) {
+      if (!e.alive || (e.air && !def.hitsAir)) continue;
+      const d = Math.hypot(e.x - t.x, e.y - t.y);
+      if (d > lvl.range + ENEMIES[e.def].radius) continue;
+      if (Math.abs(angleDelta(t.aim, Math.atan2(e.y - t.y, e.x - t.x))) > cone) continue;
+      hitAny = true;
+      const far = Math.min(1, (d + (e.air ? FLASH_AIR_EXTRA : 0)) / lvl.range);
+      let secs = full * (1 - 0.5 * far);
+      if (isBoss(e.def)) {
+        if (e.stunGuard > 0) secs = 0;
+        else {
+          secs *= 0.5;
+          e.stunGuard = secs + BOSS_STUN_GUARD;
+        }
+      }
+      e.stun = Math.max(e.stun, secs);
+      if (big && lvl.damage > 0) t.stats.wasted += this.damageEnemy(e, lvl.damage, t, this.armorOf(e), def.pierce);
+    }
+    if (!hitAny && big && lvl.damage > 0) t.stats.wasted += lvl.damage;
+  }
+
+  /**
+   * Lens: after focusing on a new target, burns a share of the health it has
+   * now each second, through any armour. It gives up a target that has too
+   * little left to be worth it, and every so often moves on to the enemy with
+   * most health now.
+   */
+  private lens(t: Tower, def: TowerDef, lvl: TowerLevel, target: Enemy, dt: number): void {
+    t.firing = true;
+    t.heat += dt;
+    t.retargetIn -= dt;
+    if (t.heat < (def.focus ?? 0)) return;
+    const dps = (lvl.pct ?? 0) * target.hp * this.pctFactor(target);
+    if (dps < (def.plateau ?? 0)) {
+      (t.dropped ??= []).push(target.id);
+      t.targetId = 0;
+      return;
+    }
+    t.stats.wasted += this.damageEnemy(target, dps * dt, t, 0, 1, false);
+  }
+
+  /**
+   * Darts: when the pause is over a burst begins; the darts leave one after
+   * another, each picking its own target (see pickDart) and making a loop or
+   * two before it heads in.
+   */
+  private fireDarts(t: Tower, def: TowerDef, lvl: TowerLevel, dt: number): void {
+    if (t.burst <= 0) {
+      if (t.cooldown > 0 || !this.candidates(t).length) return;
+      t.burst = (lvl.darts ?? 1) + (this.upgrades?.gun[t.def].darts ?? 0);
+      t.heat = 0;
+    }
+    t.heat -= dt;
+    while (t.burst > 0 && t.heat <= 0) {
+      const target = this.pickDart(t);
+      if (!target) {
+        t.burst = 0;
+        break;
+      }
+      t.aim = Math.atan2(target.y - t.y, target.x - t.x);
+      const p = this.launch(t, 'dart', target.id, lvl.damage, def, lvl, target.x, target.y);
+      p.loop = DART_LOOP * (0.6 + 0.8 * hash01(p.id * 7919));
+      p.idle = 0;
+      this.addIncoming(p);
+      t.burst--;
+      t.heat += DART_GAP;
+    }
+    if (t.burst <= 0) t.cooldown = lvl.fireInterval;
+  }
+
+  /** A dart's target: at random, nearer ones likelier and armoured ones less, never one the rounds in flight will kill. */
+  private pickDart(t: Tower, from: { x: number; y: number } = t, salt = 0): Enemy | undefined {
+    const list = this.candidates(t).filter((e) => !this.doomed(e));
+    if (!list.length) return undefined;
+    const w = list.map((e) => 1 / (1 + Math.hypot(e.x - from.x, e.y - from.y)) / (1 + 0.15 * this.armorOf(e)));
+    const sum = w.reduce((a, b) => a + b, 0);
+    let r = hash01(this.nextId * 2654435761 + t.id * 97 + salt) * sum;
+    for (let i = 0; i < list.length; i++) {
+      r -= w[i]!;
+      if (r <= 0) return list[i];
+    }
+    return list[list.length - 1];
   }
 
   /** Flame: damage per second ramps from `rampFrom` to full while it stays on one target. */
@@ -1796,7 +2039,8 @@ export class Game {
     const range = this.levelOf(t).range;
     const min = def.minRange ?? 0;
     return this.enemies.filter((e) => {
-      if (!e.alive || (e.air && !def.hitsAir)) return false;
+      if (!e.alive || (e.air && !def.hitsAir) || (!e.air && def.airOnly)) return false;
+      if (t.dropped?.includes(e.id)) return false;
       const d = Math.hypot(e.x - t.x, e.y - t.y);
       return d <= range && d >= min;
     });
@@ -1812,10 +2056,9 @@ export class Game {
     if (!list.length) return undefined;
     const mode = this.aimOf(t);
     const kept = t.targetId ? list.find((e) => e.id === t.targetId) : undefined;
-    // Set to the most vulnerable, a gun leaves its target for one in range with less health left.
-    const weaker = mode === 'weakest' && kept && list.some((e) => e.hp < kept.hp);
-    if (kept && !weaker) return kept;
     const def: TowerDef = this.defOf(t.def);
+    const lvl = this.levelOf(t);
+    if (kept && this.keeps(t, def, lvl, mode, kept, list)) return kept;
     const first = (es: Enemy[]) => es.reduce<Enemy | undefined>((b, e) => (!b || e.remaining < b.remaining ? e : b), undefined);
     /** Highest score wins; ties go to the one closest to the goal. */
     const best = (score: (e: Enemy) => number) => {
@@ -1851,6 +2094,52 @@ export class Game {
       }
       case 'strongest':
         return best((e) => e.hp);
+      case 'rear':
+        return best((e) => e.remaining);
+      case 'cone': {
+        const cone = (def.cone ?? 0) + (this.upgrades?.gun[t.def].cone ?? 0);
+        return best((e) => {
+          const a = Math.atan2(e.y - t.y, e.x - t.x);
+          return list.filter((o) => Math.abs(angleDelta(a, Math.atan2(o.y - t.y, o.x - t.x))) <= cone).length;
+        });
+      }
+      case 'airCrowd': {
+        const r = lvl.splash ?? 0;
+        return best((e) => list.filter((o) => Math.hypot(o.x - e.x, o.y - e.y) <= r + ENEMIES[o.def].radius).length);
+      }
+      case 'sureKill': {
+        // The toughest it can still kill before it leaves range; else the one it brings closest to death.
+        let pick: Enemy | undefined;
+        let top = -Infinity;
+        let near: Enemy | undefined;
+        let nearLeft = Infinity;
+        for (const e of list) {
+          const left = this.leftAfterShots(t, lvl, def, e);
+          if (left === null) continue;
+          if (left <= 0) {
+            if (e.hp > top) {
+              top = e.hp;
+              pick = e;
+            }
+          } else if (left < nearLeft) {
+            nearLeft = left;
+            near = e;
+          }
+        }
+        return pick ?? near ?? first(list);
+      }
+      case 'bounce': {
+        const r = def.bounceReach ?? 0;
+        return best((e) => list.filter((o) => o !== e && Math.hypot(o.x - e.x, o.y - e.y) <= r).length);
+      }
+      case 'lens':
+        return kept ? best((e) => e.hp) : first(list);
+      case 'biggest': {
+        const worth = list.filter((e) => e.hp >= (lvl.pct ?? 0) * e.maxHp * this.pctFactor(e));
+        let pick: Enemy | undefined;
+        for (const e of worth.length ? worth : list) if (!pick || e.maxHp > pick.maxHp || (e.maxHp === pick.maxHp && e.remaining < pick.remaining)) pick = e;
+        return pick;
+      }
       case 'line': {
         const range = this.levelOf(t).range;
         return best((e) => {
@@ -1863,13 +2152,93 @@ export class Game {
     }
   }
 
+  /** Whether a gun stays on the target it has (each mode has its own rule for letting go). */
+  private keeps(t: Tower, def: TowerDef, lvl: TowerLevel, mode: Targeting, kept: Enemy, list: Enemy[]): boolean {
+    switch (mode) {
+      // Set to the most vulnerable, a gun leaves its target for one in range with less health left.
+      case 'weakest':
+        return !list.some((e) => e.hp < kept.hp);
+      // The tail: once its target is well through range, a newer one further back takes over.
+      case 'rear': {
+        const through = t.lockRemaining - kept.remaining;
+        return through < (def.switchShare ?? 1) * REAR_PATH * lvl.range || !list.some((e) => e.remaining > kept.remaining);
+      }
+      case 'sureKill': {
+        const left = this.leftAfterShots(t, lvl, def, kept);
+        return left !== null && left <= 0;
+      }
+      case 'biggest':
+        return kept.hp >= (lvl.pct ?? 0) * kept.maxHp * this.pctFactor(kept);
+      // The lens moves on to the healthiest every so often.
+      case 'lens':
+        return t.retargetIn > 0;
+      default:
+        return true;
+    }
+  }
+
+  /**
+   * Таркански топ: health an enemy would have left after every ball the gun
+   * can still put into it before it leaves range (its own balls in flight
+   * counted); null when its own balls already kill it.
+   */
+  private leftAfterShots(t: Tower, lvl: TowerLevel, def: TowerDef, e: Enemy): number | null {
+    let own = 0;
+    for (const p of this.projectiles) if (p.towerId === t.id && p.targetId === e.id) own += afterArmor(p.damage, this.armorOf(e), p.pierce);
+    const need = e.hp - own;
+    if (need <= 0 && e.id !== t.targetId) return null;
+    const per = afterArmor(lvl.damage, this.armorOf(e), def.pierce);
+    const time = this.timeInRange(t, lvl.range, e);
+    const shots = Math.floor(Math.max(0, time - t.cooldown) / lvl.fireInterval) + 1;
+    return need - shots * per;
+  }
+
+  /** Seconds until an enemy, going straight on as it heads now, leaves a circle of `range` round a gun. */
+  private timeInRange(t: Tower, range: number, e: Enemy): number {
+    const v = e.stun > 0 ? 0 : this.speedOf(e);
+    if (v <= 0) return 30;
+    const px = e.x - t.x;
+    const py = e.y - t.y;
+    const hx = Math.cos(e.heading);
+    const hy = Math.sin(e.heading);
+    const b = px * hx + py * hy;
+    const c = px * px + py * py - range * range;
+    const disc = b * b - c;
+    if (disc <= 0) return 0;
+    return Math.max(0, -b + Math.sqrt(disc)) / v;
+  }
+
+  /** An enemy's armour now. */
+  armorOf(e: Enemy): number {
+    return ENEMIES[e.def].armor;
+  }
+
   private moveProjectiles(dt: number): void {
     const keep: Projectile[] = [];
     for (const p of this.projectiles) {
       const tower = this.towerById(p.towerId);
-      if (p.kind === 'direct') {
-        const target = this.enemies.find((e) => e.id === p.targetId && e.alive);
+      if (p.kind !== 'shell') {
+        let target = this.enemies.find((e) => e.id === p.targetId && e.alive);
+        if (!target && (p.kind === 'disc' || p.kind === 'dart')) {
+          // A disc picks the next by its bounce rule; a dart one nobody else will kill.
+          target = p.kind === 'disc' ? this.nextBounce(p, p.x, p.y) : tower ? this.pickDart(tower, p, p.id) : undefined;
+          if (target) p.targetId = target.id;
+        }
         if (!target) {
+          if (p.kind === 'rocket') {
+            // The rocket bursts where it is, among any flyers there.
+            this.rocketBurst(p, tower, p.x, p.y);
+            continue;
+          }
+          if (p.kind === 'dart' && (p.idle ?? 0) < DART_IDLE) {
+            // Nothing to strike: it circles a while before it drops.
+            p.idle = (p.idle ?? 0) + dt;
+            const a = this.time * 9 + p.id;
+            p.x += Math.cos(a) * p.speed * 0.4 * dt;
+            p.y += Math.sin(a) * p.speed * 0.4 * dt;
+            keep.push(p);
+            continue;
+          }
           // Target died or escaped before impact: the whole shot is wasted.
           if (tower) tower.stats.wasted += p.damage;
           this.events.push({ type: 'fizzle', projectileId: p.id, x: p.x, y: p.y });
@@ -1877,6 +2246,16 @@ export class Game {
         }
         p.tx = target.x;
         p.ty = target.y;
+        p.idle = 0;
+      }
+      if (p.kind === 'dart' && (p.loop ?? 0) > 0) {
+        // A loop or two before it heads in.
+        p.loop! -= dt;
+        const a = Math.atan2(p.ty - p.y, p.tx - p.x) + Math.PI / 2;
+        p.x += Math.cos(a) * p.speed * dt;
+        p.y += Math.sin(a) * p.speed * dt;
+        keep.push(p);
+        continue;
       }
       const dx = p.tx - p.x;
       const dy = p.ty - p.y;
@@ -1890,22 +2269,7 @@ export class Game {
         keep.push(p);
         continue;
       }
-      if (p.kind === 'direct') {
-        const target = this.enemies.find((e) => e.id === p.targetId)!;
-        this.events.push({ type: 'impact', x: target.x, y: target.y, ...(target.air ? { air: true } : {}) });
-        let wasted = this.damageEnemy(target, p.damage, tower, ENEMIES[target.def].armor, p.pierce);
-        // A bolt that goes through carries on into the nearest others behind its target.
-        const hit = new Set([target.id]);
-        for (let i = 0; i < p.passThrough; i++) {
-          const next = this.enemies
-            .filter((e) => e.alive && !hit.has(e.id) && e.air === target.air && Math.hypot(e.x - target.x, e.y - target.y) <= PASS_THROUGH_REACH + ENEMIES[e.def].radius)
-            .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0];
-          if (!next) break;
-          hit.add(next.id);
-          wasted += this.damageEnemy(next, p.damage, tower, ENEMIES[next.def].armor, p.pierce);
-        }
-        if (tower) tower.stats.wasted += wasted;
-      } else {
+      if (p.kind === 'shell') {
         this.events.push({ type: 'burst', x: p.tx, y: p.ty, radius: p.splash });
         let hitAny = false;
         let wasted = 0;
@@ -1913,13 +2277,84 @@ export class Game {
         for (const e of this.enemies) {
           if (!e.alive || e.air || Math.hypot(e.x - p.tx, e.y - p.ty) > p.splash + ENEMIES[e.def].radius) continue;
           hitAny = true;
-          wasted += this.damageEnemy(e, p.damage, tower, ENEMIES[e.def].armor, p.pierce);
+          wasted += this.damageEnemy(e, p.damage, tower, this.armorOf(e), p.pierce);
         }
         // Overkill and armour on a blast count per target; a shell that hits nothing is wasted whole.
         if (tower) tower.stats.wasted += hitAny ? wasted : p.damage;
+        continue;
       }
+      const target = this.enemies.find((e) => e.id === p.targetId)!;
+      if (p.kind === 'rocket') {
+        this.rocketBurst(p, tower, target.x, target.y);
+        continue;
+      }
+      this.events.push({ type: 'impact', x: target.x, y: target.y, ...(target.air ? { air: true } : {}) });
+      let wasted = this.damageEnemy(target, p.damage, tower, this.armorOf(target), p.pierce);
+      if (p.hook && target.alive) target.hooked = HOOK_SECONDS;
+      if (p.kind === 'disc') {
+        if (tower) tower.stats.wasted += wasted;
+        (p.hit ??= []).push(target.id);
+        // On to the next, losing a share of its force each time.
+        const next = (p.bounces ?? 0) > 0 ? this.nextBounce(p, target.x, target.y) : undefined;
+        if (!next) continue;
+        const loss = Math.max(0, (this.defOf(tower?.def ?? 'ricochet').bounceLoss ?? 0) + (tower ? (this.upgrades?.gun[tower.def].bounceLoss ?? 0) : 0));
+        this.events.push({ type: 'bounce', x1: target.x, y1: target.y, x2: next.x, y2: next.y });
+        p.bounces!--;
+        p.damage *= 1 - loss;
+        p.targetId = next.id;
+        p.ox = p.x = target.x;
+        p.oy = p.y = target.y;
+        p.t = p.pt = 0;
+        keep.push(p);
+        continue;
+      }
+      // A bolt that goes through carries on into the nearest others behind its target.
+      const hit = new Set([target.id]);
+      for (let i = 0; i < p.passThrough; i++) {
+        const next = this.enemies
+          .filter((e) => e.alive && !hit.has(e.id) && e.air === target.air && Math.hypot(e.x - target.x, e.y - target.y) <= PASS_THROUGH_REACH + ENEMIES[e.def].radius)
+          .sort((a, b) => Math.hypot(a.x - target.x, a.y - target.y) - Math.hypot(b.x - target.x, b.y - target.y))[0];
+        if (!next) break;
+        hit.add(next.id);
+        wasted += this.damageEnemy(next, p.damage, tower, this.armorOf(next), p.pierce);
+      }
+      if (tower) tower.stats.wasted += wasted;
     }
     this.projectiles = keep;
+  }
+
+  /** A rocket bursts: every flyer within its blast takes the hit. */
+  private rocketBurst(p: Projectile, tower: Tower | undefined, x: number, y: number): void {
+    this.events.push({ type: 'impact', x, y, air: true });
+    let hitAny = false;
+    let wasted = 0;
+    for (const e of this.enemies) {
+      if (!e.alive || !e.air || Math.hypot(e.x - x, e.y - y) > p.splash + ENEMIES[e.def].radius) continue;
+      hitAny = true;
+      wasted += this.damageEnemy(e, p.damage, tower, this.armorOf(e), p.pierce);
+    }
+    if (tower) tower.stats.wasted += hitAny ? wasted : p.damage;
+  }
+
+  /** A disc's next victim: the nearest on the ground it has not struck, within a bounce, ahead of it (no sharp turn back). */
+  private nextBounce(p: Projectile, x: number, y: number): Enemy | undefined {
+    const tower = this.towerById(p.towerId);
+    const reach = this.defOf(tower?.def ?? 'ricochet').bounceReach ?? 0;
+    const hx = x - p.ox;
+    const hy = y - p.oy;
+    let best: Enemy | undefined;
+    let bestD = Infinity;
+    for (const e of this.enemies) {
+      if (!e.alive || e.air || p.hit?.includes(e.id)) continue;
+      const dx = e.x - x;
+      const dy = e.y - y;
+      const d = Math.hypot(dx, dy);
+      if (d > reach || d >= bestD) continue;
+      if ((hx || hy) && dx * hx + dy * hy < 0) continue;
+      best = e;
+      bestD = d;
+    }
+    return best;
   }
 
   /**
@@ -1933,6 +2368,9 @@ export class Game {
     if (announce) this.events.push({ type: 'hit', enemyId: target.id, dealt: r.dealt, overkill: r.overkill, x: target.x, y: target.y });
     if (target.hp <= 0) {
       target.alive = false;
+      // A gun with the trophy research takes a share more gold for its kills.
+      const extra = tower ? (this.upgrades?.gun[tower.def].killGold ?? 0) : 0;
+      if (extra > 0) target.reward = Math.round(target.reward * (1 + extra));
       this.money += target.reward;
       this.goldEarned += target.reward;
       if (tower) tower.stats.kills++;

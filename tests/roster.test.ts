@@ -42,12 +42,14 @@ function play(g: Game, seconds: number): GameEvent[] {
 }
 
 describe('roster', () => {
-  it('has the seven guns, five levels each, ordered light to heavy', () => {
-    expect(TOWER_IDS).toEqual(['crossbow', 'scorpion', 'zis3', 'howitzer', 'greekfire', 'trebuchet', 'railgun']);
+  it('has the fifteen guns in laboratory order, five levels each, every level stronger', () => {
+    expect(TOWER_IDS).toEqual(['crossbow', 'zis3', 'howitzer', 'scorpion', 'zadnoper', 'trebuchet', 'flasher', 'rockets', 'tarkan', 'greekfire', 'ricochet', 'railgun', 'glass', 'harpoon', 'bees']);
+    // A gun's strength per level: its damage, or what it has instead (stun, share of health).
+    const power = (l: (typeof TOWERS)[TowerId]['levels'][number]) => l.damage + ('stun' in l ? (l.stun ?? 0) : 0) + ('pct' in l ? (l.pct ?? 0) : 0);
     for (const id of TOWER_IDS) {
       const levels = TOWERS[id].levels;
       expect(levels).toHaveLength(5);
-      for (let i = 1; i < 5; i++) expect(levels[i]!.damage).toBeGreaterThan(levels[i - 1]!.damage);
+      for (let i = 1; i < 5; i++) expect(power(levels[i]!), `${id} ${i + 1}`).toBeGreaterThan(power(levels[i - 1]!));
     }
   });
 
@@ -55,7 +57,7 @@ describe('roster', () => {
     const open = (done: string[]) => TOWER_IDS.filter((id) => new Game(buildPathMap(MEADOW), { upgrades: upgrades(done, TOWER_IDS) }).isUnlocked(id));
     expect(open([])).toEqual(['crossbow', 'zis3']);
     expect(open(['gun.howitzer'])).toEqual(['crossbow', 'zis3', 'howitzer']);
-    expect(open(RESEARCH.map((r) => r.id))).toHaveLength(7);
+    expect(open(RESEARCH.map((r) => r.id))).toHaveLength(15);
     const g = new Game(buildPathMap(MEADOW), { upgrades: upgrades([], TOWER_IDS) });
     expect(g.build('howitzer', 4, 0)).toEqual({ ok: false, reason: 'locked' });
   });

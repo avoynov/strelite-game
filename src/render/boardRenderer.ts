@@ -1,5 +1,5 @@
 import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type Texture } from 'pixi.js';
-import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
+import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerDef, type TowerId } from '../sim/content';
 import { isWreck, type Building, type Fence, type Game, type Tower } from '../sim/game';
 import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT, type BuildingKind } from '../sim/base';
 import { BuildingView, type BuildingState } from './buildingView';
@@ -66,6 +66,8 @@ const FLOAT_LIFE = 0.9;
 const STRIKE_LIFE = 0.18;
 
 const RAIL_LIFE = 0.35;
+const FLASH_LIFE = 0.3;
+const GLANCE_LIFE = 0.25;
 
 /** Screen rotation of a direction on the ground (`a` = atan2(dy, dx) in grid cells). */
 function screenAngle(a: number): number {
@@ -110,6 +112,10 @@ export class BoardRenderer {
   private bursts: Burst[] = [];
   /** Railgun traces fading out: ends in grid cells. */
   private rails: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
+  /** Dazzle lamp flashes: a lit cone on the ground, fading. */
+  private flashes: { x: number; y: number; aim: number; cone: number; range: number; big: boolean; age: number }[] = [];
+  /** Ricochet discs glancing from one enemy to the next. */
+  private glances: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   /** Siege mode: enemy shots at guns and fences, fading out. */
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
@@ -473,6 +479,22 @@ export class BoardRenderer {
       return;
     }
     this.rails.push({ x1, y1, x2, y2, age: 0 });
+  }
+
+  /** Dazzle lamp: a flash over its cone (stand-in drawing until it has art). */
+  onFlash(towerId: number, x: number, y: number, aim: number, cone: number, range: number, big: boolean): void {
+    const tower = this.game.towerById(towerId);
+    const view = this.towerViews.get(towerId)?.view;
+    if (tower && view) {
+      view.setAim(tower.aim);
+      view.fire(this.game.levelOf(tower).fireInterval);
+    }
+    this.flashes.push({ x, y, aim, cone, range, big, age: 0 });
+  }
+
+  /** Ricochet disc: a streak from the enemy it hit to the next one. */
+  onBounce(x1: number, y1: number, x2: number, y2: number): void {
+    this.glances.push({ x1, y1, x2, y2, age: 0 });
   }
 
   /** Siege mode: a unit fired at or rammed a gun or fence. */
@@ -842,8 +864,26 @@ export class BoardRenderer {
           g.ellipse(isoX(gx, gy), isoY(gx, gy), 4, 2).fill({ color: 0x000000, alpha: 0.25 });
           if (this.drawRound(p.id, o, gx, gy, h, Math.atan2(p.ty - gy, p.tx - gx))) continue;
         }
-        const len = Math.min(d, 16);
-        g.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
+        const ux = dx / d;
+        const uy = dy / d;
+        if (p.kind === 'rocket') {
+          // A firework: a sparking trail behind a bright head.
+          g.moveTo(x - ux * 18, y - uy * 18).lineTo(x, y).stroke({ width: 3, color: 0xff9a3c, alpha: 0.55, cap: 'round' });
+          g.circle(x, y, 2.4).fill({ color: 0xfff1b0, alpha: 0.95 });
+        } else if (p.kind === 'disc') {
+          g.ellipse(isoX(gx, gy), isoY(gx, gy), 4, 2).fill({ color: 0x000000, alpha: 0.25 });
+          g.ellipse(x, y, 5, 2.5).fill({ color: 0x9aa39a }).stroke({ width: 1, color: 0x3c4430 });
+        } else if (p.kind === 'dart') {
+          g.moveTo(x - ux * 5, y - uy * 5).lineTo(x, y).stroke({ width: 1.2, color: 0xe8d27a, alpha: 0.95, cap: 'round' });
+        } else if (p.hook) {
+          // Harpoon: a pale line trailing back to the gun.
+          const tw = this.game.towerById(p.towerId);
+          if (tw) g.moveTo(isoX(tw.x, tw.y), isoY(tw.x, tw.y, o.h)).lineTo(x, y).stroke({ width: 1, color: 0xdfe6e0, alpha: 0.5 });
+          g.moveTo(x - ux * 12, y - uy * 12).lineTo(x, y).stroke({ width: 2.5, color: 0xcfd6d0, alpha: 0.95, cap: 'round' });
+        } else {
+          const len = Math.min(d, 16);
+          g.moveTo(x - ux * len, y - uy * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
+        }
       }
     }
     for (const [id, sprite] of this.roundSprites) {
@@ -864,6 +904,18 @@ export class BoardRenderer {
       const my = m?.gy ?? t.y;
       const mh = (m?.heightM ?? 1) / METRES_PER_TILE;
       const heat = Math.min(1, t.heat / 3);
+      if (t.def === 'glass') {
+        // Devil's glass: a thin, hard beam of sunlight that sharpens as it focuses.
+        const focus = Math.min(1, t.heat / ((TOWERS.glass as TowerDef).focus || 0.5));
+        const bx0 = isoX(mx, my);
+        const by0 = isoY(mx, my, mh);
+        const bx1 = isoX(target.x, target.y);
+        const by1 = isoY(target.x, target.y, target.air ? this.flyHeight() : HIT_HEIGHT);
+        g.moveTo(bx0, by0).lineTo(bx1, by1).stroke({ width: 6 * (1.4 - focus), color: 0xfff3c0, alpha: 0.25 * focus, cap: 'round' });
+        g.moveTo(bx0, by0).lineTo(bx1, by1).stroke({ width: 1.6, color: 0xffffff, alpha: 0.5 + 0.5 * focus, cap: 'round' });
+        g.circle(bx1, by1, 2 + 4 * focus).fill({ color: 0xfff3c0, alpha: 0.7 * focus });
+        continue;
+      }
       if (this.shotFx(t.def).includes('fire_stream')) {
         const a = Math.atan2(target.y - my, target.x - mx);
         const len = Math.hypot(target.x - mx, target.y - my);
@@ -918,6 +970,44 @@ export class BoardRenderer {
       g.moveTo(a[0], a[1]).lineTo(b[0], b[1]).stroke({ width: 2.5, color: 0xffffff, alpha: 1 - k, cap: 'round' });
       return true;
     });
+
+    // Dazzle lamp: the lit cone on the ground fades out quickly.
+    this.flashes = this.flashes.filter((f) => {
+      f.age += dt;
+      const k = f.age / FLASH_LIFE;
+      if (k >= 1) return false;
+      const steps = 10;
+      g.moveTo(isoX(f.x, f.y), isoY(f.x, f.y));
+      for (let i = 0; i <= steps; i++) {
+        const a = f.aim - f.cone + (2 * f.cone * i) / steps;
+        g.lineTo(isoX(f.x + Math.cos(a) * f.range, f.y + Math.sin(a) * f.range), isoY(f.x + Math.cos(a) * f.range, f.y + Math.sin(a) * f.range));
+      }
+      g.closePath().fill({ color: 0xfffbe0, alpha: (f.big ? 0.55 : 0.35) * (1 - k) });
+      return true;
+    });
+
+    // Ricochet: a short grey streak along each glance.
+    this.glances = this.glances.filter((r) => {
+      r.age += dt;
+      const k = r.age / GLANCE_LIFE;
+      if (k >= 1) return false;
+      g.moveTo(isoX(r.x1, r.y1), isoY(r.x1, r.y1, HIT_HEIGHT)).lineTo(isoX(r.x2, r.y2), isoY(r.x2, r.y2, HIT_HEIGHT)).stroke({ width: 2, color: 0xc8cfc8, alpha: 0.8 * (1 - k), cap: 'round' });
+      return true;
+    });
+
+    // Stunned enemies: a small ring of light above them.
+    for (const e of this.game.enemies) {
+      if (!e.alive || e.stun <= 0) continue;
+      const v = this.enemyViews.get(e.id);
+      const ex = v?.gx ?? e.x;
+      const ey = v?.gy ?? e.y;
+      const h = (e.air ? this.flyHeight() : HIT_HEIGHT) + 0.5;
+      const spin = this.game.time * 6 + e.id;
+      for (let i = 0; i < 3; i++) {
+        const a = spin + (i * 2 * Math.PI) / 3;
+        g.circle(isoX(ex, ey) + Math.cos(a) * 6, isoY(ex, ey, h) + Math.sin(a) * 2.5, 1.6).fill({ color: 0xfff1a0, alpha: 0.9 });
+      }
+    }
 
     // Shell bursts: a quick flash, then dust spreading over the blast circle.
     this.bursts = this.bursts.filter((b) => {
