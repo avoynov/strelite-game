@@ -1,6 +1,7 @@
 import { t } from '../i18n';
 import type { Mode } from '../sim/maps';
 import { levelPages, LEVELS_PER_PAGE, levelWaves } from '../sim/levels';
+import { starRow } from './hud';
 
 /**
  * Level list in pages of 100: levels won, the next one to fight and the locked
@@ -13,6 +14,10 @@ const MODES: readonly Mode[] = ['path', 'arc'];
 export interface LevelsCallbacks {
   /** Highest map level won (0 for none). */
   won(): number;
+  /** Best stars on a level of the mode shown (0 when not won). */
+  stars(level: number): number;
+  /** Stars on all mission levels and medals earned. */
+  totals(): { total: number; medals: number };
   /** The level being played now, or 0 when it is in the other mode. */
   current(): number;
   mode(): Mode;
@@ -85,6 +90,7 @@ export class LevelSelect {
   private render(): void {
     const won = this.cb.won();
     const current = this.cb.current();
+    const totals = this.cb.totals();
     const pages = levelPages(won);
     this.page = Math.min(Math.max(0, this.page), pages - 1);
     const from = this.page * LEVELS_PER_PAGE + 1;
@@ -96,7 +102,7 @@ export class LevelSelect {
         <li><button class="lv ${state}${n === current ? ' current' : ''}" data-lv="${n}" ${state === 'locked' ? 'disabled' : ''}>
           <span class="lv-num">${n}</span>
           <span class="lv-waves">${t('levels.waves', { n: levelWaves(n) })}</span>
-          <span class="lv-tag">${state === 'won' ? t('levels.won') : state === 'next' ? t('levels.next') : ''}</span>
+          <span class="lv-tag">${state === 'won' ? starRow(this.cb.stars(n), 'stars lv-stars') : state === 'next' ? t('levels.next') : ''}</span>
         </button></li>`);
     }
     this.el.innerHTML = `
@@ -104,6 +110,7 @@ export class LevelSelect {
         <div>
           <p class="lab-kicker">${t('building.muster')}</p>
           <h1 class="lab-title">${t('levels.title')}</h1>
+          <p class="lv-total">${t('levels.stars', { n: totals.total, m: totals.medals })}</p>
         </div>
         <button class="win-x" data-lv="close" aria-label="${t('action.close')}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
       </header>

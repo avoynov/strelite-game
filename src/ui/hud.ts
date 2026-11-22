@@ -1,9 +1,31 @@
 import { t, type MessageKey } from '../i18n';
 import { TOWER_IDS, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
-import { isWreck, type ActionResult, type Building, type Game, type Structure } from '../sim/game';
+import { isWreck, type ActionResult, type Building, type Game, type Structure, type Tower } from '../sim/game';
 import type { Armed, Selection } from '../render/boardRenderer';
 import { BASE_RULES, builders, isRaisable, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, TREASURY_LEVELS, type BaseState, type BuildingKind, type JobError } from '../sim/base';
 import { formatDuration } from './lab';
+import { MAX_RANK, medalsFor, STARS, toNextRank, type Order, type OrderState } from '../sim/progress';
+
+/** A finished mission: stars won and what they, a medal and the daily order paid. */
+export interface MissionResult {
+  stars: number;
+  /** Best on this level before the battle. */
+  before: number;
+  starGold: number;
+  /** Gold of each medal this battle completed. */
+  medals: number[];
+  medalCount: number;
+  /** Gold the daily order paid, 0 when it did not finish now. */
+  order: number;
+}
+
+/** A veteran rank's name (0 = private). */
+export const rankName = (rank: number): string => t(`rank.${Math.max(0, Math.min(4, rank))}` as MessageKey);
+
+/** Stars as a row of three (filled and empty). */
+export function starRow(n: number, cls = 'stars'): string {
+  return `<span class="${cls}" aria-label="${t('stars.label', { n })}">${[1, 2, 3].map((i) => `<i class="${i <= n ? 'on' : ''}">★</i>`).join('')}</span>`;
+}
 
 /** How an attack on the base (or the battle to win the headquarters back) ended. */
 export interface BaseResult {
@@ -31,6 +53,10 @@ export interface BaseHud {
   openLevels(): void;
   /** The attack was provoked: the raid rides out. */
   provoked(): void;
+  /** Today's order at the muster: what it asks, how far along, what it pays. */
+  order(): { order: Order; state: OrderState; reward: number };
+  /** Stars on all mission levels, and medals earned. */
+  stars(): { total: number; medals: number };
 }
 
 const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney', occupied: 'reason.occupiedHq' };
@@ -62,6 +88,8 @@ export interface HudCallbacks {
   toBase(): void;
   /** Gold this battle has put in the research treasury so far. */
   banked(): number;
+  /** A finished mission's stars; null while it runs and in the base. */
+  missionResult(): MissionResult | null;
   /** The player's base, when this battle is fought at it. */
   base(): BaseHud | null;
   /** Stop the battle and open the pause screen (sound, graphics, language, install); in the base, the settings. */
@@ -234,10 +262,18 @@ export class Hud {
            <button class="btn primary" data-action="restart">${t('action.toBase')}</button>
          </div>`;
     } else if (!base && (g.phase === 'won' || g.phase === 'lost')) {
+      const mr = this.cb.missionResult();
+      const extras: string[] = [];
+      if (mr && mr.starGold > 0) extras.push(`<p class="end-banked"><span class="ico ico-gold" aria-hidden="true"></span>${t('end.starGold', { n: mr.starGold, k: mr.stars - mr.before })}</p>`);
+      for (const gold of mr?.medals ?? []) extras.push(`<p class="end-medal">${t('end.medal', { n: gold })}</p>`);
+      if (mr && mr.order > 0) extras.push(`<p class="end-banked"><span class="ico ico-gold" aria-hidden="true"></span>${t('end.order', { n: mr.order })}</p>`);
       end = `<div class="end-card">
+           ${g.phase === 'won' && mr ? starRow(mr.stars, 'stars end-stars') : ''}
            <h2>${t(g.phase === 'won' ? 'end.won' : 'end.lost')}</h2>
            <p>${t('end.summary', { n: g.phase === 'won' ? g.wave : Math.max(0, g.wave - 1) })}</p>
+           ${g.phase === 'won' && mr && mr.stars < 3 ? `<p class="end-hint">${t(mr.stars < 2 ? 'stars.hint2' : 'stars.hint3')}</p>` : ''}
            <p class="end-banked"><span class="ico ico-gold" aria-hidden="true"></span>${t('end.banked', { n: this.cb.banked() })}</p>
+           ${extras.join('')}
            ${g.phase === 'won' ? `<button class="btn primary" data-action="next">${t(g.mode === 'arc' ? 'mission.arc' : 'mission.path', { n: g.level + 1 })}</button>` : ''}
            <button class="btn${g.phase === 'won' ? '' : ' primary'}" data-action="restart">${t(g.phase === 'won' ? 'action.restart' : 'action.retry')}</button>
            <button class="btn" data-action="toBase">${t('action.toBase')}</button>
@@ -399,6 +435,7 @@ export class Hud {
               <span>${t('stat.wasted')} ${Math.round(s.wasted)} (${wastedPct}%)</span>
               <span>${t('stat.kills')} ${s.kills}</span>
             </div>
+            ${this.vetHtml(tower)}
           </div>
           <div class="actions">
             ${up === null
@@ -414,6 +451,34 @@ export class Hud {
         </div>`;
     }
     return body;
+  }
+
+  /** Base mode: the gun's veteran rank, all-time kills and the next rank. */
+  private vetHtml(tower: Tower): string {
+    if (!this.cb.base()) return '';
+    const kills = tower.vet ?? 0;
+    const rank = this.game.rank(tower);
+    const next = toNextRank(kills);
+    return `<div class="stats vet">
+      ${rank ? `<svg class="chevrons" viewBox="0 0 12 ${4 + 4 * rank}" aria-hidden="true">${Array.from({ length: rank }, (_, i) => `<path d="M1 ${1 + 4 * i}l5 3 5-3"/>`).join('')}</svg>` : ''}
+      <span><b>${rankName(rank)}</b></span>
+      <span>${t('vet.kills', { n: kills })}</span>
+      ${next === null || rank >= MAX_RANK ? '' : `<span>${t('vet.next', { n: next, rank: rankName(rank + 1) })}</span>`}
+    </div>`;
+  }
+
+  /** The muster's daily order: sealed until opened, then what it asks and what it pays. */
+  private orderHtml(): string {
+    const base = this.cb.base()!;
+    const { order, state, reward } = base.order();
+    const what = order.kind === 'kill' ? t('order.kill', { n: order.count ?? 0, name: t(`enemy.${order.enemy ?? 'infantry'}`) }) : t(`order.${order.kind}`);
+    const streak = state.lastDone ? `<span>${t('order.streak', { n: state.steps * 10 })}</span>` : '';
+    const progress = order.kind === 'kill' && !state.done ? `<span>${t('order.progress', { n: state.progress, total: order.count ?? 0 })}</span>` : '';
+    return `<div class="order${state.done ? ' done' : ''}">
+      <div class="order-head"><b>${t('order.title')}</b>${state.done ? `<span class="order-tag">${t('order.done')}</span>` : `<span class="cost"><span class="ico ico-gold"></span>${reward}</span>`}</div>
+      <p>${escapeHtml(what)}</p>
+      <div class="stats muted">${progress}${streak}</div>
+    </div>`;
   }
 
   /** Base mode: a repair button for a damaged part. */
@@ -460,7 +525,10 @@ export class Hud {
         <button class="btn primary" data-action="provoke" title="${escapeHtml(t('base.provokeHint'))}">${t('action.provoke')}</button>`;
     } else if (what === 'muster' && !ruined && peace) {
       const m = base.missions();
-      main = `<button class="btn primary" data-action="mission" data-def="path">${t('mission.path', { n: m.path })}</button>
+      const st2 = base.stars();
+      const toMedal = STARS.perMedal * (medalsFor(st2.total) + 1) - st2.total;
+      fx = `${fx} · ${t('stars.total', { n: st2.total, m: st2.medals, left: toMedal })}`;
+      main = `${this.orderHtml()}<button class="btn primary" data-action="mission" data-def="path">${t('mission.path', { n: m.path })}</button>
         <button class="btn primary" data-action="mission" data-def="arc">${t('mission.arc', { n: m.arc })}</button>
         <button class="btn" data-action="levels">${t('action.allLevels')}</button>`;
     } else if (what === 'arsenal' && !ruined && g.phase !== 'won' && g.phase !== 'lost') {
