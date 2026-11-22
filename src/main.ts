@@ -1,7 +1,9 @@
 import { Application } from 'pixi.js';
 import './style.css';
 import { getLang, onLangChange, t } from './i18n';
-import { BoardRenderer, type Armed, type Selection } from './render/boardRenderer';
+import { armedGun, BoardRenderer, type Armed, type Selection } from './render/boardRenderer';
+import { isTrapId } from './sim/traps';
+import { readTrapAuto } from './trapPrefs';
 import { PALETTE } from './render/palette';
 import { PortraitArt } from './render/portraitArt';
 import { TowerArt } from './render/towers/spriteTowerView';
@@ -36,8 +38,15 @@ const ART_URL = `${import.meta.env.BASE_URL}art`;
 const BATTLE_KEY = 'strelite.battle';
 
 /** Each gun's report. The flamethrower is a held loop instead; the railgun has its own event. */
-const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = { crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet' };
-const DEATH_SOUND: Record<EnemyId, SoundName> = { infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig' };
+// The new guns borrow the nearest old sound until they get their own.
+const SHOT_SOUND: Partial<Record<TowerId, SoundName>> = {
+  crossbow: 'crossbow', scorpion: 'scorpion', zis3: 'zis3', howitzer: 'howitzer', trebuchet: 'trebuchet',
+  zadnoper: 'scorpion', rockets: 'crossbow', tarkan: 'zis3', ricochet: 'howitzer', harpoon: 'scorpion',
+};
+const DEATH_SOUND: Record<EnemyId, SoundName> = {
+  infantry: 'deathSoft', moto: 'deathVehicle', drone: 'deathAir', truck: 'deathVehicle', apc: 'deathVehicle', tank: 'deathVehicle', fortress: 'deathBig',
+  wagon: 'deathVehicle', rider: 'deathSoft', glider: 'deathAir', armorcar: 'deathVehicle', sapper: 'deathSoft', shield: 'deathVehicle', boat: 'deathAir', dreadnought: 'deathBig',
+};
 
 const MODES: readonly Mode[] = ['path', 'arc', 'siege'];
 const asMode = (v: string | null): Mode | null => MODES.find((m) => m === v) ?? null;
@@ -72,6 +81,7 @@ function saveString(key: string, v: string): void {
 }
 
 const saveNumber = (key: string, n: number) => saveString(key, String(n));
+
 
 /** Highest map level won so far. */
 const wonLevel = () => readNumber(wonKey());
@@ -149,8 +159,8 @@ async function start(): Promise<void> {
   };
   /** Research follows the laboratory in the base: its level, and whether it stands. */
   const syncLab = () => {
-    const l = baseStore.state.buildings.lab;
-    research.setLab({ level: l.level, standing: l.hp > 0, hq: baseStore.state.buildings.hq.level });
+    const b = baseStore.state.buildings;
+    research.setLab({ level: b.lab.level, standing: b.lab.hp > 0, hq: b.hq.level });
   };
   baseStore.settle();
   syncLab();
@@ -181,6 +191,7 @@ async function start(): Promise<void> {
         level: baseStore.state.attack,
         upgrades: research.upgrades(),
         aimPrefs: readAimPrefs(),
+        trapAuto: readTrapAuto(),
         base: {
           get state() {
             return baseStore.state;
@@ -190,7 +201,14 @@ async function start(): Promise<void> {
         },
       });
     }
-    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), { level, upgrades: research.upgrades(), aimPrefs: readAimPrefs() });
+    return new Game(mode === 'path' ? buildPathMap(levelMap(level)) : buildArcMap(levelArcMap(level), mode), {
+      level,
+      upgrades: research.upgrades(),
+      aimPrefs: readAimPrefs(),
+      // Traps follow the base's headquarters, whatever the battle.
+      hqLevel: baseStore.state.buildings.hq.level,
+      trapAuto: readTrapAuto(),
+    });
   };
   // A battle left running last time picks up where it stopped (unless a level was asked for in the address).
   const saved = params.has('level') ? null : readBattle();
@@ -292,7 +310,7 @@ async function start(): Promise<void> {
     getSpeed: () => loop.speed,
     setSpeed: (s) => (loop.speed = s),
     restart: (level = game.level) => goTo(mode, level),
-    openArsenal: () => arsenal.open(armed && armed !== 'fence' ? armed : undefined),
+    openArsenal: () => arsenal.open(armedGun(armed) ?? undefined),
     openLab: () => lab.open(),
     toBase: () => goTo('siege'),
     banked: () => banked ?? 0,
@@ -378,6 +396,8 @@ async function start(): Promise<void> {
     },
     installWay,
     install: () => void promptInstall().then(() => pauseMenu.invalidate()),
+    inBase: () => !!game.base,
+    toBase: () => goTo('siege'),
     cheats: () => cheats,
     setCheats: (c) => {
       cheats = { ...cheats, ...c };
@@ -385,8 +405,6 @@ async function start(): Promise<void> {
       applyCheats();
       hud.update();
     },
-    inBase: () => !!game.base,
-    toBase: () => goTo('siege'),
     resume: () => {
       paused = false;
       loop.paused = false;
@@ -533,6 +551,7 @@ async function start(): Promise<void> {
     const tower = cell ? game.towerAt(cell.x, cell.y) : undefined;
     const fence = cell ? game.fenceAt(cell.x, cell.y) : undefined;
     const building = cell ? game.buildingAt(cell.x, cell.y) : undefined;
+    const trap = cell ? game.trapAt(cell.x, cell.y) : undefined;
     if (building) {
       // Tapping the muster opens the day's sealed order.
       if (building.kind === 'muster' && building.hp > 0) progress.markRead();
@@ -541,6 +560,16 @@ async function start(): Promise<void> {
       selection = selection?.kind === 'tower' && selection.id === tower.id ? null : { kind: 'tower', id: tower.id };
     } else if (fence) {
       selection = selection?.kind === 'fence' && selection.id === fence.id ? null : { kind: 'fence', id: fence.id };
+    } else if (trap) {
+      selection = selection?.kind === 'trap' && selection.id === trap.id ? null : { kind: 'trap', id: trap.id };
+    } else if (armed && isTrapId(armed)) {
+      // Traps go down with a tap, like fences.
+      selection = null;
+      if (cell) {
+        const r = game.buildTrap(armed, cell.x, cell.y);
+        if (r.ok) saveBase();
+        hud.showResult(r);
+      }
     } else if (armed === 'fence') {
       // Fences are cheap and many: a tap builds one straight away.
       selection = null;
@@ -629,6 +658,14 @@ async function start(): Promise<void> {
       else if (ev.type === 'rail') {
         board.onRail(ev.towerId, ev.x1, ev.y1, ev.x2, ev.y2);
         playAt('railgun', ev.x1, ev.y1);
+      }
+      else if (ev.type === 'trap' && ev.kind !== 'mine') playAt('impact', ev.x, ev.y);
+      else if (ev.type === 'heal') board.addFloat('+', ev.x, ev.y, 0x7bd36a);
+      else if (ev.type === 'disarmed') board.addFloat(t('trap.disarmed'), ev.x, ev.y, 0xe0624f);
+      else if (ev.type === 'flash') board.onFlash(ev.towerId, ev.x, ev.y, ev.aim, ev.cone, ev.range, ev.big);
+      else if (ev.type === 'bounce') {
+        board.onBounce(ev.x1, ev.y1, ev.x2, ev.y2);
+        playAt('impact', ev.x2, ev.y2);
       }
       else if (ev.type === 'kill') {
         board.onKill(ev.enemyId);
@@ -731,6 +768,7 @@ async function start(): Promise<void> {
     if (selection?.kind === 'building' && !game.building(selection.what)) selection = null;
     if (selection?.kind === 'fence' && !game.fenceById(selection.id)) selection = null;
     if (game.base) board.marks = { envelope: !progress.state.read, medals: progress.medals };
+    if (selection?.kind === 'trap' && !game.trapById(selection.id)) selection = null;
     board.render(alpha, selection, armed, paused ? 0 : frame * loop.speed);
     hud.update();
   });

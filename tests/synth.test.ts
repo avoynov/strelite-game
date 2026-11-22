@@ -6,10 +6,12 @@ describe('synthesised sounds', () => {
     for (const name of SOUND_NAMES) {
       const s = synth(name, 1);
       let peak = 0;
+      let finite = true;
       for (const v of s) {
-        expect(Number.isFinite(v), name).toBe(true);
+        if (!Number.isFinite(v)) finite = false;
         peak = Math.max(peak, Math.abs(v));
       }
+      expect(finite, name).toBe(true);
       expect(peak, name).toBeGreaterThan(0.2);
       expect(peak, name).toBeLessThanOrEqual(1);
       expect(s.length / SAMPLE_RATE, name).toBeLessThan(3);

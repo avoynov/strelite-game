@@ -1,7 +1,9 @@
 import { t, type MessageKey } from '../i18n';
 import { TOWER_IDS, type Targeting, type TowerDef, type TowerId, type TowerLevel } from '../sim/content';
 import { isWreck, type ActionResult, type Building, type Game, type Structure, type Tower } from '../sim/game';
-import type { Armed, Selection } from '../render/boardRenderer';
+import { armedGun, type Armed, type Selection } from '../render/boardRenderer';
+import { isTrapId, TRAP_IDS, TRAPS, trapOpen, type TrapId } from '../sim/traps';
+import { writeTrapAuto } from '../trapPrefs';
 import { BASE_RULES, builders, isRaisable, HQ_LEVELS, jobError, jobPrice, LAB_LEVELS, TREASURY_LEVELS, type BaseState, type BuildingKind, type JobError } from '../sim/base';
 import { formatDuration } from './lab';
 import { writeAimPrefs } from '../aimPrefs';
@@ -60,7 +62,7 @@ export interface BaseHud {
   stars(): { total: number; medals: number };
 }
 
-const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney', hqLevel: 'reason.labOverHq', occupied: 'reason.occupiedHq' };
+const JOB_ERR: Record<JobError, MessageKey> = { maxLevel: 'reason.maxLevel', hqLevel: 'reason.labOverHq', running: 'reason.running', noBuilder: 'reason.noBuilder', noGold: 'reason.noMoney', occupied: 'reason.occupiedHq' };
 
 /** Icons drawn in line with the HUD's own (24×24, stroked). */
 const ICON = {
@@ -175,7 +177,16 @@ export class Hud {
       this.cb.done?.();
       return;
     }
-    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', blocks: 'reason.blocks', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied', noBuilder: 'reason.noBuilder', busy: 'reason.busy', noArsenal: 'reason.noArsenal', wreck: 'reason.wreck' };
+    const key: Partial<Record<typeof r.reason, MessageKey>> = { noMoney: 'reason.noMoney', maxLevel: 'reason.maxLevel', levelLocked: 'reason.levelLocked', blocks: 'reason.blocks', notBuildable: 'hint.notBuildable', occupied: 'reason.occupied', noBuilder: 'reason.noBuilder', busy: 'reason.busy', noArsenal: 'reason.noArsenal', wreck: 'reason.wreck', trapCap: 'reason.trapCap', armed: 'reason.armed' };
+    if (r.reason === 'trapHq') {
+      const armed = this.cb.getArmed();
+      this.showToast(t('reason.trapHq', { n: armed && isTrapId(armed) ? TRAPS[armed].hq : 2 }));
+      return;
+    }
+    if (r.reason === 'notBuildable' && isTrapId(this.cb.getArmed())) {
+      this.showToast(t('reason.trapCell'));
+      return;
+    }
     if (r.reason === 'locked') {
       this.showToast(t('reason.locked'));
       return;
@@ -314,7 +325,7 @@ export class Hud {
     } else if (base) {
       // The base: no build bar; the arsenal sends guns and fences. A picked one is placed with a tap.
       const mend = g.repairAllCost();
-      const hint = armed === 'fence' ? t('hint.fence', { cost: g.fenceCost() }) : armed ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.tapBuilding');
+      const hint = armed === 'fence' ? t('hint.fence', { cost: g.fenceCost() }) : isTrapId(armed) ? t('hint.trap', { cost: TRAPS[armed].cost }) : armedGun(armed) ? t('hint.place', { name: t(`tower.${armedGun(armed)!}`) }) : t('hint.tapBuilding');
       const lost = g.phase === 'wave' ? `<span class="strength">${t('base.lost', { n: Math.round(g.lostShare() * 100), max: Math.round(BASE_RULES.lossShare * 100) })}</span>` : '';
       body = `<div class="picker base-idle">
         <div class="base-row">
@@ -335,8 +346,9 @@ export class Hud {
             <span class="cost"><span class="ico ico-gold"></span>${cost}</span>
           </button>`;
       }).join('');
-      const hint = armed && armed !== 'fence' ? t('hint.place', { name: t(`tower.${armed}`) }) : t('hint.pick');
-      body = `<div class="picker"><div class="cards">${cards}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
+      const gun = armedGun(armed);
+      const hint = isTrapId(armed) ? t('hint.trap', { cost: TRAPS[armed].cost }) : gun ? t('hint.place', { name: t(`tower.${gun}`) }) : t('hint.pick');
+      body = `<div class="picker"><div class="cards">${cards}${this.trapCardsHtml()}</div><p class="hint">${escapeHtml(hint)}</p></div>`;
     }
 
     // In the base the attack is provoked (or the headquarters retaken) from the headquarters; the button only runs the waves after.
@@ -399,6 +411,23 @@ export class Hud {
               : `<button class="btn primary" data-action="fenceUp" ${g.money < up ? 'disabled' : ''}>${escapeHtml(t(`fence.${f.level + 1}` as MessageKey))}<span class="cost"><span class="ico ico-gold"></span>${up}</span></button>`}
             ${this.repairHtml(f)}
             <button class="btn" data-action="fenceSell">${t('action.sell')}<span class="cost">+${g.fenceSellValue(f)}</span></button>
+          </div>
+        </div>`;
+    } else if (sel?.kind === 'trap' && g.trapById(sel.id)) {
+      const tr = g.trapById(sel.id)!;
+      const def = TRAPS[tr.kind];
+      body = `
+        <div class="row">
+          <span class="gun-ico trap-ico trap-${tr.kind}" aria-hidden="true"></span>
+          <div class="info">
+            <div class="title">${escapeHtml(t(`trap.${tr.kind}`))} · ${tr.armed ? t('trap.armed') : t('trap.spent')}</div>
+            <div class="stats"><span>${escapeHtml(t(`trap.${tr.kind}.role` as MessageKey))}</span></div>
+            <div class="stats muted"><span>${t('trap.title')}: ${t('trap.count', { n: g.traps.length, cap: g.trapLimit })}</span></div>
+          </div>
+          <div class="actions">
+            ${tr.armed ? '' : `<button class="btn primary" data-action="trapRecharge" ${g.money < def.recharge || tr.patch > 0 ? 'disabled' : ''}>${t('trap.recharge')}<span class="cost"><span class="ico ico-gold"></span>${def.recharge}</span></button>`}
+            <button class="btn" data-action="trapAuto" aria-pressed="${g.trapAuto}">${g.trapAuto ? t('trap.auto') : t('trap.autoOff')}</button>
+            <button class="btn" data-action="trapSell">${t('action.sell')}<span class="cost">+${g.trapSellValue(tr)}</span></button>
           </div>
         </div>`;
     } else if (sel?.kind === 'building' && g.building(sel.what)) {
@@ -483,6 +512,26 @@ export class Hud {
     </div>`;
   }
 
+  /** Kinds of trap the headquarters has brought (none while no trap may be laid). */
+  private openTraps(): TrapId[] {
+    const g = this.game;
+    return g.trapLimit > 0 ? TRAP_IDS.filter((k) => trapOpen(k, g.trapHq)) : [];
+  }
+
+  /** The build bar's trap cards, after the guns. */
+  private trapCardsHtml(): string {
+    const g = this.game;
+    const armed = this.cb.getArmed();
+    return this.openTraps()
+      .map((k) => `
+          <button class="card trap-card${armed === k ? ' armed' : ''}${g.money < TRAPS[k].cost || g.traps.length >= g.trapLimit ? ' poor' : ''}" data-action="pick" data-def="${k}" aria-pressed="${armed === k}" title="${escapeHtml(t(`trap.${k}.role` as MessageKey))}">
+            <span class="gun-ico trap-ico trap-${k}" aria-hidden="true"></span>
+            <span class="card-name">${escapeHtml(t(`trap.${k}`))}</span>
+            <span class="cost"><span class="ico ico-gold"></span>${TRAPS[k].cost}</span>
+          </button>`)
+      .join('');
+  }
+
   /** Base mode: a repair button for a damaged part. */
   private repairHtml(s: Structure): string {
     const cost = this.game.repairCost(s);
@@ -534,8 +583,12 @@ export class Hud {
         <button class="btn primary" data-action="mission" data-def="arc">${t('mission.arc', { n: m.arc })}</button>
         <button class="btn" data-action="levels">${t('action.allLevels')}</button>`;
     } else if (what === 'arsenal' && !ruined && g.phase !== 'won' && g.phase !== 'lost') {
+      const traps = this.openTraps()
+        .map((k) => `<button class="btn" data-action="pick" data-def="${k}">${escapeHtml(t(`trap.${k}`))}<span class="cost"><span class="ico ico-gold"></span>${TRAPS[k].cost}</span></button>`)
+        .join('');
       main = `<button class="btn primary" data-action="arsenal">${t('action.guns')}</button>
-        <button class="btn" data-action="pick" data-def="fence">${t('fence.name')}<span class="cost"><span class="ico ico-gold"></span>${g.fenceCost()}</span></button>`;
+        <button class="btn" data-action="pick" data-def="fence">${t('fence.name')}<span class="cost"><span class="ico ico-gold"></span>${g.fenceCost()}</span></button>
+        ${traps}${traps ? `<span class="muted-note">${t('trap.title')}: ${t('trap.count', { n: g.traps.length, cap: g.trapLimit })}</span>` : ''}`;
     } else if (what === 'lab') {
       main = `<button class="btn${ruined ? '' : ' primary'}" data-action="lab">${t('action.research')}</button>`;
     }
@@ -591,6 +644,12 @@ export class Hud {
     const sel = this.cb.getSelection();
     switch (action) {
       case 'pick': {
+        if (isTrapId(def)) {
+          this.cb.setArmed(this.cb.getArmed() === def ? null : def);
+          this.cb.setSelection(null);
+          if (this.cb.getArmed() && g.traps.length >= g.trapLimit) this.showToast(t('reason.trapCap'));
+          break;
+        }
         if (def === 'fence') {
           this.cb.setArmed(this.cb.getArmed() === 'fence' ? null : 'fence');
           this.cb.setSelection(null);
@@ -631,6 +690,22 @@ export class Hud {
           g.sell(tower.id);
           this.cb.setSelection(null);
         }
+        break;
+      }
+      case 'trapRecharge':
+      case 'trapSell':
+      case 'trapAuto': {
+        const tr = sel?.kind === 'trap' ? g.trapById(sel.id) : undefined;
+        if (!tr) break;
+        if (action === 'trapRecharge') this.showResult(g.rechargeTrap(tr.id));
+        else if (action === 'trapAuto') {
+          g.trapAuto = !g.trapAuto;
+          writeTrapAuto(g.trapAuto);
+        } else {
+          g.sellTrap(tr.id);
+          this.cb.setSelection(null);
+        }
+        this.cb.done?.();
         break;
       }
       case 'fenceUp':

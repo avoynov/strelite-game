@@ -50,17 +50,24 @@ interface StatSpec {
   format: (v: number) => string;
   /** sqrt keeps a 12-damage gun visible next to a 400-damage one. */
   curve: 'linear' | 'sqrt';
+  /** Shown only on guns that have this stat. */
+  own?: boolean;
 }
 
 const fmt = (v: number) => (Math.abs(v - Math.round(v)) < 1e-6 ? String(Math.round(v)) : v < 1 ? v.toFixed(2) : v.toFixed(1));
 
 const STATS: StatSpec[] = [
-  { key: 'damage', label: () => t('stat.damage'), value: (l) => l.damage, format: fmt, curve: 'sqrt' },
-  { key: 'rate', label: () => t('stat.rateLong'), unit: () => t('unit.shots'), value: (l) => 1 / l.fireInterval, format: fmt, curve: 'linear' },
-  { key: 'dps', label: () => t('stat.dpsLong'), value: (l) => l.damage / l.fireInterval, format: (v) => v.toFixed(1), curve: 'sqrt' },
+  { key: 'damage', label: () => t('stat.damage'), value: (l) => (l.damage > 0 ? l.damage : undefined), format: fmt, curve: 'sqrt' },
+  { key: 'rate', label: () => t('stat.rateLong'), unit: () => t('unit.shots'), value: (l) => (l.fireInterval > 0 ? 1 / l.fireInterval : undefined), format: fmt, curve: 'linear' },
+  { key: 'dps', label: () => t('stat.dpsLong'), value: (l) => (l.damage > 0 && l.fireInterval > 0 ? (l.damage * (l.darts ?? 1)) / l.fireInterval : undefined), format: (v) => v.toFixed(1), curve: 'sqrt' },
   { key: 'range', label: () => t('stat.rangeLong'), unit: () => t('unit.tiles'), value: (l) => l.range, format: fmt, curve: 'linear' },
   { key: 'splash', label: () => t('stat.splashLong'), unit: () => t('unit.tiles'), value: (l) => l.splash, format: fmt, curve: 'linear' },
   { key: 'pierce', label: () => t('stat.pierce'), value: (_, d) => d.pierce, format: (v) => `${Math.round(v * 100)}%`, curve: 'linear' },
+  // Only on the guns that have them (the new roster), so older slides stay as they were.
+  { key: 'stun', label: () => t('stat.stun'), unit: () => t('unit.sec.short'), value: (l) => l.stun, format: fmt, curve: 'linear', own: true },
+  { key: 'bounces', label: () => t('stat.bounces'), value: (l) => l.bounces, format: fmt, curve: 'linear', own: true },
+  { key: 'darts', label: () => t('stat.darts'), value: (l) => l.darts, format: fmt, curve: 'linear', own: true },
+  { key: 'pct', label: () => t('stat.pct'), value: (l) => l.pct, format: (v) => `${Math.round(v * 100)}%`, curve: 'linear', own: true },
 ];
 
 const SEGMENTS = 12;
@@ -200,7 +207,7 @@ export class Arsenal {
     const role = tMaybe(`tower.${id}.role`);
     const traits = this.traits(def as ArsenalDef);
 
-    const rows = STATS.filter((s) => TOWER_IDS.some((tid) => (TOWERS[tid] as TowerDef).levels.some((l) => s.value(l, TOWERS[tid] as ArsenalDef) !== undefined))).map((s) => {
+    const rows = STATS.filter((s) => (s.own ? def.levels.some((l) => s.value(l, def as ArsenalDef) !== undefined) : true) && TOWER_IDS.some((tid) => (TOWERS[tid] as TowerDef).levels.some((l) => s.value(l, TOWERS[tid] as ArsenalDef) !== undefined))).map((s) => {
       const v = s.value(lvl, def as ArsenalDef);
       const v0 = s.value(base, def as ArsenalDef);
       const max = this.max.get(s.key) || 1;

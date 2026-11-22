@@ -1,7 +1,8 @@
 import { Assets, Container, Graphics, Matrix, Sprite, Text, TilingSprite, type Texture } from 'pixi.js';
-import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerId } from '../sim/content';
+import { ENEMIES, METRES_PER_TILE, TOWERS, type TowerDef, type TowerId } from '../sim/content';
 import { isWreck, type Building, type Fence, type Game, type Tower } from '../sim/game';
 import { BUILDING_SIZE, gunJobSeconds, HQ_LEVELS, HQ_SPOT, type BuildingKind } from '../sim/base';
+import { isTrapId, TRAPS, type TrapId } from '../sim/traps';
 import { BuildingView, type BuildingState } from './buildingView';
 import { Camera, type Rect } from './camera';
 import { Effects } from './effects';
@@ -15,14 +16,21 @@ import { SpriteTowerView, type Density, type TowerArt } from './towers/spriteTow
 import { frameForAim, shotEffects, spriteScale, type ProjectileArtDef } from './towers/towerArt';
 import type { TowerView } from './towers/towerView';
 
-/** What the build menu has picked: a gun, or (siege mode) fences. */
-export type Armed = TowerId | 'fence';
+/** What the build menu has picked: a gun, fences (siege mode) or a kind of trap. */
+export type Armed = TowerId | 'fence' | TrapId;
+
+/** The picked gun, when a gun (not fences or a trap) is picked. */
+export function armedGun(a: Armed | null): TowerId | null {
+  return a && a !== 'fence' && !isTrapId(a) ? a : null;
+}
 
 export type Selection =
   /** An existing gun, by id. */
   | { kind: 'tower'; id: number }
   /** Siege mode: an existing fence, by id. */
   | { kind: 'fence'; id: number }
+  /** A trap on the map, by id. */
+  | { kind: 'trap'; id: number }
   /** Base mode: one of the base's buildings. */
   | { kind: 'building'; what: BuildingKind }
   /** A gun about to be built, footprint's top-left cell at (cx, cy). */
@@ -66,6 +74,8 @@ const FLOAT_LIFE = 0.9;
 const STRIKE_LIFE = 0.18;
 
 const RAIL_LIFE = 0.35;
+const FLASH_LIFE = 0.3;
+const GLANCE_LIFE = 0.25;
 
 /** Screen rotation of a direction on the ground (`a` = atan2(dy, dx) in grid cells). */
 function screenAngle(a: number): number {
@@ -77,7 +87,7 @@ function groundLengthPx(tiles: number, a: number): number {
   return Math.hypot(isoX(Math.cos(a), Math.sin(a)), isoY(Math.cos(a), Math.sin(a))) * tiles;
 }
 /** Size of the burst a destroyed vehicle goes up in; units not listed just fall. */
-const VEHICLE_BURST: Record<string, number> = { drone: 0.6, truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4 };
+const VEHICLE_BURST: Record<string, number> = { drone: 0.6, truck: 0.65, apc: 0.75, tank: 0.85, fortress: 1.4, wagon: 0.6, glider: 0.4, armorcar: 0.65, shield: 0.85, boat: 1.1, dreadnought: 1.7 };
 /** Units drawn up in the air: their hits and wrecks burst at flying height. */
 const AIR_KINDS = new Set<string>(Object.values(ENEMIES).filter((e) => 'air' in e && e.air).map((e) => e.id));
 const BURST_LIFE = 0.45;
@@ -110,6 +120,10 @@ export class BoardRenderer {
   private bursts: Burst[] = [];
   /** Railgun traces fading out: ends in grid cells. */
   private rails: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
+  /** Dazzle lamp flashes: a lit cone on the ground, fading. */
+  private flashes: { x: number; y: number; aim: number; cone: number; range: number; big: boolean; age: number }[] = [];
+  /** Ricochet discs glancing from one enemy to the next. */
+  private glances: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   /** Siege mode: enemy shots at guns and fences, fading out. */
   private strikes: { x1: number; y1: number; x2: number; y2: number; age: number }[] = [];
   private readonly fenceViews = new Map<number, FenceView>();
@@ -131,6 +145,8 @@ export class BoardRenderer {
   private readonly roundSprites = new Map<number, Sprite>();
   private readonly shotFxCache = new Map<string, string[]>();
   private overlayKey = '';
+  /** Traps and tar patches, on the ground under everything that stands. */
+  private readonly trapLayer = new Graphics();
   private groundSprite: TilingSprite | null = null;
   private groundDensity: Density = 1;
   private roadTexture: Texture | null = null;
@@ -147,7 +163,7 @@ export class BoardRenderer {
     private readonly artUrl: string,
   ) {
     this.objects.sortableChildren = true;
-    this.world.addChild(this.groundLayer, this.map, this.overlay, this.objects, this.shots, this.rounds);
+    this.world.addChild(this.groundLayer, this.map, this.overlay, this.trapLayer, this.objects, this.shots, this.rounds);
     this.root.addChild(this.world, this.floats);
     this.bounds = this.mapBounds();
     this.offArt = art?.onChange(() => void this.loadGround());
@@ -477,6 +493,22 @@ export class BoardRenderer {
     this.rails.push({ x1, y1, x2, y2, age: 0 });
   }
 
+  /** Dazzle lamp: a flash over its cone (stand-in drawing until it has art). */
+  onFlash(towerId: number, x: number, y: number, aim: number, cone: number, range: number, big: boolean): void {
+    const tower = this.game.towerById(towerId);
+    const view = this.towerViews.get(towerId)?.view;
+    if (tower && view) {
+      view.setAim(tower.aim);
+      view.fire(this.game.levelOf(tower).fireInterval);
+    }
+    this.flashes.push({ x, y, aim, cone, range, big, age: 0 });
+  }
+
+  /** Ricochet disc: a streak from the enemy it hit to the next one. */
+  onBounce(x1: number, y1: number, x2: number, y2: number): void {
+    this.glances.push({ x1, y1, x2, y2, age: 0 });
+  }
+
   /** Siege mode: a unit fired at or rammed a gun or fence. */
   onStrike(kind: 'shoot' | 'ram' | 'bomb' | 'blast', x1: number, y1: number, x2: number, y2: number): void {
     if (kind === 'bomb') {
@@ -584,6 +616,9 @@ export class BoardRenderer {
     } else if (selection?.kind === 'fence') {
       const fc = this.game.fenceById(selection.id);
       if (fc) f = { cx: fc.cx, cy: fc.cy, size: 1, tall: 0.5 };
+    } else if (selection?.kind === 'trap') {
+      const tr = this.game.trapById(selection.id);
+      if (tr) f = { cx: tr.cx, cy: tr.cy, size: 1, tall: 0.3 };
     }
     if (!f) return null;
     const mid = this.gridToScreen(f.cx + f.size / 2, f.cy + f.size / 2);
@@ -750,7 +785,7 @@ export class BoardRenderer {
     const game = this.game;
     const { grid } = game.map;
     // Redraw only when something it shows has changed.
-    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.openField ? game.arcWidth() : 0, game.hq?.level, game.buildings.map((b) => b.hp > 0)]);
+    const key = JSON.stringify([selection, armed, game.towers.map((t) => [t.id, t.level]), game.fences.length, game.traps.length, game.openField ? game.arcWidth() : 0, game.hq?.level, game.buildings.map((b) => b.hp > 0)]);
     if (key === this.overlayKey) return;
     this.overlayKey = key;
     o.clear();
@@ -760,8 +795,17 @@ export class BoardRenderer {
       for (const c of game.activeSpawns()) o.poly(diamond(c.x, c.y, c.x + 1, c.y + 1)).fill({ color: PALETTE.invalid, alpha: 0.28 });
     }
 
+    // While a trap is picked, show the tiles it can go on.
+    if (armed && isTrapId(armed)) {
+      for (let y = 0; y < grid.rows; y++) {
+        for (let x = 0; x < grid.cols; x++) {
+          const err = game.trapError(armed, x, y);
+          if (err === 'notBuildable' || err === 'occupied') continue;
+          o.poly(diamond(x, y, x + 1, y + 1)).stroke({ width: 1, color: PALETTE.valid, alpha: 0.35 });
+        }
+      }
+    } else if (selection?.kind === 'place' || (armed && !selection)) {
     // While a gun is picked for building, show where it can stand.
-    if (selection?.kind === 'place' || (armed && !selection)) {
       for (let y = 0; y < grid.rows; y++) {
         for (let x = 0; x < grid.cols; x++) {
           if (grid.get(x, y) !== 'build' || game.towerAt(x, y) || game.fenceAt(x, y) || game.buildingAt(x, y) || !game.inArea(x, y, 1)) continue;
@@ -814,6 +858,50 @@ export class BoardRenderer {
     } else if (selection?.kind === 'fence') {
       const f = game.fenceById(selection.id);
       if (f) o.poly(diamond(f.cx, f.cy, f.cx + 1, f.cy + 1)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
+    } else if (selection?.kind === 'trap') {
+      const tr = game.trapById(selection.id);
+      if (tr) o.poly(diamond(tr.cx, tr.cy, tr.cx + 1, tr.cy + 1)).stroke({ width: 2.5, color: PALETTE.hover, alpha: 0.9 });
+    }
+  }
+
+  /** Traps: stand-in drawings until they have art; a spent one is faded; tar shows its patch (alight when burning). */
+  private drawTraps(): void {
+    const g = this.trapLayer;
+    g.clear();
+    for (const tr of this.game.traps) {
+      const x = isoX(tr.x, tr.y);
+      const y = isoY(tr.x, tr.y);
+      const a = tr.armed ? 1 : 0.45;
+      if (tr.patch > 0) {
+        const rx = (((TRAPS.tar.radius ?? 1) * TILE_W) / Math.SQRT2) * Math.min(1, 0.4 + tr.patch);
+        g.ellipse(x, y, rx, rx / 2).fill({ color: 0x15110c, alpha: 0.7 });
+        if (tr.burning > 0) {
+          const f = 0.8 + 0.2 * Math.sin(this.game.time * 25 + tr.id);
+          g.ellipse(x, y - 2, rx * 0.85 * f, (rx / 2) * 0.85 * f).fill({ color: 0xff7a22, alpha: 0.45 });
+          g.ellipse(x, y - 3, rx * 0.5 * f, (rx / 4) * f).fill({ color: 0xffd060, alpha: 0.5 });
+        }
+      }
+      switch (tr.kind) {
+        case 'mine':
+          g.ellipse(x, y, 9, 4.5).fill({ color: 0x3a3a30, alpha: a }).stroke({ width: 1, color: 0x1c1c16, alpha: a });
+          g.circle(x, y - 2, 2).fill({ color: tr.armed ? 0xc23a2a : 0x555555, alpha: a });
+          break;
+        case 'pit':
+          g.poly(diamond(tr.cx + 0.12, tr.cy + 0.12, tr.cx + 0.88, tr.cy + 0.88)).fill({ color: 0x2a2116, alpha: 0.9 * a });
+          for (let i = -1; i <= 1; i++) g.moveTo(x + i * 7, y + 2).lineTo(x + i * 7, y - 6).stroke({ width: 2, color: 0x9a7a4a, alpha: a });
+          break;
+        case 'leg':
+          g.ellipse(x, y, 10, 5).stroke({ width: 2, color: 0x6c7076, alpha: a });
+          for (let i = -2; i <= 2; i++) g.moveTo(x + i * 4, y - 3).lineTo(x + i * 4, y + 3).stroke({ width: 1, color: 0x9ca0a6, alpha: a });
+          break;
+        case 'tar':
+          if (tr.armed) {
+            g.ellipse(x, y, 7, 3.5).fill({ color: 0x000000, alpha: 0.25 });
+            g.roundRect(x - 6, y - 15, 12, 15, 3).fill({ color: 0x5a3c22 }).stroke({ width: 1, color: 0x2a1a0e });
+            g.moveTo(x - 6, y - 11).lineTo(x + 6, y - 11).moveTo(x - 6, y - 4).lineTo(x + 6, y - 4).stroke({ width: 1, color: 0x2a2a2a });
+          } else if (tr.patch <= 0) g.ellipse(x, y, 8, 4).fill({ color: 0x15110c, alpha: 0.35 });
+          break;
+      }
     }
   }
 
@@ -890,8 +978,26 @@ export class BoardRenderer {
           g.ellipse(isoX(gx, gy), isoY(gx, gy), 4, 2).fill({ color: 0x000000, alpha: 0.25 });
           if (this.drawRound(p.id, o, gx, gy, h, Math.atan2(p.ty - gy, p.tx - gx))) continue;
         }
-        const len = Math.min(d, 16);
-        g.moveTo(x - (dx / d) * len, y - (dy / d) * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
+        const ux = dx / d;
+        const uy = dy / d;
+        if (p.kind === 'rocket') {
+          // A firework: a sparking trail behind a bright head.
+          g.moveTo(x - ux * 18, y - uy * 18).lineTo(x, y).stroke({ width: 3, color: 0xff9a3c, alpha: 0.55, cap: 'round' });
+          g.circle(x, y, 2.4).fill({ color: 0xfff1b0, alpha: 0.95 });
+        } else if (p.kind === 'disc') {
+          g.ellipse(isoX(gx, gy), isoY(gx, gy), 4, 2).fill({ color: 0x000000, alpha: 0.25 });
+          g.ellipse(x, y, 5, 2.5).fill({ color: 0x9aa39a }).stroke({ width: 1, color: 0x3c4430 });
+        } else if (p.kind === 'dart') {
+          g.moveTo(x - ux * 5, y - uy * 5).lineTo(x, y).stroke({ width: 1.2, color: 0xe8d27a, alpha: 0.95, cap: 'round' });
+        } else if (p.hook) {
+          // Harpoon: a pale line trailing back to the gun.
+          const tw = this.game.towerById(p.towerId);
+          if (tw) g.moveTo(isoX(tw.x, tw.y), isoY(tw.x, tw.y, o.h)).lineTo(x, y).stroke({ width: 1, color: 0xdfe6e0, alpha: 0.5 });
+          g.moveTo(x - ux * 12, y - uy * 12).lineTo(x, y).stroke({ width: 2.5, color: 0xcfd6d0, alpha: 0.95, cap: 'round' });
+        } else {
+          const len = Math.min(d, 16);
+          g.moveTo(x - ux * len, y - uy * len).lineTo(x, y).stroke({ width: 2, color: PALETTE.tracer, alpha: 0.9, cap: 'round' });
+        }
       }
     }
     for (const [id, sprite] of this.roundSprites) {
@@ -912,6 +1018,18 @@ export class BoardRenderer {
       const my = m?.gy ?? t.y;
       const mh = (m?.heightM ?? 1) / METRES_PER_TILE;
       const heat = Math.min(1, t.heat / 3);
+      if (t.def === 'glass') {
+        // Devil's glass: a thin, hard beam of sunlight that sharpens as it focuses.
+        const focus = Math.min(1, t.heat / ((TOWERS.glass as TowerDef).focus || 0.5));
+        const bx0 = isoX(mx, my);
+        const by0 = isoY(mx, my, mh);
+        const bx1 = isoX(target.x, target.y);
+        const by1 = isoY(target.x, target.y, target.air ? this.flyHeight() : HIT_HEIGHT);
+        g.moveTo(bx0, by0).lineTo(bx1, by1).stroke({ width: 6 * (1.4 - focus), color: 0xfff3c0, alpha: 0.25 * focus, cap: 'round' });
+        g.moveTo(bx0, by0).lineTo(bx1, by1).stroke({ width: 1.6, color: 0xffffff, alpha: 0.5 + 0.5 * focus, cap: 'round' });
+        g.circle(bx1, by1, 2 + 4 * focus).fill({ color: 0xfff3c0, alpha: 0.7 * focus });
+        continue;
+      }
       if (this.shotFx(t.def).includes('fire_stream')) {
         const a = Math.atan2(target.y - my, target.x - mx);
         const len = Math.hypot(target.x - mx, target.y - my);
@@ -967,6 +1085,44 @@ export class BoardRenderer {
       return true;
     });
 
+    // Dazzle lamp: the lit cone on the ground fades out quickly.
+    this.flashes = this.flashes.filter((f) => {
+      f.age += dt;
+      const k = f.age / FLASH_LIFE;
+      if (k >= 1) return false;
+      const steps = 10;
+      g.moveTo(isoX(f.x, f.y), isoY(f.x, f.y));
+      for (let i = 0; i <= steps; i++) {
+        const a = f.aim - f.cone + (2 * f.cone * i) / steps;
+        g.lineTo(isoX(f.x + Math.cos(a) * f.range, f.y + Math.sin(a) * f.range), isoY(f.x + Math.cos(a) * f.range, f.y + Math.sin(a) * f.range));
+      }
+      g.closePath().fill({ color: 0xfffbe0, alpha: (f.big ? 0.55 : 0.35) * (1 - k) });
+      return true;
+    });
+
+    // Ricochet: a short grey streak along each glance.
+    this.glances = this.glances.filter((r) => {
+      r.age += dt;
+      const k = r.age / GLANCE_LIFE;
+      if (k >= 1) return false;
+      g.moveTo(isoX(r.x1, r.y1), isoY(r.x1, r.y1, HIT_HEIGHT)).lineTo(isoX(r.x2, r.y2), isoY(r.x2, r.y2, HIT_HEIGHT)).stroke({ width: 2, color: 0xc8cfc8, alpha: 0.8 * (1 - k), cap: 'round' });
+      return true;
+    });
+
+    // Stunned enemies: a small ring of light above them.
+    for (const e of this.game.enemies) {
+      if (!e.alive || e.stun <= 0) continue;
+      const v = this.enemyViews.get(e.id);
+      const ex = v?.gx ?? e.x;
+      const ey = v?.gy ?? e.y;
+      const h = (e.air ? this.flyHeight() : HIT_HEIGHT) + 0.5;
+      const spin = this.game.time * 6 + e.id;
+      for (let i = 0; i < 3; i++) {
+        const a = spin + (i * 2 * Math.PI) / 3;
+        g.circle(isoX(ex, ey) + Math.cos(a) * 6, isoY(ex, ey, h) + Math.sin(a) * 2.5, 1.6).fill({ color: 0xfff1a0, alpha: 0.9 });
+      }
+    }
+
     // Shell bursts: a quick flash, then dust spreading over the blast circle.
     this.bursts = this.bursts.filter((b) => {
       b.age += dt;
@@ -994,6 +1150,7 @@ export class BoardRenderer {
     this.syncEnemies(alpha);
     this.syncRaid();
     this.drawOverlay(selection, armed);
+    this.drawTraps();
     this.drawShots(alpha, dtSeconds);
     this.effects?.update(dtSeconds);
 

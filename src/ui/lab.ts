@@ -1,6 +1,6 @@
 import { t, type MessageKey } from '../i18n';
 import type { GunPortrait } from '../render/towers/spriteTowerView';
-import type { TowerId } from '../sim/content';
+import { TOWERS, type TowerId } from '../sim/content';
 import {
   completeSets,
   inTree,
@@ -54,7 +54,7 @@ export interface LabCallbacks {
 const ERR: Record<StartError, MessageKey> = { busy: 'lab.busy', noGold: 'lab.noGold', locked: 'lab.lockedHint', done: 'lab.done', noLab: 'lab.noLab', hqLevel: 'lab.hqLevelHint', labLevel: 'lab.labLevelHint' };
 
 const pct = (v: number) => Math.round(v * 100);
-const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V'];
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX'];
 const SEEN_KEY = 'strelite.lab.seen';
 const MEDALS_KEY = 'strelite.lab.medals';
 
@@ -80,6 +80,7 @@ export function itemName(item: ResearchItem): string {
   const e = item.effect;
   if (e.kind === 'gun') return t(`tower.${e.gun}` as MessageKey);
   if (e.kind === 'maxLevel') return t('lab.levelName', { gun: t(`tower.${e.gun}` as MessageKey), n: e.level });
+  if (e.kind === 'trap') return t('lab.trapLevel', { trap: t(`trap.${e.trap}` as MessageKey), n: ROMAN[e.level]! });
   return t(`research.${item.id}` as MessageKey);
 }
 
@@ -101,6 +102,10 @@ export function itemEffect(item: ResearchItem): string {
       return t('lab.fx.lives', { n: e.add });
     case 'aim':
       return t('lab.fx.aim', { gun: t(`tower.${e.gun}` as MessageKey), mode: t(`target.${e.mode}` as MessageKey) });
+    case 'trap':
+      return t('lab.fx.trap', { trap: t(`trap.${e.trap}` as MessageKey), n: pct(e.add) });
+    case 'burningTar':
+      return t('lab.fx.burningTar');
     case 'gunMod': {
       const m = e.mods;
       const parts: string[] = [];
@@ -111,17 +116,28 @@ export function itemEffect(item: ResearchItem): string {
       if (m.reload) parts.push(t('lab.fx.reload', { n: pct(1 - m.reload) }));
       if (m.rampTime) parts.push(t('lab.fx.ramp', { n: Math.round(1 / m.rampTime) }));
       if (m.damage) parts.push(t('lab.fx.damage', { n: pct(m.damage - 1) }));
+      if (m.stun) parts.push(t('lab.fx.stun', { n: pct(m.stun - 1) }));
+      if (m.cone) parts.push(t('lab.fx.cone', { n: Math.round(((TOWERS.flasher.cone + m.cone) * 360) / Math.PI) }));
+      if (m.flashDamage) parts.push(t('lab.fx.flashDamage'));
+      if (m.bigEvery) parts.push(t('lab.fx.bigEvery', { n: m.bigEvery }));
+      if (m.bounces) parts.push(t('lab.fx.bounces', { n: m.bounces }));
+      if (m.bounceLoss) parts.push(t('lab.fx.bounceLoss', { n: pct(TOWERS.ricochet.bounceLoss + m.bounceLoss) }));
+      if (m.killGold) parts.push(t('lab.fx.killGold', { n: pct(m.killGold) }));
+      if (m.retarget) parts.push(t('lab.fx.retarget', { n: m.retarget }));
+      if (m.spool) parts.push(t('lab.fx.spool', { n: 40, s: 1.5 }));
+      if (m.darts) parts.push(t('lab.fx.darts', { n: m.darts }));
       return `${t(`tower.${e.gun}` as MessageKey)}: ${parts.join(', ')}`;
     }
   }
 }
 
 export function setName(id: SetId): string {
-  return id === 'fortress' ? t('lab.set.fortress') : t(`tower.${id}` as MessageKey);
+  return id === 'fortress' ? t('lab.set.fortress') : id === 'traps' ? t('lab.set.traps') : t(`tower.${id}` as MessageKey);
 }
 
 /** The bonus a full set gives, in words. */
 export function setBonus(id: SetId): string {
+  if (id === 'traps') return t('lab.bonus.traps', { n: pct(MASTERY_DAMAGE) });
   return id === 'fortress' ? t('lab.bonus.fortress', { n: pct(MASTERY_GOLD) }) : t('lab.bonus.gun', { n: pct(MASTERY_DAMAGE), gun: setName(id) });
 }
 
@@ -151,13 +167,14 @@ const ICON = {
   clock: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l2.5 1.5"/></svg>',
   flask: '<svg viewBox="0 0 24 24"><path d="M9.5 3h5M10.5 3v5.5L5 18.5A1.7 1.7 0 0 0 6.5 21h11a1.7 1.7 0 0 0 1.5-2.5L13.5 8.5V3"/><path d="M7.5 15h9"/></svg>',
   sight: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="1.6" class="dot"/><path d="M12 2.5v5M12 16.5v5M2.5 12h5M16.5 12h5"/></svg>',
+  trap: '<svg viewBox="0 0 24 24"><path d="M3 15.5h18"/><path d="M5 15.5l2.2-6 2.2 6M9.6 15.5l2.4-7 2.4 7M14.6 15.5l2.2-6 2.2 6"/><path d="M4 19.5h16"/></svg>',
   castle:
     '<svg viewBox="0 0 24 24"><path d="M3.5 21V8.5h3V11h2.5V8.5h3V11h2.5V8.5h3V11h3V21z"/><path d="M10 21v-4.5a2 2 0 0 1 4 0V21"/><path d="M3.5 21h17"/></svg>',
 } as const;
 
 function shapeOf(item: ResearchItem): Shape {
   const k = item.effect.kind;
-  return k === 'maxLevel' ? 'oct' : k === 'gunMod' || k === 'aim' ? 'circle' : 'hex';
+  return k === 'maxLevel' || k === 'trap' ? 'oct' : k === 'gunMod' || k === 'aim' || k === 'burningTar' ? 'circle' : 'hex';
 }
 
 function glyphOf(item: ResearchItem): string {
@@ -179,6 +196,10 @@ function glyphOf(item: ResearchItem): string {
       return ICON.flask;
     case 'aim':
       return ICON.sight;
+    case 'trap':
+      return ROMAN[e.level] ?? String(e.level);
+    case 'burningTar':
+      return ICON.spark;
   }
 }
 
@@ -197,7 +218,16 @@ const SET_TINT: Record<SetId, string> = {
   trebuchet: '176, 162, 132',
   greekfire: '214, 108, 62',
   railgun: '96, 184, 222',
+  zadnoper: '150, 120, 84',
+  flasher: '236, 214, 120',
+  rockets: '214, 82, 72',
+  tarkan: '160, 140, 112',
+  ricochet: '170, 176, 184',
+  glass: '244, 196, 92',
+  harpoon: '170, 196, 200',
+  bees: '200, 200, 210',
   fortress: '211, 168, 92',
+  traps: '150, 132, 104',
 };
 
 const CARD = 'M14 1.5H60A12.5 12.5 0 0 1 72.5 14V70A12.5 12.5 0 0 1 60 82.5H14A12.5 12.5 0 0 1 1.5 70V14A12.5 12.5 0 0 1 14 1.5Z';
@@ -538,8 +568,8 @@ export class Lab {
       const ok = won.has(set.id);
       const name = setName(set.id);
       const pic =
-        set.id === 'fortress'
-          ? `<span class="lt-medal-ico">${ICON.castle}</span>`
+        set.id === 'fortress' || set.id === 'traps'
+          ? `<span class="lt-medal-ico">${set.id === 'traps' ? ICON.trap : ICON.castle}</span>`
           : `<span class="lt-pic" data-pic="${set.id}" data-lv="${ok ? 5 : 3}" data-w="34" data-h="34" data-z="1.7"></span>`;
       return `<li><button class="lt-medal${ok ? ' won' : ''}" data-lt="goto" data-set="${set.id}" aria-label="${esc(name)}${ok ? `: ${t('lab.medal')}` : ''}" title="${esc(name)}">${pic}</button></li>`;
     }).join('');
@@ -647,15 +677,18 @@ export class Lab {
         <span class="lt-pips" aria-hidden="true">${pips}</span>
         ${tail}
       </header>`;
-    if (set.id === 'fortress') {
-      // The boosts snake: four across, then three back.
-      const cols = [1, 2, 3, 4, 4, 3, 2];
-      const rows = [1, 1, 1, 1, 2, 2, 2];
-      const nodes = set.items.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, `grid-column:${cols[i]};grid-row:${rows[i]}`)).join('');
+    if (set.id === 'fortress' || set.id === 'traps') {
+      // The boosts (and the traps) snake: four across, then back, and so on.
+      const at = (i: number) => {
+        const row = Math.floor(i / 4) + 1;
+        return { col: row % 2 ? (i % 4) + 1 : 4 - (i % 4), row };
+      };
+      const nodes = set.items.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, `grid-column:${at(i).col};grid-row:${at(i).row}`)).join('');
+      const ico = set.id === 'traps' ? ICON.trap : ICON.castle;
       return `
-        <section class="lt-set fortress${complete ? ' complete' : ''}" data-set="fortress" style="--tint:${SET_TINT.fortress}">
-          <span class="lt-set-bg" aria-hidden="true"><span class="lt-ghost">${ICON.castle}</span></span>
-          <div class="lt-card lt-emblem${complete ? ' st-done' : ''}" aria-hidden="true">${shapeSvg(CARD, false, 0, 1, '0 0 74 84')}<span class="lt-emblem-ico">${ICON.castle}</span></div>
+        <section class="lt-set fortress${complete ? ' complete' : ''}" data-set="${set.id}" style="--tint:${SET_TINT[set.id]}">
+          <span class="lt-set-bg" aria-hidden="true"><span class="lt-ghost">${ico}</span></span>
+          <div class="lt-card lt-emblem${complete ? ' st-done' : ''}" aria-hidden="true">${shapeSvg(CARD, false, 0, 1, '0 0 74 84')}<span class="lt-emblem-ico">${ico}</span></div>
           ${head}
           <div class="lt-nodes snake">${nodes}</div>
           ${foot}
@@ -665,7 +698,8 @@ export class Lab {
     const unlock = set.starter ? null : researchItem(`gun.${gun}`)!;
     const lv4 = researchItem(`lvl4.${gun}`)!;
     const lv5 = researchItem(`lvl5.${gun}`)!;
-    const fx = researchItem(`fx.${gun}`)!;
+    // Effects: the first beside the levels, any more on the row below, back from the right.
+    const effects = set.items.filter((id) => researchItem(id)?.effect.kind === 'gunMod');
     // Aiming modes: a second row, under the level each grows from.
     const aims = set.items
       .filter((id) => researchItem(id)?.effect.kind === 'aim')
@@ -680,7 +714,7 @@ export class Lab {
           ${this.slotHtml(lv4, s, lab, 'grid-column:1')}
           ${this.slotHtml(lv5, s, lab, 'grid-column:2')}
           <span class="lt-split" aria-hidden="true"></span>
-          ${this.slotHtml(fx, s, lab, 'grid-column:4')}
+          ${effects.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, i === 0 ? 'grid-column:4' : `grid-column:${5 - i};grid-row:2`)).join('')}
           ${aims}
         </div>
         ${foot}
@@ -809,7 +843,7 @@ export class Lab {
   }
 
   private celebrationHtml(id: SetId): string {
-    const pic = id === 'fortress' ? `<span class="lt-medal-ico big">${ICON.castle}</span>` : `<span class="lt-pic" data-pic="${id}" data-lv="5" data-w="104" data-h="96" data-z="1.35"></span>`;
+    const pic = id === 'fortress' || id === 'traps' ? `<span class="lt-medal-ico big">${id === 'traps' ? ICON.trap : ICON.castle}</span>` : `<span class="lt-pic" data-pic="${id}" data-lv="5" data-w="104" data-h="96" data-z="1.35"></span>`;
     return `
       <div class="lt-cele" role="dialog" aria-modal="true" aria-label="${esc(t('lab.cele.kicker'))}">
         <div class="lt-cele-card">
@@ -870,23 +904,25 @@ export class Lab {
       paths.push(`<path class="w-${kind}" d="${d}"/>`);
     };
     const gunKey = (set: ResearchSet) => (set.starter ? set.id : `gun.${set.id}`);
-    const guns = RESEARCH_SETS.filter((set) => set.id !== 'fortress');
+    const guns = RESEARCH_SETS.filter((set) => set.id !== 'fortress' && set.id !== 'traps');
     guns.forEach((set, i) => {
       const g = gunKey(set);
       line(g, `lvl4.${set.id}`, cls(g, `lvl4.${set.id}`));
       line(`lvl4.${set.id}`, `lvl5.${set.id}`, cls(`lvl4.${set.id}`, `lvl5.${set.id}`));
       for (const id of set.items) {
-        const from = researchItem(id)?.effect.kind === 'aim' ? researchItem(id)!.requires[0] : undefined;
+        const it = researchItem(id);
+        const from = it?.effect.kind === 'aim' ? it.requires[0] : undefined;
         if (from) line(from, id, cls(from, id));
+        // An effect leans on the effect before it (its own gun's, or the previous gun's).
+        if (it?.effect.kind === 'gunMod') for (const r of it.requires) if (r.startsWith('fx.')) line(r, id, cls(r, id));
       }
       const after = guns[i + 1];
-      if (after) {
-        line(g, gunKey(after), cls(g, gunKey(after)));
-        line(`fx.${set.id}`, `fx.${after.id}`, cls(`fx.${set.id}`, `fx.${after.id}`));
-      }
+      if (after) line(g, gunKey(after), cls(g, gunKey(after)));
     });
-    const boosts = RESEARCH_SETS.find((set) => set.id === 'fortress')!.items;
-    for (let i = 1; i < boosts.length; i++) line(boosts[i - 1]!, boosts[i]!, cls(boosts[i - 1]!, boosts[i]!));
+    for (const sid of ['fortress', 'traps'] as const) {
+      const items = RESEARCH_SETS.find((set) => set.id === sid)!.items;
+      for (let i = 1; i < items.length; i++) line(items[i - 1]!, items[i]!, cls(items[i - 1]!, items[i]!));
+    }
     // Only when something moved, so the moving dashes do not restart.
     const html = paths.join('');
     const view = `0 0 ${tree.offsetWidth} ${tree.offsetHeight}`;
