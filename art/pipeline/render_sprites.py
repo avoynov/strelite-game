@@ -109,7 +109,7 @@ def render_tower_layers(model, a, level):
     patch = model.ground(level)
     scene = stage.build_stage("photoreal", size, a.samples, frame_m=frame_m * (1.6 if wh else 1.0),
                               ground="patch", target_z=0.0, projection="ortho",
-                              catcher_hole=patch.r_solid - Patch.CATCHER_INSET)
+                              catcher_hole=getattr(patch, "catcher_hole", patch.r_solid - Patch.CATCHER_INSET))
     size_y = size
     if wh:      # taller-than-wide frame: tower ground point ANCHOR_FROM_BOTTOM_M above the bottom
         size_y = int(round(wh[1] * a.ppm / 2)) * 2
@@ -156,6 +156,8 @@ def render_tower_layers(model, a, level):
     for i in range(a.dirs):
         aim = 2 * math.pi * i / a.dirs                  # game angle: atan2(dy, dx) in grid cells
         turret.rotation_euler = (0, 0, -aim - math.pi / 2)
+        if hasattr(model, "set_aim"):                   # parts that turn with the yaw (e.g. gears)
+            model.set_aim(-aim - math.pi / 2)
         bpy.context.view_layer.update()
         entry = {"index": i, "aimRad": round(aim, 6)}
         if muzzle is not None:
@@ -182,6 +184,8 @@ def render_tower_layers(model, a, level):
                 continue
             aim = 2 * math.pi * i / a.fire_dirs
             turret.rotation_euler = (0, 0, -aim - math.pi / 2)
+            if hasattr(model, "set_aim"):
+                model.set_aim(-aim - math.pi / 2)
             for f in frames:
                 model.set_fire_frame(f, scene)
                 shoot(f"fire_{i:02d}_{f:02d}.png")

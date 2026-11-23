@@ -330,6 +330,23 @@ class Patch(Terrain):
         self.cover *= 1 - m
         return self
 
+    def square_pit(self, half, depth, bank=0.12, bank_width=0.5, ragged=0.05):
+        """Dig a square pit with steep, slightly ragged walls and a low bank of spoil round it
+        (a spike pit). The floor is uneven."""
+        rng = np.random.default_rng(self.seed + 2)
+        edge = _fbm(self.n, rng, [(int(self.size / 0.5), ragged), (int(self.size / 0.15), ragged * 0.5)])
+        d = np.maximum(np.abs(self.X), np.abs(self.Y)) + edge
+        inside = _smooth((half - d) / 0.05)
+        ring = np.exp(-(((d - half - bank_width * 0.45) / (bank_width * 0.42)) ** 2))
+        floor = _fbm(self.n, rng, [(int(self.size / 0.6), 0.06), (int(self.size / 0.2), 0.03)])
+        self.h = (self.h * (1 - inside) + (floor - depth) * inside
+                  + bank * ring * (1 - inside)).astype(np.float32)
+        self.cover *= 1 - np.clip(ring * 1.6 + inside, 0, 1)
+        self.tramp = np.clip(self.tramp + inside, 0, 1)
+        # the shadow catcher must not cover the hole, or it hides everything below ground level
+        self.catcher_hole = max(self.r_solid - self.CATCHER_INSET, half * 1.42 + 0.12)
+        return self
+
     def pit(self, radius, depth, bank=0.3, bank_width=1.3, gap=None):
         """Dig a round pit; the spoil is thrown up as a bank around it. gap = (deg0, deg1)
         keeps a sector of the rim level (no bank), e.g. for the ammunition point."""

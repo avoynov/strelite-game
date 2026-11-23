@@ -143,8 +143,12 @@ SPEC = {
     "iron_black":    ("metal", dict(color=(0.06, 0.06, 0.065), rough=0.32, dust=0.4, rust=0.1)),
     "bronze_old":    ("metal", dict(color=(0.78, 0.50, 0.28), rough=0.34, dust=0.25, rust=0.0)),
     "iron_forged":   ("metal", dict(color=(0.10, 0.10, 0.10), rough=0.48, dust=0.6, rust=0.35)),
+    "iron_worn":     ("metal", dict(color=(0.22, 0.20, 0.19), rough=0.62, dust=1.1, rust=0.75)),
+    "iron_clean":    ("metal", dict(color=(0.6, 0.6, 0.61), rough=0.26, dust=0.4, rust=0.28)),   # mostly clean, traces in places
     "silver":        ("metal", dict(color=(0.95, 0.95, 0.94), rough=0.17, dust=0.12)),
     "silver_satin":  ("metal", dict(color=(0.86, 0.87, 0.88), rough=0.32, dust=0.15)),
+    "mirror_bronze": ("metal", dict(color=(0.90, 0.66, 0.42), rough=0.05, dust=0.08)),   # polished speculum
+    "mirror_silver": ("metal", dict(color=(0.96, 0.96, 0.95), rough=0.02, dust=0.03)),   # silvered glass
     "gold_trim":     ("metal", dict(color=(1.0, 0.77, 0.40), rough=0.24, dust=0.1)),
     "hemp":          ("plain", dict(color=(0.60, 0.50, 0.34), rough=0.95, dust=0.6)),
     "ember":         ("ember", {}),
@@ -154,6 +158,38 @@ SPEC = {
     "clay":          ("plain", dict(color=(0.60, 0.34, 0.20), rough=0.8, dust=0.9)),
     "leather":       ("plain", dict(color=(0.30, 0.18, 0.10), rough=0.62, dust=0.6)),
     "steel_cable":   ("metal", dict(color=(0.70, 0.71, 0.72), rough=0.3, dust=0.2)),
+    # шеметофар and ракети (2026-11-22)
+    "lamp_glow":     ("lamp", {}),
+    "leather_pale":  ("plain", dict(color=(0.80, 0.64, 0.44), rough=0.6, dust=0.4)),
+    "lens_glass":    ("plain", dict(color=(0.55, 0.66, 0.70), rough=0.05, dust=0.2)),
+    "glass_red":     ("plain", dict(color=(0.45, 0.04, 0.03), rough=0.06, dust=0.1)),
+    "glass_amber":   ("plain", dict(color=(0.70, 0.38, 0.04), rough=0.06, dust=0.1)),
+    "glass_blue":    ("plain", dict(color=(0.05, 0.14, 0.45), rough=0.06, dust=0.1)),
+    "paper_red":     ("plain", dict(color=(0.55, 0.09, 0.07), rough=0.8, dust=0.4)),
+    "paper_ochre":   ("plain", dict(color=(0.72, 0.52, 0.18), rough=0.8, dust=0.4)),
+    "paper_blue":    ("plain", dict(color=(0.10, 0.20, 0.45), rough=0.8, dust=0.4)),
+    "paper_green":   ("plain", dict(color=(0.12, 0.36, 0.17), rough=0.8, dust=0.4)),
+    "paper_cream":   ("plain", dict(color=(0.78, 0.72, 0.58), rough=0.85, dust=0.5)),
+    "bamboo":        ("plain", dict(color=(0.66, 0.58, 0.36), rough=0.5, dust=0.5)),
+    "wicker":        ("plain", dict(color=(0.58, 0.45, 0.27), rough=0.9, dust=0.6)),
+    "horsehair_brown": ("plain", dict(color=(0.22, 0.12, 0.06), rough=0.65, dust=0.2)),
+    "horsehair_white": ("plain", dict(color=(0.84, 0.82, 0.76), rough=0.6, dust=0.15)),
+    # real see-through glass (Дяволско стъкло lenses and crystals)
+    "glass_green":   ("glass", dict(color=(0.74, 0.88, 0.78), rough=0.03)),        # old bottle-green lens
+    "glass_clear":   ("glass", dict(color=(0.80, 0.90, 0.93), rough=0.015)),
+    "glass_spirit":  ("glass", dict(color=(0.96, 0.84, 0.55), rough=0.015)),       # lens filled with spirit
+    "quartz":        ("glass", dict(color=(0.92, 0.93, 0.97), rough=0.04, ior=1.54)),
+    "crystal":       ("glass", dict(color=(0.90, 0.93, 1.0), rough=0.005, ior=1.65)),
+    "crystal_violet": ("glass", dict(color=(0.80, 0.62, 0.98), rough=0.01, ior=1.6)),   # amethyst
+    "horn":          ("plain", dict(color=(0.27, 0.21, 0.15), rough=0.38, dust=0.3)),
+    "stone_red":     ("stone", dict(light=(0.60, 0.37, 0.26), dark=(0.45, 0.27, 0.19), soil=0.3)),   # Belogradchik
+    "stone_white":   ("stone", dict(light=(0.66, 0.63, 0.57), dark=(0.54, 0.51, 0.46), soil=0.3)),
+    "stone_dark":    ("stone", dict(light=(0.30, 0.29, 0.31), dark=(0.19, 0.18, 0.20), soil=0.15)),
+    "rune_glow":     ("glow", dict(color=(1.0, 0.36, 0.08), strength=28.0)),     # devilish ember runes
+    "rune_gold":     ("glow", dict(color=(1.0, 0.72, 0.30), strength=22.0)),
+    "crystal_core":  ("glow", dict(color=(1.0, 0.62, 0.32), strength=14.0)),
+    "mirror":        ("metal", dict(color=(0.36, 0.38, 0.40), rough=0.05, dust=0.12)),
+    "mirror_bronze": ("metal", dict(color=(0.42, 0.28, 0.15), rough=0.14, dust=0.3)),
 }
 
 
@@ -488,6 +524,26 @@ def _plain(name, color, rough, dust=1.0, sss=0.0):
     return mat
 
 
+def _glass(name, color, rough, ior=1.5):
+    """Clear glass or crystal: light goes through and bends (Cycles transmission)."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((*color, 1), rough, 0.0)
+    bsdf.inputs["Transmission Weight"].default_value = 1.0
+    bsdf.inputs["IOR"].default_value = ior
+    return mat
+
+
+def _glow(name, color, strength):
+    """Something that glows by itself (runes, the heart of a crystal)."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((color[0] * 0.3, color[1] * 0.3, color[2] * 0.3, 1), 0.4)
+    bsdf.inputs["Emission Color"].default_value = (*color, 1)
+    bsdf.inputs["Emission Strength"].default_value = strength
+    return mat
+
+
 def _wood(name, color):
     """Raw sawn softwood (crate battens, tool handles). Grain runs along local Y."""
     mat = bpy.data.materials.new(f"{name}__photoreal")
@@ -543,7 +599,7 @@ def _timber(name, light, dark, rough=0.8, weather=0.6, dust=0.7, checks=1.0):
     return mat
 
 
-def _stone(name, light=(0.60, 0.53, 0.42), dark=(0.40, 0.36, 0.31)):
+def _stone(name, light=(0.60, 0.53, 0.42), dark=(0.40, 0.36, 0.31), soil=1.0):
     mat = bpy.data.materials.new(f"{name}__photoreal")
     g = Graph(mat)
     tc = g.node("ShaderNodeTexCoord")
@@ -553,7 +609,7 @@ def _stone(name, light=(0.60, 0.53, 0.42), dark=(0.40, 0.36, 0.31)):
     a = g.mix(info.outputs["Random"], rgb(light), rgb(dark))
     col = g.mix(1.0, a, g.math("ADD", 0.7, g.math("MULTIPLY", n, 0.6)), "MULTIPLY")
     _, nz, _ = g.world()
-    col = g.mix(g.ramp(nz, 0.9, -0.2), col, rgb(DUST))   # soil clings to the lower half
+    col = g.mix(g.math("MULTIPLY", g.ramp(nz, 0.9, -0.2), soil), col, rgb(DUST))   # soil clings to the lower half
     g.finish(col, 0.9, 0.0, height=n, bump=0.6, bump_dist=0.004)
     return mat
 
@@ -865,10 +921,20 @@ def _arc(name):
     return mat
 
 
+def _lamp(name):
+    """A lit lamp: warm white glow (lime light, arc, magnesium)."""
+    mat = bpy.data.materials.new(f"{name}__photoreal")
+    g = Graph(mat)
+    bsdf = g.finish((0.9, 0.86, 0.7, 1), 0.2)
+    bsdf.inputs["Emission Color"].default_value = (1.0, 0.9, 0.68, 1)
+    bsdf.inputs["Emission Strength"].default_value = 5.0
+    return mat
+
+
 _BUILDERS = {"painted": _painted, "metal": _metal, "plain": _plain, "wood": _wood, "timber": _timber,
              "stone": _stone, "dirt": _dirt, "grass": _grass, "bore": _bore, "cloth": _cloth,
              "geotextile": _geotextile, "concrete": _concrete, "log": _log, "camo_net": _camo_net,
-             "screen": _screen, "ember": _ember, "arc": _arc}
+             "screen": _screen, "ember": _ember, "arc": _arc, "lamp": _lamp, "glass": _glass, "glow": _glow}
 
 
 def build(name):
