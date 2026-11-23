@@ -131,6 +131,8 @@ const lvl = (g: TowerId, level: number): Effect => ({ kind: 'maxLevel', gun: g, 
 const mod = (g: TowerId, mods: Partial<GunMods>): Effect => ({ kind: 'gunMod', gun: g, mods });
 const lvl4 = (g: TowerId, act: number, cost: number, seconds: number, requires: string[]) => item(`lvl4.${g}`, 'levels', Math.max(act, LEVEL4_LAB), cost, seconds, requires, lvl(g, 4));
 const lvl5 = (g: TowerId, act: number, cost: number, seconds: number) => item(`lvl5.${g}`, 'levels', Math.max(act, LEVEL5_LAB), cost, seconds, [`lvl4.${g}`], lvl(g, 5));
+/** Levels past V (only guns whose art has them): each needs the one before, in the act of the last headquarters. */
+const lvlUp = (g: TowerId, level: number, cost: number, seconds: number) => item(`lvl${level}.${g}`, 'levels', LAB_LEVELS.length, cost, seconds, [`lvl${level - 1}.${g}`], lvl(g, level));
 /** A trap's level II or III: +60% to what it does, in the act its headquarters brings it. */
 const TRAP_STEP = 0.6;
 const trapLvl = (tr: TrapId, act: number, level: 2 | 3 | 4, cost: number, seconds: number) =>
@@ -188,6 +190,8 @@ export const RESEARCH: readonly ResearchItem[] = [
   lvl5('glass', 7, 9000, 4 * DAY),
   lvl4('harpoon', 8, 8000, 3 * DAY, ['gun.harpoon']),
   lvl5('harpoon', 8, 10000, 4 * DAY),
+  lvlUp('harpoon', 6, 13000, 5 * DAY),
+  lvlUp('harpoon', 7, 16000, 6 * DAY),
   lvl4('bees', 9, 10000, 4 * DAY, ['gun.bees']),
   lvl5('bees', 9, 12500, 5 * DAY),
 
@@ -504,7 +508,8 @@ export const RESEARCH_SETS: readonly ResearchSet[] = [
   ...GUN_ORDER.map((g): ResearchSet => {
     const starter = START_GUNS.includes(g);
     const fx = RESEARCH.filter((r) => r.branch === 'effects' && 'gun' in r.effect && r.effect.gun === g).map((r) => r.id);
-    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, ...fx] };
+    const more = RESEARCH.filter((r) => r.effect.kind === 'maxLevel' && r.effect.gun === g && r.effect.level > 5).map((r) => r.id);
+    return { id: g, starter, items: [...(starter ? [] : [`gun.${g}`]), `lvl4.${g}`, `lvl5.${g}`, ...more, ...fx] };
   }),
   { id: 'fortress', starter: false, items: RESEARCH.filter((r) => r.branch === 'boosts').map((r) => r.id) },
   { id: 'traps', starter: false, items: RESEARCH.filter((r) => r.branch === 'traps').map((r) => r.id) },

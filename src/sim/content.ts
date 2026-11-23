@@ -368,7 +368,12 @@ export const TOWERS = {
     targeting: 'biggest',
     pierce: 1,
     hitsAir: true,
-    levels: levelsWith({ cost: 280, damage: 0, fireInterval: 3.5, range: 7.5, projectileSpeed: 16, pct: 0.06 }, [{}, { pct: 0.07 }, { pct: 0.08 }, { pct: 0.09 }, { pct: 0.1 }]),
+    // Two levels past the usual five (VI and VII, after the last headquarters).
+    levels: [
+      ...levelsWith({ cost: 280, damage: 0, fireInterval: 3.5, range: 7.5, projectileSpeed: 16, pct: 0.06 }, [{}, { pct: 0.07 }, { pct: 0.08 }, { pct: 0.09 }, { pct: 0.1 }]),
+      { cost: 1600, damage: 0, fireInterval: 2.6, range: 10, projectileSpeed: 16, pct: 0.115 },
+      { cost: 2200, damage: 0, fireInterval: 2.4, range: 10.5, projectileSpeed: 17, pct: 0.13 },
+    ],
   },
   /** Стоманени пчели: a burst of whistling darts, each on an enemy nobody else will kill first. */
   bees: {

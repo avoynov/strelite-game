@@ -30,7 +30,7 @@ import { waveSpec, type WaveSpec } from '../src/sim/waves';
 import { Campaign } from './helpers/baseBot';
 import { upTo } from './helpers/stages';
 import { TOWER_IDS } from '../src/sim/content';
-import { upgrades } from '../src/sim/research';
+import { RESEARCH, upgrades } from '../src/sim/research';
 import { baseTakings, hqThreat } from '../src/sim/base';
 import { attackStrength, defenceStrength } from '../src/sim/strength';
 
@@ -403,4 +403,18 @@ describe('balance at the base', () => {
       if (r.enemy > 1.5 * r.you) expect(r.won, `attack ${r.attack}: ${r.you} vs ${r.enemy}`).toBe(false);
     }
   }, SLOW);
+});
+
+describe('gun levels past V', () => {
+  it('only the last headquarters lets the harpoon go past level V (research still has the last word)', () => {
+    const all = upgrades(RESEARCH.map((r) => r.id), TOWER_IDS);
+    const at = (hq: number) => {
+      const b = newBase();
+      const state = { ...b, buildings: { ...b.buildings, hq: { level: hq, hp: HQ_LEVELS[hq]!.hp } } };
+      return new Game(buildArcMap(BASE_MAP, 'siege'), { level: 1, upgrades: all, base: { state, wallet: { gold: 0 }, now: () => 0 } });
+    };
+    expect(at(7).maxGunLevel('harpoon')).toBe(5);
+    expect(at(8).maxGunLevel('harpoon')).toBe(7);
+    expect(at(8).maxGunLevel('bees')).toBe(5);
+  });
 });

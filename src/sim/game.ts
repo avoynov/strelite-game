@@ -961,10 +961,15 @@ export class Game {
     return TOWERS[tower.def].levels[tower.level + 1]?.cost ?? null;
   }
 
-  /** Highest gun level (1-based) research and, in base mode, the headquarters allow. */
+  /**
+   * Highest gun level (1-based) research and, in base mode, the headquarters
+   * allow. The last headquarters sets no cap: levels past V (a few guns have
+   * them) are held back by research alone.
+   */
   maxGunLevel(def: TowerId): number {
     const research = this.upgrades ? (this.upgrades.maxLevel[def] ?? Infinity) : Infinity;
-    return Math.min(research, this.hq ? HQ_LEVELS[this.hq.level]!.maxGun : Infinity);
+    const top = this.hq && this.hq.level >= HQ_LEVELS.length - 1;
+    return Math.min(research, this.hq && !top ? HQ_LEVELS[this.hq.level]!.maxGun : Infinity);
   }
 
   /** Whether research (and the headquarters) allow raising the gun to its next level. */
