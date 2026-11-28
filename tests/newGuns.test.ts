@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ENEMIES, TICK, TOWER_IDS, TOWERS, type TowerId } from '../src/sim/content';
-import { upgrades } from '../src/sim/research';
+import { RESEARCH, RESEARCH_SETS, upgrades } from '../src/sim/research';
 import { Game, type GameEvent } from '../src/sim/game';
 import { buildPathMap, MEADOW } from '../src/sim/maps';
 import type { WaveGroup } from '../src/sim/waves';
@@ -117,11 +117,28 @@ describe('new guns', () => {
   });
 
   it('tarkan gun: every gun has a name and the sure-kill gun finishes what it starts', () => {
-    for (const id of TOWER_IDS) expect(TOWERS[id].levels).toHaveLength(5);
+    for (const id of TOWER_IDS) expect(TOWERS[id].levels.length).toBeGreaterThanOrEqual(5);
     const g = scenario([{ enemy: 'infantry', count: 6, hp: 30, interval: 0.5 }]);
     buildNear(g, 'tarkan', 4, 2);
     g.startWave();
     const ev = play(g, 40);
     expect(ev.filter((e) => e.type === 'kill').length).toBeGreaterThan(3);
+  });
+});
+
+describe('harpoon levels VI and VII', () => {
+  it('open by research after level V, in the last act, and grow clearly', () => {
+    const six = RESEARCH.find((r) => r.id === 'lvl6.harpoon')!;
+    const seven = RESEARCH.find((r) => r.id === 'lvl7.harpoon')!;
+    expect(six.requires).toEqual(['lvl5.harpoon']);
+    expect(seven.requires).toEqual(['lvl6.harpoon']);
+    expect(six.hq).toBe(9);
+    expect(RESEARCH_SETS.find((s) => s.id === 'harpoon')!.items).toEqual(expect.arrayContaining(['lvl6.harpoon', 'lvl7.harpoon']));
+    const all = upgrades(RESEARCH.map((r) => r.id), TOWER_IDS);
+    expect(all.maxLevel.harpoon).toBe(7);
+    expect(all.maxLevel.bees).toBe(5);
+    const l = TOWERS.harpoon.levels;
+    expect(l[6]!.pct! - l[5]!.pct!).toBeGreaterThan(0.01);
+    expect(l[6]!.fireInterval).toBeLessThan(l[5]!.fireInterval);
   });
 });

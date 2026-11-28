@@ -489,7 +489,8 @@ export class Lab {
 
   /** The gun shown on a set's card: the highest level researched, or level 1 while locked. */
   private gunLevel(gun: TowerId, s: ResearchState): number {
-    return s.done.includes(`lvl5.${gun}`) ? 5 : s.done.includes(`lvl4.${gun}`) ? 4 : 3;
+    for (let n = TOWERS[gun].levels.length; n > 3; n--) if (s.done.includes(`lvl${n}.${gun}`)) return n;
+    return 3;
   }
 
   private now(s: ResearchState): number {
@@ -698,6 +699,8 @@ export class Lab {
     const unlock = set.starter ? null : researchItem(`gun.${gun}`)!;
     const lv4 = researchItem(`lvl4.${gun}`)!;
     const lv5 = researchItem(`lvl5.${gun}`)!;
+    // Levels past V (few guns): on the row below, back from under V.
+    const more = set.items.map((id) => researchItem(id)!).filter((it) => it.effect.kind === 'maxLevel' && it.effect.level > 5);
     // Effects: the first beside the levels, any more on the row below, back from the right.
     const effects = set.items.filter((id) => researchItem(id)?.effect.kind === 'gunMod');
     // Aiming modes: a second row, under the level each grows from.
@@ -713,6 +716,7 @@ export class Lab {
         <div class="lt-nodes">
           ${this.slotHtml(lv4, s, lab, 'grid-column:1')}
           ${this.slotHtml(lv5, s, lab, 'grid-column:2')}
+          ${more.map((it, i) => this.slotHtml(it, s, lab, `grid-column:${2 - i};grid-row:2`)).join('')}
           <span class="lt-split" aria-hidden="true"></span>
           ${effects.map((id, i) => this.slotHtml(researchItem(id)!, s, lab, i === 0 ? 'grid-column:4' : `grid-column:${5 - i};grid-row:2`)).join('')}
           ${aims}
@@ -909,6 +913,7 @@ export class Lab {
       const g = gunKey(set);
       line(g, `lvl4.${set.id}`, cls(g, `lvl4.${set.id}`));
       line(`lvl4.${set.id}`, `lvl5.${set.id}`, cls(`lvl4.${set.id}`, `lvl5.${set.id}`));
+      for (let n = 6; researchItem(`lvl${n}.${set.id}`); n++) line(`lvl${n - 1}.${set.id}`, `lvl${n}.${set.id}`, cls(`lvl${n - 1}.${set.id}`, `lvl${n}.${set.id}`));
       for (const id of set.items) {
         const it = researchItem(id);
         const from = it?.effect.kind === 'aim' ? it.requires[0] : undefined;
